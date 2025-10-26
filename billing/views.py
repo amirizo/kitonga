@@ -30,6 +30,7 @@ from .serializers import (
 from .clickpesa import ClickPesaAPI
 from .utils import get_active_users_count, get_revenue_statistics
 from .permissions import SimpleAdminTokenPermission
+from .mikrotik import authenticate_user_with_mikrotik, logout_user_from_mikrotik
 
 logger = logging.getLogger(__name__)
 
@@ -1125,3 +1126,280 @@ def webhook_logs(request):
         'count': len(webhook_data),
         'webhooks': webhook_data
     })
+
+
+# Mikrotik Integration APIs
+@api_view(['POST', 'GET'])
+@permission_classes([AllowAny])
+def mikrotik_auth(request):
+    """
+    Mikrotik hotspot authentication endpoint
+    
+    This endpoint is called by Mikrotik router for external authentication
+    Mikrotik expects HTTP 200 for success, 403 for deny
+    """
+    # Get parameters from Mikrotik (can be POST or GET)
+    if request.method == 'POST':
+        username = request.data.get('username') or request.POST.get('username')
+        password = request.data.get('password') or request.POST.get('password', '')
+        mac_address = request.data.get('mac') or request.POST.get('mac', '')
+        ip_address = request.data.get('ip') or request.POST.get('ip', '')
+    else:
+        username = request.GET.get('username')
+        password = request.GET.get('password', '')
+        mac_address = request.GET.get('mac', '')
+        ip_address = request.GET.get('ip', '')
+    
+    logger.info(f'Mikrotik auth request: username={username}, mac={mac_address}, ip={ip_address}')
+    
+    if not username:
+        logger.warning('Mikrotik auth failed: No username provided')
+        return Response('No username provided', status=403)
+    
+    try:
+        # Check if user exists and has valid access
+        user = User.objects.get(phone_number=username)
+        
+        # Check if user has active access (paid until date)
+        if not user.has_active_access():
+            logger.warning(f'Mikrotik auth denied for {username}: No active access')
+            return Response('Payment required', status=403)
+        
+        # Check and manage device limit
+        if mac_address:
+            device, created = Device.objects.get_or_create(
+                user=user,
+                mac_address=mac_address,
+                defaults={'ip_address': ip_address, 'is_active': True}
+            )
+            
+            if created:
+                # New device - check if limit exceeded
+                active_devices = user.get_active_devices().count()
+                if active_devices > user.max_devices:
+                    device.delete()
+                    logger.warning(f'Mikrotik auth denied for {username}: Device limit exceeded')
+                    return Response(f'Device limit exceeded ({user.max_devices} max)', status=403)
+            else:
+                # Update existing device
+                device.ip_address = ip_address
+                device.is_active = True
+                device.save()
+        
+        # Log successful access
+        AccessLog.objects.create(
+            user=user,
+            mac_address=mac_address,
+            ip_address=ip_address,
+            authenticated=True,
+            notes='Mikrotik authentication successful'
+        )
+        
+        logger.info(f'Mikrotik auth successful for {username}')
+        
+        # Return simple success response for Mikrotik
+        return Response('OK', status=200)
+        
+    except User.DoesNotExist:
+        logger.warning(f'Mikrotik auth failed for {username}: User not found')
+        return Response('User not found', status=403)
+    except Exception as e:
+        logger.error(f'Error in Mikrotik authentication for {username}: {str(e)}')
+        return Response('Authentication error', status=500)
+
+
+@api_view(['POST', 'GET'])
+@permission_classes([AllowAny])
+def mikrotik_logout(request):
+    """
+    Mikrotik hotspot logout endpoint
+    """
+    if request.method == 'POST':
+        username = request.data.get('username') or request.POST.get('username')
+        ip_address = request.data.get('ip') or request.POST.get('ip', '')
+    else:
+        username = request.GET.get('username')
+        ip_address = request.GET.get('ip', '')
+    
+    logger.info(f'Mikrotik logout request: username={username}, ip={ip_address}')
+    
+    if not username:
+        return Response('No username provided', status=400)
+    
+    try:
+        # Log the logout
+        user = User.objects.get(phone_number=username)
+        AccessLog.objects.create(
+            user=user,
+            ip_address=ip_address,
+            authenticated=False,
+            notes='Mikrotik logout'
+        )
+        
+        logger.info(f'Mikrotik logout successful for {username}')
+        return Response('OK', status=200)
+        
+    except User.DoesNotExist:
+        # User not found but still return OK
+        logger.info(f'Mikrotik logout for unknown user {username}')
+        return Response('OK', status=200)
+    except Exception as e:
+        logger.error(f'Error in Mikrotik logout for {username}: {str(e)}')
+        return Response('Logout error', status=500)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def mikrotik_status_check(request):
+    """
+    Check user status for Mikrotik
+    """
+    username = request.GET.get('username')
+    
+    if not username:
+        return Response({
+            'success': False,
+            'message': 'Username is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        user = User.objects.get(phone_number=username)
+        
+        # Get recent access logs
+        recent_logs = AccessLog.objects.filter(user=user).order_by('-timestamp')[:5]
+        
+        return Response({
+            'success': True,
+            'user': {
+                'phone_number': user.phone_number,
+                'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+                'is_active': user.is_active,
+                'has_active_access': user.has_active_access(),
+                'device_count': user.get_active_devices().count(),
+                'max_devices': user.max_devices
+            },
+            'recent_activity': [
+                {
+                    'timestamp': log.timestamp.isoformat(),
+                    'authenticated': log.authenticated,
+                    'ip_address': log.ip_address,
+                    'mac_address': log.mac_address,
+                    'notes': log.notes or ''
+                } for log in recent_logs
+            ]
+        })
+        
+    except User.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['POST'])
+@permission_classes([SimpleAdminTokenPermission])
+def force_user_logout(request):
+    """
+    Force logout a user from all devices (Admin only)
+    """
+    phone_number = request.data.get('phone_number')
+    
+    if not phone_number:
+        return Response({
+            'success': False,
+            'message': 'Phone number is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        user = User.objects.get(phone_number=phone_number)
+        
+        # Logout from Mikrotik
+        mikrotik_result = logout_user_from_mikrotik(phone_number)
+        
+        # Deactivate all user devices
+        user.devices.update(is_active=False)
+        
+        # Log the forced logout
+        AccessLog.objects.create(
+            user=user,
+            authenticated=False,
+            notes='Admin forced logout'
+        )
+        
+        return Response({
+            'success': True,
+            'message': f'User {phone_number} forcibly logged out',
+            'mikrotik_result': mikrotik_result
+        })
+        
+    except User.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f'Error in force logout: {str(e)}')
+        return Response({
+            'success': False,
+            'message': 'Force logout error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([SimpleAdminTokenPermission])
+def test_user_access(request):
+    """
+    Test endpoint to verify user access logic (Admin only)
+    """
+    phone_number = request.data.get('phone_number')
+    
+    if not phone_number:
+        return Response({
+            'success': False,
+            'message': 'Phone number is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        user = User.objects.get(phone_number=phone_number)
+        
+        # Test authentication logic
+        has_access = user.has_active_access()
+        
+        # Get device count
+        active_devices = user.get_active_devices().count()
+        
+        # Recent access logs
+        recent_logs = AccessLog.objects.filter(user=user).order_by('-timestamp')[:5]
+        
+        return Response({
+            'success': True,
+            'user_info': {
+                'phone_number': user.phone_number,
+                'is_active': user.is_active,
+                'has_active_access': has_access,
+                'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+                'total_payments': user.total_payments,
+                'max_devices': user.max_devices,
+                'active_devices': active_devices,
+                'can_add_device': user.can_add_device()
+            },
+            'recent_activity': [
+                {
+                    'timestamp': log.timestamp.isoformat(),
+                    'authenticated': log.authenticated,
+                    'ip_address': log.ip_address or '',
+                    'mac_address': log.mac_address or '',
+                    'notes': log.notes or ''
+                } for log in recent_logs
+            ],
+            'auth_test': {
+                'would_allow_mikrotik': has_access,
+                'reason': 'Access granted' if has_access else 'Payment required'
+            }
+        })
+        
+    except User.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)

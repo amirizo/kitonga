@@ -832,5 +832,171 @@
     "step_2": "Login via POST /api/auth/login/ to get authentication token",
     "step_3": "Use token in Authorization header for subsequent API calls",
     "step_4": "Access admin endpoints like /api/dashboard-stats/, /api/vouchers/generate/, etc."
+  },
+  "mikrotik_integration": {
+    "mikrotik_auth": {
+      "endpoint": "POST /api/mikrotik/auth/",
+      "description": "Mikrotik hotspot external authentication endpoint",
+      "authentication": "None required (called by Mikrotik)",
+      "request": {
+        "required_fields": [
+          "username"
+        ],
+        "optional_fields": [
+          "password",
+          "mac",
+          "ip"
+        ],
+        "example": {
+          "username": "255708374149",
+          "password": "",
+          "mac": "aa:bb:cc:dd:ee:ff",
+          "ip": "192.168.88.100"
+        }
+      },
+      "responses": {
+        "200_success": {
+          "success": true,
+          "message": "Authentication successful",
+          "user": {
+            "phone_number": "255708374149",
+            "bundle": "Daily 1GB",
+            "bundle_expiry": "2025-01-13T10:30:00Z",
+            "data_balance": 1024
+          },
+          "mikrotik_result": {
+            "success": true,
+            "message": "User logged in successfully"
+          }
+        },
+        "403_no_bundle": {
+          "success": false,
+          "message": "No active bundle found"
+        },
+        "403_expired": {
+          "success": false,
+          "message": "Bundle has expired"
+        },
+        "403_device_limit": {
+          "success": false,
+          "message": "Device limit exceeded. Maximum 1 device(s) allowed."
+        },
+        "404_user_not_found": {
+          "success": false,
+          "message": "User not found"
+        }
+      }
+    },
+    "mikrotik_logout": {
+      "endpoint": "POST /api/mikrotik/logout/",
+      "description": "Mikrotik hotspot logout endpoint",
+      "authentication": "None required (called by Mikrotik)",
+      "request": {
+        "required_fields": [
+          "username"
+        ],
+        "optional_fields": [
+          "ip"
+        ],
+        "example": {
+          "username": "255708374149",
+          "ip": "192.168.88.100"
+        }
+      },
+      "responses": {
+        "200_success": {
+          "success": true,
+          "message": "Logout successful",
+          "mikrotik_result": {
+            "success": true,
+            "message": "User logged out successfully"
+          }
+        }
+      }
+    },
+    "mikrotik_status_check": {
+      "endpoint": "GET /api/mikrotik/status/?username=255708374149",
+      "description": "Check user status for Mikrotik monitoring",
+      "authentication": "None required",
+      "parameters": {
+        "username": "User's phone number"
+      },
+      "responses": {
+        "200_success": {
+          "success": true,
+          "user": {
+            "phone_number": "255708374149",
+            "bundle": "Daily 1GB",
+            "bundle_expiry": "2025-01-13T10:30:00Z",
+            "data_balance": 1024,
+            "is_active": true,
+            "device_count": 1,
+            "max_devices": 1
+          },
+          "recent_activity": [
+            {
+              "timestamp": "2025-01-12T10:30:00Z",
+              "authenticated": true,
+              "ip_address": "192.168.88.100",
+              "mac_address": "aa:bb:cc:dd:ee:ff",
+              "notes": ""
+            }
+          ]
+        },
+        "404_user_not_found": {
+          "success": false,
+          "message": "User not found"
+        }
+      }
+    },
+    "force_user_logout": {
+      "endpoint": "POST /api/force-logout/",
+      "description": "Force logout a user from all devices (Admin only)",
+      "authentication": "Token required",
+      "headers": {
+        "Authorization": "Token your_admin_token_here"
+      },
+      "request": {
+        "required_fields": [
+          "phone_number"
+        ],
+        "example": {
+          "phone_number": "255708374149"
+        }
+      },
+      "responses": {
+        "200_success": {
+          "success": true,
+          "message": "User 255708374149 forcibly logged out",
+          "mikrotik_result": {
+            "success": true,
+            "message": "User logged out successfully"
+          }
+        },
+        "404_user_not_found": {
+          "success": false,
+          "message": "User not found"
+        }
+      }
+    },
+    "configuration": {
+      "mikrotik_router_setup": {
+        "description": "Configuration required on Mikrotik router",
+        "http_post_url": "http://your-django-server:8000/api/mikrotik/auth/",
+        "http_post_data": "username=$(username)&password=$(password)&mac=$(mac)&ip=$(ip)",
+        "logout_url": "http://your-django-server:8000/api/mikrotik/logout/",
+        "required_walled_garden": [
+          "your-django-server-ip",
+          "messaging-service.co.tz"
+        ]
+      },
+      "environment_variables": {
+        "MIKROTIK_ROUTER_IP": "192.168.88.1",
+        "MIKROTIK_ADMIN_USER": "admin",
+        "MIKROTIK_ADMIN_PASS": "your_admin_password",
+        "MIKROTIK_API_PORT": "8728",
+        "MIKROTIK_HOTSPOT_NAME": "hotspot1"
+      }
+    }
   }
 }

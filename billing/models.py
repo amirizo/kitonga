@@ -3,6 +3,7 @@ Database models for Kitonga Wi-Fi Billing System
 """
 from django.db import models
 from django.utils import timezone
+from django.conf import settings
 from datetime import timedelta
 
 
@@ -39,13 +40,19 @@ class User(models.Model):
     is_active = models.BooleanField(default=False)
     total_payments = models.IntegerField(default=0)
     expiry_notification_sent = models.BooleanField(default=False)
-    max_devices = models.IntegerField(default=3)
+    max_devices = models.IntegerField(default=1)
     
     class Meta:
         ordering = ['-created_at']
     
     def __str__(self):
         return f"{self.phone_number} - Active: {self.is_active}"
+    
+    def save(self, *args, **kwargs):
+        """Override save to set default max_devices from settings"""
+        if not self.pk and self.max_devices == 1:  # New user with default value
+            self.max_devices = getattr(settings, 'MAX_DEVICES_PER_USER', 1)
+        super().save(*args, **kwargs)
     
     def has_active_access(self):
         """Check if user has valid paid access"""

@@ -30,6 +30,13 @@ urlpatterns = [
     # Admin endpoints
     path('webhook-logs/', views.webhook_logs, name='webhook_logs'),
     path('dashboard-stats/', views.dashboard_stats, name='dashboard_stats'),
+    path('force-logout/', views.force_user_logout, name='force_user_logout'),
+    path('test-user-access/', views.test_user_access, name='test_user_access'),
+    
+    # Mikrotik Integration endpoints
+    path('mikrotik/auth/', views.mikrotik_auth, name='mikrotik_auth'),
+    path('mikrotik/logout/', views.mikrotik_logout, name='mikrotik_logout'),
+    path('mikrotik/status/', views.mikrotik_status_check, name='mikrotik_status_check'),
     
     # System endpoints
     path('health/', views.health_check, name='health_check'),
