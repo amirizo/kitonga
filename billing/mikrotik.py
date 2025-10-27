@@ -17,7 +17,7 @@ class MikrotikIntegration:
     Mikrotik router integration for hotspot authentication
     """
     
-    def __init__(self, router_ip="192.168.88.1", admin_user="admin", admin_pass=""):
+    def __init__(self, router_ip="192.168.0.173", admin_user="admin", admin_pass="Kijangwani2003"):
         self.router_ip = router_ip
         self.admin_user = admin_user
         self.admin_pass = admin_pass
@@ -213,9 +213,9 @@ def get_mikrotik_client():
     Returns:
         MikrotikIntegration: Configured client
     """
-    router_ip = getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.88.1')
+    router_ip = getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.0.173')
     admin_user = getattr(settings, 'MIKROTIK_ADMIN_USER', 'admin')
-    admin_pass = getattr(settings, 'MIKROTIK_ADMIN_PASS', '')
+    admin_pass = getattr(settings, 'MIKROTIK_ADMIN_PASS', 'Kijangwani2003')
     
     return MikrotikIntegration(router_ip, admin_user, admin_pass)
 

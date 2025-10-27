@@ -8,6 +8,8 @@ from rest_framework import status
 from django.utils import timezone
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
+from django.db import connection
+from django.core.cache import cache
 import uuid
 import json
 import logging
@@ -33,6 +35,41 @@ from .permissions import SimpleAdminTokenPermission
 from .mikrotik import authenticate_user_with_mikrotik, logout_user_from_mikrotik
 
 logger = logging.getLogger(__name__)
+
+
+# Health Check API
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health_check(request):
+    """
+    Health check endpoint for monitoring and load balancers
+    """
+    try:
+        # Check database connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            
+        # Check cache if configured
+        try:
+            cache.set('health_check', 'ok', 10)
+            cache.get('health_check')
+        except Exception:
+            pass  # Cache might not be configured
+            
+        return Response({
+            'status': 'healthy',
+            'timestamp': timezone.now().isoformat(),
+            'version': '1.0.0',
+            'service': 'kitonga-wifi-billing'
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return Response({
+            'status': 'unhealthy',
+            'timestamp': timezone.now().isoformat(),
+            'error': str(e)
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
 
 # Authentication APIs
@@ -993,13 +1030,34 @@ def dashboard_stats(request):
 @permission_classes([AllowAny])
 def health_check(request):
     """
-    Health check endpoint for monitoring
+    Health check endpoint for monitoring and load balancers
     """
-    return Response({
-        'status': 'healthy',
-        'timestamp': timezone.now().isoformat(),
-        'service': 'Kitonga Wi-Fi Billing System'
-    })
+    try:
+        # Check database connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            
+        # Check cache if configured
+        try:
+            cache.set('health_check', 'ok', 10)
+            cache.get('health_check')
+        except Exception:
+            pass  # Cache might not be configured
+            
+        return Response({
+            'status': 'healthy',
+            'timestamp': timezone.now().isoformat(),
+            'version': '1.0.0',
+            'service': 'kitonga-wifi-billing'
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return Response({
+            'status': 'unhealthy',
+            'timestamp': timezone.now().isoformat(),
+            'error': str(e)
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
 
 @api_view(['GET'])

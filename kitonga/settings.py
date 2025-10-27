@@ -12,9 +12,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-kitonga-dev-key-change-in-production')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = config('DEBUG', default=True, cast=bool)
+DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,c1a1ae0aa118.ngrok-free.app', cast=Csv())
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,api.kitonga.klikcell.com,kitonga.klikcell.com', cast=Csv())
 
 # Application definition
 INSTALLED_APPS = [
@@ -33,6 +33,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -96,6 +97,87 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+# WhiteNoise configuration for static files in production
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# Additional WhiteNoise settings for optimal performance
+WHITENOISE_USE_FINDERS = True
+WHITENOISE_AUTOREFRESH = DEBUG  # Only in development
+WHITENOISE_MANIFEST_STRICT = False  # More forgiving in production
+WHITENOISE_SKIP_COMPRESS_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'zip', 'gz', 'tgz', 'bz2', 'tbz', 'xz', 'br']
+
+# Static files configuration
+STATICFILES_DIRS = []
+if (BASE_DIR / 'static').exists():
+    STATICFILES_DIRS.append(BASE_DIR / 'static')
+
+# Media files configuration (for user uploads if needed)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# Production Security Settings
+if not DEBUG:
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_REDIRECT_EXEMPT = []
+    SECURE_SSL_REDIRECT = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    USE_TZ = True
+    
+    # Session security
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_PRELOAD = True
+    
+    # Additional production security
+    X_FRAME_OPTIONS = 'DENY'
+    SECURE_REFERRER_POLICY = 'same-origin'
+    
+# Production Logging
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'file': {
+            'class': 'logging.FileHandler',
+            'filename': BASE_DIR / 'logs' / 'django.log',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO' if DEBUG else 'WARNING',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console', 'file'] if not DEBUG else ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'billing': {
+            'handlers': ['console', 'file'] if not DEBUG else ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -115,7 +197,7 @@ REST_FRAMEWORK = {
 
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = DEBUG
-CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='', cast=Csv())
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='https://kitonga.klikcell.com,https://api.kitonga.klikcell.com', cast=Csv())
 
 # Allow specific headers for CORS
 CORS_ALLOW_HEADERS = [
@@ -129,6 +211,8 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
     'x-admin-access',  # Custom header for admin authentication
+    'cache-control',   # For static file caching
+    'expires',         # For static file caching
 ]
 
 # Allow specific methods
@@ -153,9 +237,9 @@ CLICKPESA_WEBHOOK_URL = config('CLICKPESA_WEBHOOK_URL', default='')
 # NEXTSMS Configuration
 NEXTSMS_USERNAME = config('NEXTSMS_USERNAME', default='')
 NEXTSMS_PASSWORD = config('NEXTSMS_PASSWORD', default='')
-NEXTSMS_SENDER_ID = config('NEXTSMS_SENDER_ID', default='KITONGA')
+NEXTSMS_SENDER_ID = config('NEXTSMS_SENDER_ID', default='Klikcell')
 NEXTSMS_BASE_URL = config('NEXTSMS_BASE_URL', default='https://messaging-service.co.tz')
-IS_TEST_MODE = config('IS_TEST_MODE', default=True, cast=bool)
+IS_TEST_MODE = config('IS_TEST_MODE', default=False, cast=bool)
 
 # NextSMS API URLs
 NEXTSMS_TEST_URL = 'https://messaging-service.co.tz/api/sms/v1/test/text/single'
@@ -178,11 +262,11 @@ SIMPLE_ADMIN_TOKEN = config('SIMPLE_ADMIN_TOKEN', default='kitonga_admin_2025')
 ADMIN_TOKEN_SECRET = config('ADMIN_TOKEN_SECRET', default=SECRET_KEY)
 
 # Mikrotik Router Configuration
-MIKROTIK_ROUTER_IP = config('MIKROTIK_ROUTER_IP', default='192.168.88.1')
+MIKROTIK_ROUTER_IP = config('MIKROTIK_ROUTER_IP', default='192.168.0.173')
 MIKROTIK_ADMIN_USER = config('MIKROTIK_ADMIN_USER', default='admin')
-MIKROTIK_ADMIN_PASS = config('MIKROTIK_ADMIN_PASS', default='')
+MIKROTIK_ADMIN_PASS = config('MIKROTIK_ADMIN_PASS', default='Kijangwani2003')
 MIKROTIK_API_PORT = config('MIKROTIK_API_PORT', default=8728, cast=int)
-MIKROTIK_HOTSPOT_NAME = config('MIKROTIK_HOTSPOT_NAME', default='hotspot1')
+MIKROTIK_HOTSPOT_NAME = config('MIKROTIK_HOTSPOT_NAME', default='kitonga-hotspot')
 
 # Jazzmin Configuration
 JAZZMIN_SETTINGS = {
@@ -232,7 +316,7 @@ JAZZMIN_SETTINGS = {
         {"name": "Home", "url": "admin:index", "permissions": ["auth.view_user"]},
 
         # external url that opens in a new window (Permissions can be added)
-        {"name": "Portal", "url": "http://localhost:3000", "new_window": True},
+        {"name": "Portal", "url": "https://kitonga.klikcell.com", "new_window": True},
 
         # model admin to link to (Permissions checked against model)
         {"model": "auth.User"},
@@ -247,7 +331,7 @@ JAZZMIN_SETTINGS = {
 
     # Additional links to include in the user menu on the top right ("app" url type is not allowed)
     "usermenu_links": [
-        {"name": "Portal Home", "url": "http://localhost:3000", "new_window": True},
+        {"name": "Portal Home", "url": "https://kitonga.klikcell.com", "new_window": True},
         {"model": "auth.user"}
     ],
 

@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kitonga WiFi - Login</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+            max-width: 400px;
+            width: 100%;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 16px;
+        }
+        
+        .form-container {
+            padding: 40px 30px;
+        }
+        
+        .input-group {
+            margin-bottom: 25px;
+            position: relative;
+        }
+        
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+        }
+        
+        .input-group input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e1e1e1;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        .input-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .login-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .login-btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .info {
+            background: #f8f9fa;
+            padding: 20px;
+            margin-top: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .info h3 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .info p {
+            color: #666;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .wifi-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        
+        @media (max-width: 480px) {
+            .container {
+                margin: 10px;
+            }
+            
+            .header {
+                padding: 20px;
+            }
+            
+            .form-container {
+                padding: 30px 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="wifi-icon">📶</div>
+            <h1>Kitonga WiFi</h1>
+            <p>Welcome to our high-speed internet service</p>
+        </div>
+        
+        <div class="form-container">
+            <form name="login" action="$(link-login-only)" method="post">
+                <input type="hidden" name="dst" value="$(link-orig)">
+                <input type="hidden" name="popup" value="true">
+                
+                <div class="input-group">
+                    <label for="username">Phone Number</label>
+                    <input type="text" 
+                           id="username" 
+                           name="username" 
+                           placeholder="Enter your phone number (e.g., 255700000000)"
+                           pattern="255[0-9]{9}"
+                           required
+                           autocomplete="tel">
+                </div>
+                
+                <button type="submit" class="login-btn">
+                    Connect to Internet
+                </button>
+            </form>
+            
+            <div class="info">
+                <h3>📱 How to Connect</h3>
+                <p>
+                    1. Enter your phone number (starting with 255)<br>
+                    2. Make sure you have an active internet bundle<br>
+                    3. Click "Connect to Internet" to get online<br><br>
+                    <strong>Need a bundle?</strong> Visit our portal to purchase.
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Auto-format phone number
+        document.getElementById('username').addEventListener('input', function(e) {
+            let value = e.target.value.replace(/\D/g, '');
+            if (!value.startsWith('255') && value.length > 0) {
+                value = '255' + value;
+            }
+            if (value.length > 12) {
+                value = value.substring(0, 12);
+            }
+            e.target.value = value;
+        });
+        
+        // Show error if authentication failed
+        if (window.location.search.includes('failed')) {
+            alert('Login failed. Please check if you have an active internet bundle and try again.');
+        }
+    </script>
+</body>
+</html>
