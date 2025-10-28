@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kitonga API Production Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #333;
+        }
+        
+        .test-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 4px solid #007bff;
+        }
+        
+        .btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+        
+        .btn:hover {
+            background: #0056b3;
+        }
+        
+        .btn-success {
+            background: #28a745;
+        }
+        
+        .btn-success:hover {
+            background: #1e7e34;
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        
+        .form-group {
+            margin: 10px 0;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        .console-output {
+            background: #1e1e1e;
+            color: #ffffff;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+            margin: 15px 0;
+            font-size: 13px;
+        }
+        
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🌐 Kitonga API Production Test</h1>
+            <p>Test your production API endpoints at <strong>https://api.kitonga.klikcell.com</strong></p>
+        </div>
+
+        <!-- Connection Test -->
+        <div class="test-section">
+            <h3>1️⃣ Connection Test</h3>
+            <p>Test basic connectivity to the production server:</p>
+            <button class="btn btn-success" onclick="runConnectionTest()">🔍 Test Connection</button>
+            <div id="connectionResult"></div>
+        </div>
+
+        <!-- Authentication Test -->
+        <div class="test-section">
+            <h3>2️⃣ Authentication Test</h3>
+            <p>Test admin login functionality:</p>
+            
+            <div class="grid">
+                <div>
+                    <div class="form-group">
+                        <label for="adminUsername">Admin Username:</label>
+                        <input type="text" id="adminUsername" placeholder="Enter admin username">
+                    </div>
+                    <div class="form-group">
+                        <label for="adminPassword">Admin Password:</label>
+                        <input type="password" id="adminPassword" placeholder="Enter admin password">
+                    </div>
+                    <button class="btn" onclick="runAuthTest()">🔐 Test Login</button>
+                    <button class="btn btn-danger" onclick="logout()">🚪 Logout</button>
+                </div>
+                <div>
+                    <div id="authStatus">
+                        <span class="status-badge status-warning">Not authenticated</span>
+                    </div>
+                    <div id="authResult"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- API Endpoints Test -->
+        <div class="test-section">
+            <h3>3️⃣ API Endpoints Test</h3>
+            <p>Test various API endpoints:</p>
+            
+            <div class="grid">
+                <div>
+                    <button class="btn" onclick="testPackages()">📦 Test Packages</button>
+                    <button class="btn" onclick="testMikrotikStatus()">🌐 Test MikroTik Status</button>
+                    <button class="btn" onclick="testDashboardStats()">📊 Test Dashboard Stats</button>
+                </div>
+                <div>
+                    <div class="form-group">
+                        <label for="phoneNumber">Phone Number (for user status):</label>
+                        <input type="tel" id="phoneNumber" placeholder="+255700123456">
+                    </div>
+                    <button class="btn" onclick="testUserStatus()">👤 Test User Status</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Full Test Suite -->
+        <div class="test-section">
+            <h3>4️⃣ Complete Test Suite</h3>
+            <p>Run all tests automatically:</p>
+            <button class="btn btn-success" onclick="runFullTestSuite()">🧪 Run All Tests</button>
+            <button class="btn btn-danger" onclick="clearConsole()">🗑️ Clear Output</button>
+        </div>
+
+        <!-- Console Output -->
+        <div class="test-section">
+            <h3>📟 Console Output</h3>
+            <div id="consoleOutput" class="console-output">
+Ready to test API endpoints...
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="test-section">
+            <h3>⚡ Quick Actions</h3>
+            <button class="btn" onclick="checkProductionServer()">🌐 Check Server Status</button>
+            <button class="btn" onclick="validateCORS()">🔗 Test CORS</button>
+            <button class="btn" onclick="showAPIDocumentation()">📖 Show API Docs</button>
+        </div>
+    </div>
+
+    <!-- Include the production API client -->
+    <script src="production-api-client.js"></script>
+
+    <script>
+        // Console output management
+        function logToConsole(message, type = 'info') {
+            const console = document.getElementById('consoleOutput');
+            const timestamp = new Date().toLocaleTimeString();
+            const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : type === 'warning' ? '⚠️' : 'ℹ️';
+            
+            console.textContent += `[${timestamp}] ${prefix} ${message}\n`;
+            console.scrollTop = console.scrollHeight;
+        }
+
+        function clearConsole() {
+            document.getElementById('consoleOutput').textContent = 'Console cleared...\n';
+        }
+
+        // Initialize API
+        const api = new KitongaProductionAPI();
+
+        // Connection Test
+        async function runConnectionTest() {
+            logToConsole('Testing connection to production server...', 'info');
+            
+            try {
+                const result = await api.testConnection();
+                
+                if (result.success) {
+                    logToConsole('✅ Connection successful!', 'success');
+                    logToConsole(`Server: ${result.data.service} v${result.data.version}`, 'info');
+                    document.getElementById('connectionResult').innerHTML = `
+                        <div style="margin-top: 10px;">
+                            <span class="status-badge status-success">Connected</span>
+                            <p style="margin: 5px 0;">Server: ${result.data.service}</p>
+                            <p style="margin: 5px 0;">Version: ${result.data.version}</p>
+                        </div>
+                    `;
+                } else {
+                    logToConsole(`❌ Connection failed: ${result.error}`, 'error');
+                    document.getElementById('connectionResult').innerHTML = `
+                        <div style="margin-top: 10px;">
+                            <span class="status-badge status-error">Connection Failed</span>
+                            <p style="margin: 5px 0;">${result.error}</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                logToConsole(`❌ Connection test failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Authentication Test
+        async function runAuthTest() {
+            const username = document.getElementById('adminUsername').value;
+            const password = document.getElementById('adminPassword').value;
+
+            if (!username || !password) {
+                logToConsole('❌ Please enter both username and password', 'error');
+                return;
+            }
+
+            logToConsole(`Attempting login for user: ${username}`, 'info');
+
+            try {
+                const loginResult = await api.adminLogin(username, password);
+                logToConsole('✅ Login successful!', 'success');
+                
+                // Update auth status
+                document.getElementById('authStatus').innerHTML = `
+                    <span class="status-badge status-success">Authenticated as ${loginResult.user.username}</span>
+                `;
+
+                // Test admin profile
+                const profile = await api.getAdminProfile();
+                logToConsole('✅ Admin profile retrieved successfully', 'success');
+                
+                document.getElementById('authResult').innerHTML = `
+                    <div style="margin-top: 10px;">
+                        <h4>User Profile:</h4>
+                        <p>Username: ${profile.user.username}</p>
+                        <p>Email: ${profile.user.email}</p>
+                        <p>Staff: ${profile.user.is_staff ? 'Yes' : 'No'}</p>
+                        <p>Superuser: ${profile.user.is_superuser ? 'Yes' : 'No'}</p>
+                    </div>
+                `;
+
+            } catch (error) {
+                logToConsole(`❌ Authentication failed: ${error.message}`, 'error');
+                document.getElementById('authStatus').innerHTML = `
+                    <span class="status-badge status-error">Authentication Failed</span>
+                `;
+                document.getElementById('authResult').innerHTML = `
+                    <div style="margin-top: 10px;">
+                        <p style="color: #dc3545;">${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Logout
+        function logout() {
+            api.logout();
+            logToConsole('✅ Logged out successfully', 'success');
+            document.getElementById('authStatus').innerHTML = `
+                <span class="status-badge status-warning">Not authenticated</span>
+            `;
+            document.getElementById('authResult').innerHTML = '';
+        }
+
+        // Test Packages
+        async function testPackages() {
+            logToConsole('Testing packages endpoint...', 'info');
+            
+            try {
+                const packages = await api.getPackages();
+                logToConsole(`✅ Packages retrieved: ${packages.length} items`, 'success');
+                
+                packages.forEach(pkg => {
+                    logToConsole(`📦 ${pkg.name}: ${pkg.price} TZS (${pkg.data_limit_mb}MB, ${pkg.duration_hours}h)`, 'info');
+                });
+            } catch (error) {
+                logToConsole(`❌ Packages test failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Test MikroTik Status
+        async function testMikrotikStatus() {
+            logToConsole('Testing MikroTik status endpoint...', 'info');
+            
+            try {
+                const status = await api.getMikrotikStatus();
+                logToConsole(`✅ MikroTik status retrieved successfully`, 'success');
+                logToConsole(`Router IP: ${status.router_ip}`, 'info');
+                logToConsole(`Connection: ${status.connection_status}`, 'info');
+                logToConsole(`Active Users: ${status.active_users}`, 'info');
+            } catch (error) {
+                logToConsole(`❌ MikroTik status test failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Test Dashboard Stats
+        async function testDashboardStats() {
+            logToConsole('Testing dashboard stats endpoint...', 'info');
+            
+            try {
+                const stats = await api.getDashboardStats();
+                logToConsole(`✅ Dashboard stats retrieved successfully`, 'success');
+                logToConsole(`Stats: ${JSON.stringify(stats, null, 2)}`, 'info');
+            } catch (error) {
+                logToConsole(`❌ Dashboard stats test failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Test User Status
+        async function testUserStatus() {
+            const phoneNumber = document.getElementById('phoneNumber').value;
+            
+            if (!phoneNumber) {
+                logToConsole('❌ Please enter a phone number', 'error');
+                return;
+            }
+
+            logToConsole(`Testing user status for: ${phoneNumber}`, 'info');
+            
+            try {
+                const userStatus = await api.getUserStatus(phoneNumber);
+                logToConsole(`✅ User status retrieved successfully`, 'success');
+                logToConsole(`User: ${JSON.stringify(userStatus, null, 2)}`, 'info');
+            } catch (error) {
+                logToConsole(`❌ User status test failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Full Test Suite
+        async function runFullTestSuite() {
+            logToConsole('🧪 Starting full test suite...', 'info');
+            logToConsole('===============================', 'info');
+            
+            // Run all tests
+            await runConnectionTest();
+            await testPackages();
+            
+            if (api.isAuthenticated()) {
+                await testMikrotikStatus();
+                await testDashboardStats();
+            } else {
+                logToConsole('⚠️ Skipping authenticated tests (not logged in)', 'warning');
+            }
+            
+            logToConsole('===============================', 'info');
+            logToConsole('🎉 Full test suite completed!', 'success');
+        }
+
+        // Check Production Server
+        async function checkProductionServer() {
+            logToConsole('Checking production server health...', 'info');
+            
+            try {
+                const response = await fetch('https://api.kitonga.klikcell.com/api/health/');
+                const data = await response.json();
+                
+                logToConsole(`✅ Server is healthy`, 'success');
+                logToConsole(`Response time: ${response.headers.get('x-response-time') || 'N/A'}`, 'info');
+                logToConsole(`Server: ${data.service} v${data.version}`, 'info');
+                
+            } catch (error) {
+                logToConsole(`❌ Server health check failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Validate CORS
+        async function validateCORS() {
+            logToConsole('Testing CORS configuration...', 'info');
+            
+            try {
+                // Test preflight request
+                const response = await fetch('https://api.kitonga.klikcell.com/api/health/', {
+                    method: 'OPTIONS',
+                    headers: {
+                        'Origin': window.location.origin,
+                        'Access-Control-Request-Method': 'GET',
+                        'Access-Control-Request-Headers': 'Content-Type, X-Admin-Access'
+                    }
+                });
+                
+                logToConsole(`✅ CORS preflight successful`, 'success');
+                logToConsole(`Status: ${response.status}`, 'info');
+                
+            } catch (error) {
+                logToConsole(`❌ CORS test failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Show API Documentation
+        function showAPIDocumentation() {
+            const docs = `
+Available API Endpoints:
+========================
+
+Public Endpoints:
+• GET /api/health/ - Server health check
+• GET /api/bundles/ - Get available packages
+
+Authentication Required:
+• POST /api/auth/login/ - Admin login
+• GET /api/auth/profile/ - Get admin profile
+
+Admin Only Endpoints:
+• GET /api/mikrotik/status/ - Router status
+• GET /api/dashboard-stats/ - Dashboard statistics
+• GET /api/mikrotik/user-status/?username=... - User status
+
+User Endpoints:
+• GET /api/user-status/{phone}/ - User subscription status
+• POST /api/initiate-payment/ - Start payment process
+• GET /api/payment-status/{reference}/ - Check payment status
+
+Authentication Methods:
+• X-Admin-Access header with admin token
+• Authorization header with Token {user_token}
+            `;
+            
+            logToConsole(docs, 'info');
+        }
+
+        // Initialize
+        logToConsole('🚀 Kitonga API Test Page loaded', 'success');
+        logToConsole('Production server: https://api.kitonga.klikcell.com', 'info');
+    </script>
+</body>
+</html>
