@@ -15,15 +15,15 @@ const API_URL = API_BASE_URL; // Change to LOCAL_API_URL for local testing
 // ========================================
 class AuthManager {
     static setToken(token) {
-        localStorage.setItem('admin_token', token);
+        localStorage.setItem('kitonga_auth_token', token);
     }
     
     static getToken() {
-        return localStorage.getItem('admin_token');
+        return localStorage.getItem('kitonga_auth_token');
     }
     
     static clearToken() {
-        localStorage.removeItem('admin_token');
+        localStorage.removeItem('kitonga_auth_token');
     }
     
     static isAuthenticated() {
@@ -31,8 +31,20 @@ class AuthManager {
     }
     
     static getAuthHeaders() {
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        
+        // Method 1: Use Django Token (preferred)
         const token = this.getToken();
-        return token ? { 'Authorization': `Bearer ${token}` } : {};
+        if (token) {
+            headers['Authorization'] = `Token ${token}`;
+        } else {
+            // Method 2: Fallback to static admin token
+            headers['X-Admin-Access'] = 'kitonga_admin_secure_token_2025';
+        }
+        
+        return headers;
     }
 }
 
@@ -43,11 +55,12 @@ async function apiRequest(endpoint, options = {}) {
     try {
         const url = `${API_URL}${endpoint}`;
         const config = {
+            headers: AuthManager.getAuthHeaders(),
+            ...options,
             headers: {
-                'Content-Type': 'application/json',
+                ...AuthManager.getAuthHeaders(),
                 ...options.headers
-            },
-            ...options
+            }
         };
         
         const response = await fetch(url, config);

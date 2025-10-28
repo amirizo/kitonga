@@ -1,3 +1,31 @@
 INFO 2025-10-27 14:26:15,864 autoreload 12452 8304402752 Watching for file changes with StatReloader
 INFO 2025-10-27 14:26:32,275 basehttp 12452 6167556096 "HEAD /static/admin/css/base.css HTTP/1.1" 301 0
 INFO 2025-10-27 16:13:04,016 mikrotik 18341 8304402752 Mikrotik authentication request for user 255700000000
+INFO 2025-10-28 12:01:36,893 autoreload 44417 8304402752 Watching for file changes with StatReloader
+INFO 2025-10-28 12:01:47,250 basehttp 44417 6168506368 "GET /health/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:01:47,265 basehttp 44417 6168506368 code 400, message Bad request version ('\x00\x02\x01\x00\x00')
+ERROR 2025-10-28 12:01:47,266 basehttp 44417 6168506368 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-10-28 12:02:09,374 basehttp 44417 6168506368 "GET /health/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:03:38,610 basehttp 44417 6168506368 "GET /api/health/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:03:38,619 basehttp 44417 6168506368 code 400, message Bad request version ('\x00\x02\x01\x00\x00')
+ERROR 2025-10-28 12:03:38,619 basehttp 44417 6168506368 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-10-28 12:04:00,633 basehttp 44417 6168506368 "GET /api/health/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:04:08,822 basehttp 44417 6168506368 "GET /api/health/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:15:20,130 autoreload 47322 8304402752 Watching for file changes with StatReloader
+INFO 2025-10-28 12:16:04,819 autoreload 47322 8304402752 /Users/macbookair/Desktop/kitonga/billing/views.py changed, reloading.
+INFO 2025-10-28 12:16:05,405 autoreload 47346 8304402752 Watching for file changes with StatReloader
+INFO 2025-10-28 12:16:14,636 autoreload 47346 8304402752 /Users/macbookair/Desktop/kitonga/billing/urls.py changed, reloading.
+INFO 2025-10-28 12:16:15,089 autoreload 47364 8304402752 Watching for file changes with StatReloader
+INFO 2025-10-28 12:16:25,724 basehttp 47364 6191951872 "GET /api/mikrotik/status/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:16:43,154 basehttp 47364 6191951872 "GET /api/mikrotik/status/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:16:52,641 basehttp 47364 6191951872 "GET /api/mikrotik/status/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:17:08,693 basehttp 47364 6191951872 "GET /api/mikrotik/status/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:17:51,065 basehttp 47364 6191951872 "GET /api/auth/profile/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:17:51,066 basehttp 47364 6208778240 "GET /api/mikrotik/status/?username=admin HTTP/1.1" 301 0
+INFO 2025-10-28 12:18:05,241 basehttp 47364 6191951872 "POST /api/auth/login/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:18:11,557 basehttp 47364 6191951872 "POST /api/auth/login/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:18:24,625 basehttp 47364 6191951872 "POST /api/auth/login/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:18:30,503 basehttp 47364 6191951872 "POST /api/auth/login/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:18:46,416 autoreload 48754 8304402752 Watching for file changes with StatReloader
+INFO 2025-10-28 12:19:12,141 autoreload 49064 8304402752 Watching for file changes with StatReloader
+INFO 2025-10-28 12:19:30,811 basehttp 49064 6135738368 "GET /api/mikrotik/status/ HTTP/1.1" 301 0

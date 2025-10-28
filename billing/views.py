@@ -1307,51 +1307,57 @@ def mikrotik_logout(request):
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([SimpleAdminTokenPermission])
 def mikrotik_status_check(request):
     """
-    Check user status for Mikrotik
+    Check MikroTik router status (Admin only)
     """
-    username = request.GET.get('username')
-    
-    if not username:
-        return Response({
-            'success': False,
-            'message': 'Username is required'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
     try:
-        user = User.objects.get(phone_number=username)
+        from .mikrotik import get_mikrotik_client
         
-        # Get recent access logs
-        recent_logs = AccessLog.objects.filter(user=user).order_by('-timestamp')[:5]
+        # Get router configuration from settings
+        router_ip = settings.MIKROTIK_ROUTER_IP
+        hotspot_name = settings.MIKROTIK_HOTSPOT_NAME
+        
+        # Try to get MikroTik client
+        mikrotik_client = get_mikrotik_client()
+        
+        # Get active users count
+        active_users_count = User.objects.filter(
+            paid_until__gt=timezone.now(),
+            is_active=True
+        ).count()
+        
+        # Check if we can connect to router (basic connectivity test)
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((router_ip, 80))  # Test HTTP port
+            sock.close()
+            connection_status = "connected" if result == 0 else "disconnected"
+        except Exception:
+            connection_status = "unknown"
         
         return Response({
             'success': True,
-            'user': {
-                'phone_number': user.phone_number,
-                'paid_until': user.paid_until.isoformat() if user.paid_until else None,
-                'is_active': user.is_active,
-                'has_active_access': user.has_active_access(),
-                'device_count': user.get_active_devices().count(),
-                'max_devices': user.max_devices
-            },
-            'recent_activity': [
-                {
-                    'timestamp': log.timestamp.isoformat(),
-                    'authenticated': log.authenticated,
-                    'ip_address': log.ip_address,
-                    'mac_address': log.mac_address,
-                    'notes': log.notes or ''
-                } for log in recent_logs
-            ]
+            'router_ip': router_ip,
+            'hotspot_name': hotspot_name,
+            'connection_status': connection_status,
+            'active_users': active_users_count,
+            'api_port': settings.MIKROTIK_API_PORT,
+            'admin_user': settings.MIKROTIK_ADMIN_USER,
+            'timestamp': timezone.now().isoformat()
         })
         
-    except User.DoesNotExist:
+    except Exception as e:
+        logger.error(f'MikroTik status check failed: {str(e)}')
         return Response({
             'success': False,
-            'message': 'User not found'
-        }, status=status.HTTP_404_NOT_FOUND)
+            'message': f'Failed to check router status: {str(e)}',
+            'router_ip': getattr(settings, 'MIKROTIK_ROUTER_IP', 'Not configured'),
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])
@@ -1454,6 +1460,54 @@ def test_user_access(request):
                 'would_allow_mikrotik': has_access,
                 'reason': 'Access granted' if has_access else 'Payment required'
             }
+        })
+        
+    except User.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def mikrotik_user_status(request):
+    """
+    Check individual user status for MikroTik (used by MikroTik hotspot for external authentication)
+    """
+    username = request.GET.get('username')
+    
+    if not username:
+        return Response({
+            'success': False,
+            'message': 'Username is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        user = User.objects.get(phone_number=username)
+        
+        # Get recent access logs
+        recent_logs = AccessLog.objects.filter(user=user).order_by('-timestamp')[:5]
+        
+        return Response({
+            'success': True,
+            'user': {
+                'phone_number': user.phone_number,
+                'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+                'is_active': user.is_active,
+                'has_active_access': user.has_active_access(),
+                'device_count': user.get_active_devices().count(),
+                'max_devices': user.max_devices
+            },
+            'recent_activity': [
+                {
+                    'timestamp': log.timestamp.isoformat(),
+                    'authenticated': log.authenticated,
+                    'ip_address': log.ip_address,
+                    'mac_address': log.mac_address,
+                    'notes': log.notes or ''
+                } for log in recent_logs
+            ]
         })
         
     except User.DoesNotExist:

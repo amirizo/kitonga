@@ -37,6 +37,7 @@ urlpatterns = [
     path('mikrotik/auth/', views.mikrotik_auth, name='mikrotik_auth'),
     path('mikrotik/logout/', views.mikrotik_logout, name='mikrotik_logout'),
     path('mikrotik/status/', views.mikrotik_status_check, name='mikrotik_status_check'),
+    path('mikrotik/user-status/', views.mikrotik_user_status, name='mikrotik_user_status'),
     
     # System endpoints
     path('health/', views.health_check, name='health_check'),
