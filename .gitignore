@@ -27,3 +27,4 @@ yarn-error.log*
 next-env.d.tsdb.sqlite3
 
 
+db.sqlite3
