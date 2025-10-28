@@ -459,8 +459,7 @@ def get_user_detail(request, user_id):
                 'bundle_name': payment.bundle.name if payment.bundle else None,
                 'order_reference': payment.order_reference,
                 'created_at': payment.created_at.isoformat(),
-                'completed_at': payment.completed_at.isoformat() if payment.completed_at else None,
-                'expires_at': payment.expires_at.isoformat() if payment.expires_at else None
+                'completed_at': payment.completed_at.isoformat() if payment.completed_at else None
             })
         
         # Get user's devices
@@ -473,19 +472,20 @@ def get_user_detail(request, user_id):
                 'device_name': device.device_name or 'Unknown Device',
                 'is_active': device.is_active,
                 'last_seen': device.last_seen.isoformat() if device.last_seen else None,
-                'created_at': device.created_at.isoformat()
+                'first_seen': device.first_seen.isoformat()
             })
         
         # Get access logs
-        access_logs = AccessLog.objects.filter(phone_number=user.phone_number).order_by('-created_at')[:10]
+        access_logs = AccessLog.objects.filter(user=user).order_by('-timestamp')[:10]
         logs_data = []
         for log in access_logs:
             logs_data.append({
                 'id': log.id,
-                'action': log.action,
+                'access_granted': log.access_granted,
+                'denial_reason': log.denial_reason,
                 'ip_address': log.ip_address,
                 'mac_address': log.mac_address,
-                'created_at': log.created_at.isoformat()
+                'timestamp': log.timestamp.isoformat()
             })
         
         user_data = {
@@ -493,7 +493,6 @@ def get_user_detail(request, user_id):
             'phone_number': user.phone_number,
             'is_active': user.is_active,
             'created_at': user.created_at.isoformat(),
-            'last_login': user.last_login.isoformat() if user.last_login else None,
             'has_active_access': user.has_active_access(),
             'payments': payments_data,
             'devices': devices_data,
@@ -1418,13 +1417,17 @@ def mikrotik_disconnect_user(request):
         
         if result:
             # Log the disconnection
-            AccessLog.objects.create(
-                phone_number=username,
-                action='admin_disconnect',
-                ip_address=request.META.get('REMOTE_ADDR', ''),
-                mac_address='',
-                details=f'Disconnected by admin user: {request.user.username if request.user.is_authenticated else "Unknown"}'
-            )
+            try:
+                user = User.objects.get(phone_number=username)
+                AccessLog.objects.create(
+                    user=user,
+                    ip_address=request.META.get('REMOTE_ADDR', '127.0.0.1'),
+                    mac_address='',
+                    access_granted=False,
+                    denial_reason=f'Disconnected by admin user: {request.user.username if request.user.is_authenticated else "Unknown"}'
+                )
+            except User.DoesNotExist:
+                pass  # Log anyway without user reference
             
             return Response({
                 'success': True,
@@ -1461,14 +1464,20 @@ def mikrotik_disconnect_all_users(request):
         result = disconnect_all_hotspot_users()
         
         if result['success']:
-            # Log the mass disconnection
-            AccessLog.objects.create(
-                phone_number='ALL_USERS',
-                action='admin_disconnect_all',
-                ip_address=request.META.get('REMOTE_ADDR', ''),
-                mac_address='',
-                details=f'All users disconnected by admin: {request.user.username if request.user.is_authenticated else "Unknown"}'
-            )
+            # Log the mass disconnection (using system user if available)
+            try:
+                # Try to create admin log without user reference
+                from django.contrib.auth.models import User as AuthUser
+                admin_user = request.user if request.user.is_authenticated else None
+                AccessLog.objects.create(
+                    user=admin_user if isinstance(admin_user, User) else None,
+                    ip_address=request.META.get('REMOTE_ADDR', '127.0.0.1'),
+                    mac_address='ADMIN_ACTION',
+                    access_granted=False,
+                    denial_reason=f'All users disconnected by admin: {request.user.username if request.user.is_authenticated else "Unknown"}'
+                )
+            except Exception:
+                pass  # Don't fail if logging fails
             
             return Response({
                 'success': True,
@@ -1514,14 +1523,19 @@ def mikrotik_reboot_router(request):
         result = reboot_router()
         
         if result['success']:
-            # Log the reboot
-            AccessLog.objects.create(
-                phone_number='SYSTEM',
-                action='router_reboot',
-                ip_address=request.META.get('REMOTE_ADDR', ''),
-                mac_address='',
-                details=f'Router reboot initiated by admin: {request.user.username if request.user.is_authenticated else "Unknown"}'
-            )
+            # Log the reboot (skip logging if it fails)
+            try:
+                from django.contrib.auth.models import User as AuthUser
+                admin_user = request.user if request.user.is_authenticated else None
+                AccessLog.objects.create(
+                    user=admin_user if isinstance(admin_user, User) else None,
+                    ip_address=request.META.get('REMOTE_ADDR', '127.0.0.1'),
+                    mac_address='ADMIN_ACTION',
+                    access_granted=False,
+                    denial_reason=f'Router reboot initiated by admin: {request.user.username if request.user.is_authenticated else "Unknown"}'
+                )
+            except Exception:
+                pass  # Don't fail if logging fails
             
             return Response({
                 'success': True,
@@ -1834,18 +1848,22 @@ def clickpesa_webhook(request):
         order_reference = (
             payment_data.get('orderReference') or 
             payment_data.get('order_reference') or
-            payment_data.get('id')
+            payment_data.get('id') or
+            webhook_data.get('order_reference') or  # Check root level too
+            webhook_data.get('orderReference')
         )
         
         # Extract transaction/payment ID
         transaction_id = (
             payment_data.get('paymentId') or 
             payment_data.get('id') or
-            payment_data.get('transaction_id')
+            payment_data.get('transaction_id') or
+            webhook_data.get('transaction_reference') or  # Check root level too
+            webhook_data.get('transaction_id')
         )
         
         # Extract status
-        status_code = payment_data.get('status')
+        status_code = payment_data.get('status') or webhook_data.get('status')
         
         # Extract other fields
         channel = payment_data.get('channel')
@@ -1894,7 +1912,7 @@ def clickpesa_webhook(request):
         try:
             payment = Payment.objects.get(order_reference=order_reference)
             
-            if event_type == 'PAYMENT RECEIVED' and status_code in ['SUCCESS', 'COMPLETED']:
+            if (event_type == 'PAYMENT RECEIVED' or status_code == 'PAYMENT RECEIVED') and status_code in ['SUCCESS', 'COMPLETED', 'PAYMENT RECEIVED']:
                 # Payment successful
                 payment.mark_completed(
                     payment_reference=transaction_id,
