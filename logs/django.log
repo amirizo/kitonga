@@ -29,3 +29,17 @@ INFO 2025-10-28 12:18:30,503 basehttp 47364 6191951872 "POST /api/auth/login/ HT
 INFO 2025-10-28 12:18:46,416 autoreload 48754 8304402752 Watching for file changes with StatReloader
 INFO 2025-10-28 12:19:12,141 autoreload 49064 8304402752 Watching for file changes with StatReloader
 INFO 2025-10-28 12:19:30,811 basehttp 49064 6135738368 "GET /api/mikrotik/status/ HTTP/1.1" 301 0
+INFO 2025-10-28 12:36:22,321 autoreload 2099167 139687989540672 Watching for file changes with StatReloader
+WARNING 2025-10-28 12:55:07,746 log 2169189 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:10:29,479 log 2242864 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:13:04,965 log 2242864 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:15:48,861 log 2264787 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:15:49,274 log 2264787 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:16:57,976 log 2242866 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:16:58,338 log 2242864 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:23:49,086 log 2291759 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:23:49,429 log 2291759 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:31:32,149 log 2291759 139764793022272 Not Found: /api/admin/users/
+WARNING 2025-10-28 13:31:32,489 log 2291759 139764793022272 Not Found: /api/admin/users/
+WARNING 2025-10-28 13:32:44,021 log 2291759 139764793022272 Not Found: /api/admin/users/
+WARNING 2025-10-28 13:32:44,457 log 2291759 139764793022272 Not Found: /api/admin/users/

@@ -1,0 +1,109 @@
+WARNING 2025-10-28 11:33:01,611 log 1819851 140088575231808 Not Found: /
+WARNING 2025-10-28 11:33:02,047 log 1820010 140088575231808 Not Found: /favicon.ico
+WARNING 2025-10-28 11:33:34,103 utils 1819851 140088575231808 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 11:33:34,106 utils 1819851 140088575231808 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 11:35:39,793 utils 1820595 140088575231808 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 11:35:45,378 utils 1836020 140088575231808 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 11:35:55,598 utils 1837046 140088575231808 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 11:35:58,999 utils 1837303 140088575231808 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 11:36:02,857 utils 1837949 140088575231808 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 11:36:05,400 utils 1838217 140088575231808 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 11:36:10,120 utils 1838595 140088575231808 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 11:36:11,882 utils 1838595 140088575231808 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 11:36:21,630 utils 1820010 140088575231808 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 11:37:10,440 utils 1819851 140088575231808 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 11:37:15,126 utils 1819851 140088575231808 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 11:39:29,499 log 1854718 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:39:29,511 log 1820595 140088575231808 Bad Request: /api/mikrotik/status/
+WARNING 2025-10-28 11:39:29,513 log 1854718 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 11:39:29,870 log 1854718 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:39:29,873 log 1820595 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 11:39:29,875 log 1820010 140088575231808 Bad Request: /api/mikrotik/status/
+WARNING 2025-10-28 11:41:55,963 log 1819851 140088575231808 Not Found: /health/
+WARNING 2025-10-28 11:41:57,062 log 1819851 140088575231808 Not Found: /auth/login/
+WARNING 2025-10-28 11:42:30,497 log 1820595 140088575231808 Unauthorized: /api/auth/login/
+WARNING 2025-10-28 11:43:37,881 log 1819851 140088575231808 Unauthorized: /api/auth/login/
+WARNING 2025-10-28 11:43:38,322 log 1819851 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:46:26,607 log 1820595 140088575231808 Bad Request: /api/mikrotik/status/
+WARNING 2025-10-28 11:46:26,622 log 1820595 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:46:26,632 log 1883109 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 11:46:26,970 log 1883109 140088575231808 Bad Request: /api/mikrotik/status/
+WARNING 2025-10-28 11:46:26,992 log 1883109 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:46:27,002 log 1883109 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 11:48:19,114 log 1819851 140088575231808 Bad Request: /api/mikrotik/status/
+WARNING 2025-10-28 11:48:20,187 log 1819851 140088575231808 Bad Request: /api/mikrotik/status/
+WARNING 2025-10-28 11:48:20,545 log 1819851 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:48:54,328 log 1819851 140088575231808 Bad Request: /api/mikrotik/status/
+WARNING 2025-10-28 11:48:54,328 log 1883109 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:48:54,331 log 1820595 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 11:49:05,061 log 1820595 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 11:49:05,072 log 1883109 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:49:05,071 log 1820595 140088575231808 Bad Request: /api/mikrotik/status/
+WARNING 2025-10-28 11:49:05,428 log 1883109 140088575231808 Bad Request: /api/mikrotik/status/
+WARNING 2025-10-28 11:49:05,428 log 1819851 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 11:49:05,434 log 1820595 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:49:27,176 log 1820595 140088575231808 Method Not Allowed: /api/health/
+WARNING 2025-10-28 11:51:02,934 log 1820595 140088575231808 Bad Request: /api/mikrotik/status/
+WARNING 2025-10-28 11:51:14,737 log 1820595 140088575231808 Not Found: /api/mikrotik/status/
+WARNING 2025-10-28 11:52:51,916 log 1820595 140088575231808 Unauthorized: /api/auth/login/
+WARNING 2025-10-28 11:53:15,815 log 1820595 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:53:15,865 log 1820595 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 11:53:16,235 log 1819851 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:53:16,267 log 1820595 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 11:53:16,270 log 1819851 140088575231808 Not Found: /api/mikrotik/status/
+WARNING 2025-10-28 11:53:16,664 log 1819851 140088575231808 Not Found: /api/mikrotik/status/
+WARNING 2025-10-28 11:54:00,238 log 1819851 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 11:54:00,247 log 1883109 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:54:00,254 log 1820595 140088575231808 Not Found: /api/mikrotik/status/
+WARNING 2025-10-28 11:54:00,687 log 1819851 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:54:00,688 log 1883109 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 11:54:00,691 log 1820595 140088575231808 Not Found: /api/mikrotik/status/
+WARNING 2025-10-28 11:55:15,901 log 1883109 140088575231808 Not Found: /api/mikrotik/status/
+WARNING 2025-10-28 11:55:25,767 log 1883109 140088575231808 Method Not Allowed: /api/mikrotik/status/
+WARNING 2025-10-28 11:55:34,950 log 1883109 140088575231808 Not Found: /api/mikrotik/status/
+WARNING 2025-10-28 11:55:46,336 log 1883109 140088575231808 Not Found: /api/mikrotik/status/
+WARNING 2025-10-28 11:55:59,763 log 1883109 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:55:59,777 log 1819851 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 11:56:00,125 log 1819851 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:56:00,140 log 1819851 140088575231808 Not Found: /api/mikrotik/status/
+WARNING 2025-10-28 11:56:00,142 log 1883109 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 11:56:00,542 log 1883109 140088575231808 Not Found: /api/mikrotik/status/
+INFO 2025-10-28 11:56:12,420 views 1883109 140088575231808 Mikrotik auth request: username=admin, mac=, ip=
+WARNING 2025-10-28 11:56:12,422 views 1883109 140088575231808 Mikrotik auth failed for admin: User not found
+WARNING 2025-10-28 11:56:12,422 log 1883109 140088575231808 Forbidden: /api/mikrotik/auth/
+WARNING 2025-10-28 11:57:40,161 log 1819851 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 11:57:40,162 log 1883109 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:57:40,165 log 1820595 140088575231808 Not Found: /api/mikrotik/status/
+WARNING 2025-10-28 11:57:40,548 log 1820595 140088575231808 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 11:57:40,549 log 1883109 140088575231808 Not Found: /api/mikrotik/status/
+WARNING 2025-10-28 11:57:40,550 log 1819851 140088575231808 Forbidden: /api/dashboard-stats/
+WARNING 2025-10-28 12:11:32,154 log 1980959 140465585014592 Not Found: /api/mikrotik/status/
+WARNING 2025-10-28 12:11:47,647 log 1980959 140465585014592 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 12:12:02,264 log 1980959 140465585014592 Unauthorized: /api/auth/login/
+WARNING 2025-10-28 12:55:07,746 log 2169189 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:10:29,479 log 2242864 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:13:04,965 log 2242864 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:14:14,566 utils 2242864 139764793022272 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 13:14:32,285 utils 2242866 139764793022272 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 13:14:32,288 utils 2242866 139764793022272 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 13:14:38,396 utils 2242866 139764793022272 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 13:14:42,189 utils 2242866 139764793022272 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 13:14:45,079 utils 2242866 139764793022272 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 13:14:47,431 utils 2242866 139764793022272 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 13:14:49,643 utils 2242866 139764793022272 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 13:14:52,246 utils 2242866 139764793022272 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 13:15:48,861 log 2264787 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:15:49,274 log 2264787 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:16:57,976 log 2242866 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:16:58,338 log 2242864 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:23:49,086 log 2291759 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:23:49,429 log 2291759 139764793022272 Unauthorized: /api/auth/profile/
+WARNING 2025-10-28 13:31:32,149 log 2291759 139764793022272 Not Found: /api/admin/users/
+WARNING 2025-10-28 13:31:32,489 log 2291759 139764793022272 Not Found: /api/admin/users/
+WARNING 2025-10-28 13:32:44,021 log 2291759 139764793022272 Not Found: /api/admin/users/
+WARNING 2025-10-28 13:32:44,457 log 2291759 139764793022272 Not Found: /api/admin/users/
+WARNING 2025-10-28 13:33:26,604 utils 2318070 139764793022272 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 13:34:43,600 utils 2318070 139764793022272 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 13:34:49,331 utils 2318070 139764793022272 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 13:35:59,951 utils 2291759 139764793022272 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 13:36:01,642 utils 2291759 139764793022272 Couldnt reverse admin:billing_statistics
