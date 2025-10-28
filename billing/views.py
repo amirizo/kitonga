@@ -19,10 +19,9 @@ from django.db.models import Count, Sum
 from datetime import timedelta
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User as DjangoUser
+from .models import User, Bundle, Payment, Device, PaymentWebhook, Voucher, AccessLog
 from django.views.decorators.http import require_http_methods
 from rest_framework.authtoken.models import Token
-
-from .models import User, Payment, AccessLog, Voucher, Bundle, Device, PaymentWebhook
 from .serializers import (
     UserSerializer, PaymentSerializer, 
     InitiatePaymentSerializer, VerifyAccessSerializer,
@@ -351,7 +350,6 @@ def list_users(request):
         # Apply filters
         phone_filter = request.GET.get('phone_number')
         is_active_filter = request.GET.get('is_active')
-        has_access_filter = request.GET.get('has_access')
         
         if phone_filter:
             users = users.filter(phone_number__icontains=phone_filter)
@@ -369,45 +367,58 @@ def list_users(request):
         total_users = users.count()
         users_page = users[start:end]
         
-        # Serialize users
+        # Serialize users with basic data first
         users_data = []
         for user in users_page:
-            user_data = {
-                'id': user.id,
-                'phone_number': user.phone_number,
-                'is_active': user.is_active,
-                'created_at': user.created_at.isoformat(),
-                'last_login': user.last_login.isoformat() if user.last_login else None,
-                'has_active_access': user.has_active_access(),
-                'device_count': user.devices.count(),
-                'total_payments': user.payments.filter(status='completed').count(),
-                'last_payment': None
-            }
-            
-            # Get last payment
-            last_payment = user.payments.filter(status='completed').order_by('-completed_at').first()
-            if last_payment:
-                user_data['last_payment'] = {
-                    'amount': str(last_payment.amount),
-                    'bundle_name': last_payment.bundle.name if last_payment.bundle else None,
-                    'completed_at': last_payment.completed_at.isoformat()
+            try:
+                user_data = {
+                    'id': user.id,
+                    'phone_number': user.phone_number,
+                    'is_active': user.is_active,
+                    'created_at': user.created_at.isoformat(),
+                    'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+                    'has_active_access': user.has_active_access(),
+                    'max_devices': user.max_devices,
+                    'total_payments': user.total_payments
                 }
-            
-            # Get current package
-            current_payment = user.payments.filter(
-                status='completed',
-                expires_at__gt=timezone.now()
-            ).order_by('-expires_at').first()
-            
-            if current_payment:
-                user_data['current_package'] = {
-                    'name': current_payment.bundle.name if current_payment.bundle else None,
-                    'expires_at': current_payment.expires_at.isoformat()
-                }
-            else:
-                user_data['current_package'] = None
-            
-            users_data.append(user_data)
+                
+                # Safely get device count
+                try:
+                    user_data['device_count'] = user.devices.count()
+                except:
+                    user_data['device_count'] = 0
+                
+                # Safely get payment count
+                try:
+                    user_data['payment_count'] = user.payments.filter(status='completed').count()
+                except:
+                    user_data['payment_count'] = 0
+                
+                # Safely get last payment
+                user_data['last_payment'] = None
+                try:
+                    last_payment = user.payments.filter(status='completed').order_by('-completed_at').first()
+                    if last_payment:
+                        user_data['last_payment'] = {
+                            'amount': str(last_payment.amount),
+                            'bundle_name': last_payment.bundle.name if last_payment.bundle else None,
+                            'completed_at': last_payment.completed_at.isoformat() if last_payment.completed_at else None
+                        }
+                except:
+                    pass
+                
+                users_data.append(user_data)
+                
+            except Exception as e:
+                logger.error(f'Error serializing user {user.id}: {str(e)}')
+                # Add basic user data without problematic fields
+                users_data.append({
+                    'id': user.id,
+                    'phone_number': user.phone_number,
+                    'is_active': user.is_active,
+                    'created_at': user.created_at.isoformat(),
+                    'error': 'Failed to load complete user data'
+                })
         
         return Response({
             'success': True,
@@ -424,7 +435,7 @@ def list_users(request):
         logger.error(f'Error listing users: {str(e)}')
         return Response({
             'success': False,
-            'message': 'Error retrieving users'
+            'message': f'Error retrieving users: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -669,9 +680,10 @@ def list_payments(request):
                 'bundle_id': payment.bundle.id if payment.bundle else None,
                 'created_at': payment.created_at.isoformat(),
                 'completed_at': payment.completed_at.isoformat() if payment.completed_at else None,
-                'expires_at': payment.expires_at.isoformat() if payment.expires_at else None,
                 'user_id': payment.user.id if payment.user else None,
-                'clickpesa_reference': payment.clickpesa_reference
+                'payment_reference': payment.payment_reference,
+                'transaction_id': payment.transaction_id,
+                'payment_channel': payment.payment_channel
             }
             payments_data.append(payment_data)
         
@@ -706,7 +718,7 @@ def list_payments(request):
         logger.error(f'Error listing payments: {str(e)}')
         return Response({
             'success': False,
-            'message': 'Error retrieving payments'
+            'message': f'Error retrieving payments: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -856,14 +868,10 @@ def manage_bundles(request):
                     'description': bundle.description,
                     'price': str(bundle.price),
                     'duration_hours': bundle.duration_hours,
-                    'data_limit_gb': bundle.data_limit_gb,
-                    'max_devices': bundle.max_devices,
                     'is_active': bundle.is_active,
-                    'created_at': bundle.created_at.isoformat(),
-                    'statistics': {
-                        'total_purchases': total_purchases,
-                        'total_revenue': str(revenue)
-                    }
+                    'display_order': bundle.display_order,
+                    'total_purchases': total_purchases,
+                    'revenue': str(revenue)
                 })
             
             return Response({
@@ -1117,9 +1125,9 @@ def system_status(request):
             'memory_usage': 'Unknown',  # You can get actual memory usage
             'disk_usage': 'Unknown',  # You can get actual disk usage
             'active_users': User.objects.filter(
-                payments__status='completed',
-                payments__expires_at__gt=now
-            ).distinct().count(),
+                is_active=True,
+                paid_until__gt=now
+            ).count(),
             'payments_today': Payment.objects.filter(
                 created_at__date=today,
                 status='completed'
@@ -1151,7 +1159,7 @@ def system_status(request):
         logger.error(f'Error getting system status: {str(e)}')
         return Response({
             'success': False,
-            'message': 'Error retrieving system status'
+            'message': f'Error retrieving system status: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
