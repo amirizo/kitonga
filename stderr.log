@@ -107,3 +107,24 @@ WARNING 2025-10-28 13:34:43,600 utils 2318070 139764793022272 Couldnt reverse ad
 WARNING 2025-10-28 13:34:49,331 utils 2318070 139764793022272 Couldnt reverse admin:billing_statistics
 WARNING 2025-10-28 13:35:59,951 utils 2291759 139764793022272 Couldnt reverse admin:billing_statistics
 WARNING 2025-10-28 13:36:01,642 utils 2291759 139764793022272 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 20:02:47,032 utils 2521425 140377464006464 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 20:02:58,321 utils 2521425 140377464006464 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 20:03:06,055 utils 2521425 140377464006464 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 20:03:10,122 utils 2521425 140377464006464 Couldnt reverse admin:billing_statistics
+INFO 2025-10-28 20:18:16,451 views 3290559 140377464006464 ClickPesa webhook received: {"event": "PAYMENT FAILED", "data": {"id": "CLPLCPCAEM1EA", "status": "FAILED", "channel": "TIGO-PESA", "orderReference": "KITONGA9DED37E57", "message": "Transaction timedout", "updatedAt": "2025-10-28T17:18:12.424Z", "createdAt": "2025-10-28T17:13:11.870Z", "customer": {"customerName": "ESTER MBWAMBO", "customerPhoneNumber": "255712345999"}, "clientId": "IDlUeSuskCXqxxYcEpJZwgAj41OoBkzl"}}
+ERROR 2025-10-28 20:18:16,495 views 3290559 140377464006464 Payment not found for order reference: KITONGA9DED37E57
+WARNING 2025-10-28 20:18:16,530 log 3290559 140377464006464 Not Found: /api/clickpesa-webhook/
+INFO 2025-10-28 20:19:25,019 views 3290559 140377464006464 ClickPesa webhook received: {"event": "PAYMENT FAILED", "data": {"id": "CLPLCPCAAA5DG", "status": "FAILED", "channel": "TIGO-PESA", "orderReference": "KITONGA9AC282A9C", "message": "Transaction timedout", "updatedAt": "2025-10-28T17:19:21.546Z", "createdAt": "2025-10-28T17:14:20.891Z", "customer": {"customerName": "ESTER MBWAMBO", "customerPhoneNumber": "255712345999"}, "clientId": "IDlUeSuskCXqxxYcEpJZwgAj41OoBkzl"}}
+ERROR 2025-10-28 20:19:25,083 views 3290559 140377464006464 Payment not found for order reference: KITONGA9AC282A9C
+WARNING 2025-10-28 20:19:25,109 log 3290559 140377464006464 Not Found: /api/clickpesa-webhook/
+ERROR 2025-10-28 20:22:03,954 views 3290576 140377464006464 Error getting user detail: 'Payment' object has no attribute 'expires_at'
+ERROR 2025-10-28 20:22:03,959 log 3290576 140377464006464 Internal Server Error: /api/admin/users/6/
+ERROR 2025-10-28 20:22:13,036 views 3290576 140377464006464 Error getting user detail: 'Payment' object has no attribute 'expires_at'
+ERROR 2025-10-28 20:22:13,037 log 3290576 140377464006464 Internal Server Error: /api/admin/users/7/
+ERROR 2025-10-28 20:22:21,773 views 3290576 140377464006464 Error getting user detail: 'Payment' object has no attribute 'expires_at'
+ERROR 2025-10-28 20:22:21,774 log 3290576 140377464006464 Internal Server Error: /api/admin/users/3/
+INFO 2025-10-28 20:24:31,348 views 3290576 140377464006464 ClickPesa webhook received: {"event": "PAYMENT FAILED", "data": {"id": "CLPLCPCAM6DE5", "status": "FAILED", "channel": "TIGO-PESA", "orderReference": "KITONGA109909633C", "message": "Transaction timedout", "updatedAt": "2025-10-28T17:24:27.958Z", "createdAt": "2025-10-28T17:19:27.403Z", "customer": {"customerName": "BLANDINA MALLYA", "customerPhoneNumber": "255712345888"}, "clientId": "IDlUeSuskCXqxxYcEpJZwgAj41OoBkzl"}}
+ERROR 2025-10-28 20:24:31,375 views 3290576 140377464006464 Payment not found for order reference: KITONGA109909633C
+WARNING 2025-10-28 20:24:31,389 log 3290576 140377464006464 Not Found: /api/clickpesa-webhook/
+WARNING 2025-10-28 20:31:40,150 utils 3791633 140377464006464 Couldnt reverse admin:billing_statistics
+WARNING 2025-10-28 20:31:48,145 utils 3791633 140377464006464 Couldnt reverse admin:billing_statistics
