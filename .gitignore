@@ -25,4 +25,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.tsdb.sqlite3
-logs/
+
+

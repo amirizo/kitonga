@@ -734,18 +734,19 @@ def get_payment_detail(request, payment_id):
         # Get webhook logs for this payment
         webhook_logs = PaymentWebhook.objects.filter(
             order_reference=payment.order_reference
-        ).order_by('-created_at')
+        ).order_by('-received_at')
         
         webhook_data = []
         for webhook in webhook_logs:
             webhook_data.append({
                 'id': webhook.id,
+                'event_type': webhook.event_type,
                 'payment_status': webhook.payment_status,
-                'amount': str(webhook.amount),
-                'phone_number': webhook.phone_number,
-                'transaction_reference': webhook.transaction_reference,
-                'created_at': webhook.created_at.isoformat(),
-                'raw_data': webhook.raw_data
+                'amount': str(webhook.amount) if webhook.amount else None,
+                'transaction_id': webhook.transaction_id,
+                'received_at': webhook.received_at.isoformat(),
+                'processed_at': webhook.processed_at.isoformat() if webhook.processed_at else None,
+                'processing_status': webhook.processing_status
             })
         
         payment_data = {
@@ -754,22 +755,24 @@ def get_payment_detail(request, payment_id):
             'amount': str(payment.amount),
             'status': payment.status,
             'order_reference': payment.order_reference,
-            'clickpesa_reference': payment.clickpesa_reference,
+            'payment_reference': payment.payment_reference,
+            'transaction_id': payment.transaction_id,
+            'payment_channel': payment.payment_channel,
             'bundle': {
                 'id': payment.bundle.id,
                 'name': payment.bundle.name,
                 'price': str(payment.bundle.price),
                 'duration_hours': payment.bundle.duration_hours,
-                'data_limit_gb': payment.bundle.data_limit_gb
+                'description': payment.bundle.description
             } if payment.bundle else None,
             'user': {
                 'id': payment.user.id,
                 'phone_number': payment.user.phone_number,
-                'is_active': payment.user.is_active
+                'is_active': payment.user.is_active,
+                'has_active_access': payment.user.has_active_access()
             } if payment.user else None,
             'created_at': payment.created_at.isoformat(),
             'completed_at': payment.completed_at.isoformat() if payment.completed_at else None,
-            'expires_at': payment.expires_at.isoformat() if payment.expires_at else None,
             'webhook_logs': webhook_data
         }
         
@@ -787,7 +790,7 @@ def get_payment_detail(request, payment_id):
         logger.error(f'Error getting payment detail: {str(e)}')
         return Response({
             'success': False,
-            'message': 'Error retrieving payment details'
+            'message': f'Error retrieving payment details: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -894,8 +897,7 @@ def manage_bundles(request):
                 description=request.data.get('description', ''),
                 price=request.data.get('price'),
                 duration_hours=request.data.get('duration_hours'),
-                data_limit_gb=request.data.get('data_limit_gb'),
-                max_devices=request.data.get('max_devices', 5),
+                display_order=request.data.get('display_order', 0),
                 is_active=request.data.get('is_active', True)
             )
             
@@ -950,10 +952,8 @@ def manage_bundle(request, bundle_id):
                 'description': bundle.description,
                 'price': str(bundle.price),
                 'duration_hours': bundle.duration_hours,
-                'data_limit_gb': bundle.data_limit_gb,
-                'max_devices': bundle.max_devices,
                 'is_active': bundle.is_active,
-                'created_at': bundle.created_at.isoformat(),
+                'display_order': bundle.display_order,
                 'statistics': {
                     'total_purchases': total_purchases,
                     'total_revenue': str(revenue),
@@ -976,10 +976,8 @@ def manage_bundle(request, bundle_id):
                 bundle.price = request.data['price']
             if 'duration_hours' in request.data:
                 bundle.duration_hours = request.data['duration_hours']
-            if 'data_limit_gb' in request.data:
-                bundle.data_limit_gb = request.data['data_limit_gb']
-            if 'max_devices' in request.data:
-                bundle.max_devices = request.data['max_devices']
+            if 'display_order' in request.data:
+                bundle.display_order = request.data['display_order']
             if 'is_active' in request.data:
                 bundle.is_active = request.data['is_active']
             

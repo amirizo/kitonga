@@ -49,9 +49,11 @@ class User(models.Model):
         return f"{self.phone_number} - Active: {self.is_active}"
     
     def save(self, *args, **kwargs):
-        """Override save to set default max_devices from settings"""
-        if not self.pk and self.max_devices == 1:  # New user with default value
-            self.max_devices = getattr(settings, 'MAX_DEVICES_PER_USER', 1)
+        """Override save to ensure max_devices defaults to 1"""
+        if not self.pk:  # New user
+            # Always default to 1 device per user
+            if not hasattr(self, 'max_devices') or self.max_devices is None:
+                self.max_devices = 1
         super().save(*args, **kwargs)
     
     def has_active_access(self):
