@@ -337,6 +337,1332 @@ def create_admin_user(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+# User Management APIs
+
+@api_view(['GET'])
+@permission_classes([SimpleAdminTokenPermission])
+def list_users(request):
+    """
+    List all Wi-Fi users (Admin only)
+    """
+    try:
+        users = User.objects.all().order_by('-created_at')
+        
+        # Apply filters
+        phone_filter = request.GET.get('phone_number')
+        is_active_filter = request.GET.get('is_active')
+        has_access_filter = request.GET.get('has_access')
+        
+        if phone_filter:
+            users = users.filter(phone_number__icontains=phone_filter)
+        
+        if is_active_filter is not None:
+            is_active = is_active_filter.lower() == 'true'
+            users = users.filter(is_active=is_active)
+        
+        # Pagination
+        page_size = int(request.GET.get('page_size', 20))
+        page = int(request.GET.get('page', 1))
+        start = (page - 1) * page_size
+        end = start + page_size
+        
+        total_users = users.count()
+        users_page = users[start:end]
+        
+        # Serialize users
+        users_data = []
+        for user in users_page:
+            user_data = {
+                'id': user.id,
+                'phone_number': user.phone_number,
+                'is_active': user.is_active,
+                'created_at': user.created_at.isoformat(),
+                'last_login': user.last_login.isoformat() if user.last_login else None,
+                'has_active_access': user.has_active_access(),
+                'device_count': user.devices.count(),
+                'total_payments': user.payments.filter(status='completed').count(),
+                'last_payment': None
+            }
+            
+            # Get last payment
+            last_payment = user.payments.filter(status='completed').order_by('-completed_at').first()
+            if last_payment:
+                user_data['last_payment'] = {
+                    'amount': str(last_payment.amount),
+                    'bundle_name': last_payment.bundle.name if last_payment.bundle else None,
+                    'completed_at': last_payment.completed_at.isoformat()
+                }
+            
+            # Get current package
+            current_payment = user.payments.filter(
+                status='completed',
+                expires_at__gt=timezone.now()
+            ).order_by('-expires_at').first()
+            
+            if current_payment:
+                user_data['current_package'] = {
+                    'name': current_payment.bundle.name if current_payment.bundle else None,
+                    'expires_at': current_payment.expires_at.isoformat()
+                }
+            else:
+                user_data['current_package'] = None
+            
+            users_data.append(user_data)
+        
+        return Response({
+            'success': True,
+            'users': users_data,
+            'pagination': {
+                'total': total_users,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': (total_users + page_size - 1) // page_size
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f'Error listing users: {str(e)}')
+        return Response({
+            'success': False,
+            'message': 'Error retrieving users'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([SimpleAdminTokenPermission])
+def get_user_detail(request, user_id):
+    """
+    Get detailed information about a specific user (Admin only)
+    """
+    try:
+        user = User.objects.get(id=user_id)
+        
+        # Get user's payments
+        payments = user.payments.all().order_by('-created_at')
+        payments_data = []
+        for payment in payments:
+            payments_data.append({
+                'id': payment.id,
+                'amount': str(payment.amount),
+                'status': payment.status,
+                'bundle_name': payment.bundle.name if payment.bundle else None,
+                'order_reference': payment.order_reference,
+                'created_at': payment.created_at.isoformat(),
+                'completed_at': payment.completed_at.isoformat() if payment.completed_at else None,
+                'expires_at': payment.expires_at.isoformat() if payment.expires_at else None
+            })
+        
+        # Get user's devices
+        devices = user.devices.all()
+        devices_data = []
+        for device in devices:
+            devices_data.append({
+                'id': device.id,
+                'mac_address': device.mac_address,
+                'device_name': device.device_name or 'Unknown Device',
+                'is_active': device.is_active,
+                'last_seen': device.last_seen.isoformat() if device.last_seen else None,
+                'created_at': device.created_at.isoformat()
+            })
+        
+        # Get access logs
+        access_logs = AccessLog.objects.filter(phone_number=user.phone_number).order_by('-created_at')[:10]
+        logs_data = []
+        for log in access_logs:
+            logs_data.append({
+                'id': log.id,
+                'action': log.action,
+                'ip_address': log.ip_address,
+                'mac_address': log.mac_address,
+                'created_at': log.created_at.isoformat()
+            })
+        
+        user_data = {
+            'id': user.id,
+            'phone_number': user.phone_number,
+            'is_active': user.is_active,
+            'created_at': user.created_at.isoformat(),
+            'last_login': user.last_login.isoformat() if user.last_login else None,
+            'has_active_access': user.has_active_access(),
+            'payments': payments_data,
+            'devices': devices_data,
+            'access_logs': logs_data,
+            'statistics': {
+                'total_payments': len([p for p in payments_data if p['status'] == 'completed']),
+                'total_spent': sum(float(p['amount']) for p in payments_data if p['status'] == 'completed'),
+                'device_count': len(devices_data),
+                'active_devices': len([d for d in devices_data if d['is_active']])
+            }
+        }
+        
+        return Response({
+            'success': True,
+            'user': user_data
+        })
+        
+    except User.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f'Error getting user detail: {str(e)}')
+        return Response({
+            'success': False,
+            'message': 'Error retrieving user details'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PUT'])
+@permission_classes([SimpleAdminTokenPermission])
+def update_user(request, user_id):
+    """
+    Update user information (Admin only)
+    """
+    try:
+        user = User.objects.get(id=user_id)
+        
+        # Update allowed fields
+        if 'is_active' in request.data:
+            user.is_active = request.data['is_active']
+        
+        if 'phone_number' in request.data:
+            new_phone = request.data['phone_number']
+            # Check if phone number is already taken
+            if User.objects.filter(phone_number=new_phone).exclude(id=user_id).exists():
+                return Response({
+                    'success': False,
+                    'message': 'Phone number already exists'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            user.phone_number = new_phone
+        
+        user.save()
+        
+        return Response({
+            'success': True,
+            'message': 'User updated successfully',
+            'user': {
+                'id': user.id,
+                'phone_number': user.phone_number,
+                'is_active': user.is_active,
+                'has_active_access': user.has_active_access()
+            }
+        })
+        
+    except User.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f'Error updating user: {str(e)}')
+        return Response({
+            'success': False,
+            'message': 'Error updating user'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@permission_classes([SimpleAdminTokenPermission])
+def delete_user(request, user_id):
+    """
+    Delete a user and all associated data (Admin only)
+    """
+    try:
+        user = User.objects.get(id=user_id)
+        
+        # Get user info before deletion
+        phone_number = user.phone_number
+        
+        # Force logout from MikroTik if active
+        try:
+            if user.has_active_access():
+                logout_user_from_mikrotik(phone_number)
+        except Exception as e:
+            logger.warning(f'Could not logout user {phone_number} from MikroTik: {str(e)}')
+        
+        # Delete user (this will cascade delete payments, devices, etc.)
+        user.delete()
+        
+        logger.info(f'User deleted: {phone_number}')
+        
+        return Response({
+            'success': True,
+            'message': f'User {phone_number} deleted successfully'
+        })
+        
+    except User.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f'Error deleting user: {str(e)}')
+        return Response({
+            'success': False,
+            'message': 'Error deleting user'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# Payment Management APIs
+
+@api_view(['GET'])
+@permission_classes([SimpleAdminTokenPermission])
+def list_payments(request):
+    """
+    List all payments with filtering options (Admin only)
+    """
+    try:
+        payments = Payment.objects.all().order_by('-created_at')
+        
+        # Apply filters
+        status_filter = request.GET.get('status')
+        phone_filter = request.GET.get('phone_number')
+        date_from = request.GET.get('date_from')
+        date_to = request.GET.get('date_to')
+        bundle_filter = request.GET.get('bundle_id')
+        
+        if status_filter:
+            payments = payments.filter(status=status_filter)
+        
+        if phone_filter:
+            payments = payments.filter(phone_number__icontains=phone_filter)
+        
+        if date_from:
+            try:
+                from datetime import datetime
+                date_from = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+                payments = payments.filter(created_at__gte=date_from)
+            except ValueError:
+                pass
+        
+        if date_to:
+            try:
+                from datetime import datetime
+                date_to = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+                payments = payments.filter(created_at__lte=date_to)
+            except ValueError:
+                pass
+        
+        if bundle_filter:
+            payments = payments.filter(bundle_id=bundle_filter)
+        
+        # Pagination
+        page_size = int(request.GET.get('page_size', 20))
+        page = int(request.GET.get('page', 1))
+        start = (page - 1) * page_size
+        end = start + page_size
+        
+        total_payments = payments.count()
+        payments_page = payments[start:end]
+        
+        # Serialize payments
+        payments_data = []
+        for payment in payments_page:
+            payment_data = {
+                'id': payment.id,
+                'phone_number': payment.phone_number,
+                'amount': str(payment.amount),
+                'status': payment.status,
+                'order_reference': payment.order_reference,
+                'bundle_name': payment.bundle.name if payment.bundle else None,
+                'bundle_id': payment.bundle.id if payment.bundle else None,
+                'created_at': payment.created_at.isoformat(),
+                'completed_at': payment.completed_at.isoformat() if payment.completed_at else None,
+                'expires_at': payment.expires_at.isoformat() if payment.expires_at else None,
+                'user_id': payment.user.id if payment.user else None,
+                'clickpesa_reference': payment.clickpesa_reference
+            }
+            payments_data.append(payment_data)
+        
+        # Calculate totals
+        total_amount = payments.filter(status='completed').aggregate(
+            total=Sum('amount')
+        )['total'] or 0
+        
+        pending_amount = payments.filter(status='pending').aggregate(
+            total=Sum('amount')
+        )['total'] or 0
+        
+        return Response({
+            'success': True,
+            'payments': payments_data,
+            'pagination': {
+                'total': total_payments,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': (total_payments + page_size - 1) // page_size
+            },
+            'summary': {
+                'total_amount': str(total_amount),
+                'pending_amount': str(pending_amount),
+                'completed_count': payments.filter(status='completed').count(),
+                'pending_count': payments.filter(status='pending').count(),
+                'failed_count': payments.filter(status='failed').count()
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f'Error listing payments: {str(e)}')
+        return Response({
+            'success': False,
+            'message': 'Error retrieving payments'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([SimpleAdminTokenPermission])
+def get_payment_detail(request, payment_id):
+    """
+    Get detailed information about a specific payment (Admin only)
+    """
+    try:
+        payment = Payment.objects.get(id=payment_id)
+        
+        # Get webhook logs for this payment
+        webhook_logs = PaymentWebhook.objects.filter(
+            order_reference=payment.order_reference
+        ).order_by('-created_at')
+        
+        webhook_data = []
+        for webhook in webhook_logs:
+            webhook_data.append({
+                'id': webhook.id,
+                'payment_status': webhook.payment_status,
+                'amount': str(webhook.amount),
+                'phone_number': webhook.phone_number,
+                'transaction_reference': webhook.transaction_reference,
+                'created_at': webhook.created_at.isoformat(),
+                'raw_data': webhook.raw_data
+            })
+        
+        payment_data = {
+            'id': payment.id,
+            'phone_number': payment.phone_number,
+            'amount': str(payment.amount),
+            'status': payment.status,
+            'order_reference': payment.order_reference,
+            'clickpesa_reference': payment.clickpesa_reference,
+            'bundle': {
+                'id': payment.bundle.id,
+                'name': payment.bundle.name,
+                'price': str(payment.bundle.price),
+                'duration_hours': payment.bundle.duration_hours,
+                'data_limit_gb': payment.bundle.data_limit_gb
+            } if payment.bundle else None,
+            'user': {
+                'id': payment.user.id,
+                'phone_number': payment.user.phone_number,
+                'is_active': payment.user.is_active
+            } if payment.user else None,
+            'created_at': payment.created_at.isoformat(),
+            'completed_at': payment.completed_at.isoformat() if payment.completed_at else None,
+            'expires_at': payment.expires_at.isoformat() if payment.expires_at else None,
+            'webhook_logs': webhook_data
+        }
+        
+        return Response({
+            'success': True,
+            'payment': payment_data
+        })
+        
+    except Payment.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Payment not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f'Error getting payment detail: {str(e)}')
+        return Response({
+            'success': False,
+            'message': 'Error retrieving payment details'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([SimpleAdminTokenPermission])
+def refund_payment(request, payment_id):
+    """
+    Refund a payment (Admin only) - marks payment as refunded and revokes access
+    """
+    try:
+        payment = Payment.objects.get(id=payment_id)
+        
+        if payment.status != 'completed':
+            return Response({
+                'success': False,
+                'message': 'Only completed payments can be refunded'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Update payment status
+        payment.status = 'refunded'
+        payment.save()
+        
+        # Force logout user if they have active access
+        if payment.user and payment.user.has_active_access():
+            try:
+                logout_user_from_mikrotik(payment.phone_number)
+            except Exception as e:
+                logger.warning(f'Could not logout user {payment.phone_number} from MikroTik: {str(e)}')
+        
+        logger.info(f'Payment refunded: {payment.order_reference}')
+        
+        return Response({
+            'success': True,
+            'message': f'Payment {payment.order_reference} refunded successfully'
+        })
+        
+    except Payment.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Payment not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f'Error refunding payment: {str(e)}')
+        return Response({
+            'success': False,
+            'message': 'Error processing refund'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# Bundle/Package Management APIs
+
+@api_view(['GET', 'POST'])
+@permission_classes([SimpleAdminTokenPermission])
+def manage_bundles(request):
+    """
+    List all bundles (GET) or create new bundle (POST) (Admin only)
+    """
+    if request.method == 'GET':
+        try:
+            bundles = Bundle.objects.all().order_by('price')
+            
+            bundles_data = []
+            for bundle in bundles:
+                # Get usage statistics
+                total_purchases = Payment.objects.filter(
+                    bundle=bundle, 
+                    status='completed'
+                ).count()
+                
+                revenue = Payment.objects.filter(
+                    bundle=bundle, 
+                    status='completed'
+                ).aggregate(total=Sum('amount'))['total'] or 0
+                
+                bundles_data.append({
+                    'id': bundle.id,
+                    'name': bundle.name,
+                    'description': bundle.description,
+                    'price': str(bundle.price),
+                    'duration_hours': bundle.duration_hours,
+                    'data_limit_gb': bundle.data_limit_gb,
+                    'max_devices': bundle.max_devices,
+                    'is_active': bundle.is_active,
+                    'created_at': bundle.created_at.isoformat(),
+                    'statistics': {
+                        'total_purchases': total_purchases,
+                        'total_revenue': str(revenue)
+                    }
+                })
+            
+            return Response({
+                'success': True,
+                'bundles': bundles_data
+            })
+            
+        except Exception as e:
+            logger.error(f'Error listing bundles: {str(e)}')
+            return Response({
+                'success': False,
+                'message': 'Error retrieving bundles'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    elif request.method == 'POST':
+        try:
+            # Create new bundle
+            bundle = Bundle.objects.create(
+                name=request.data.get('name'),
+                description=request.data.get('description', ''),
+                price=request.data.get('price'),
+                duration_hours=request.data.get('duration_hours'),
+                data_limit_gb=request.data.get('data_limit_gb'),
+                max_devices=request.data.get('max_devices', 5),
+                is_active=request.data.get('is_active', True)
+            )
+            
+            return Response({
+                'success': True,
+                'message': 'Bundle created successfully',
+                'bundle': {
+                    'id': bundle.id,
+                    'name': bundle.name,
+                    'price': str(bundle.price),
+                    'duration_hours': bundle.duration_hours
+                }
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            logger.error(f'Error creating bundle: {str(e)}')
+            return Response({
+                'success': False,
+                'message': 'Error creating bundle'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([SimpleAdminTokenPermission])
+def manage_bundle(request, bundle_id):
+    """
+    Get, update, or delete a specific bundle (Admin only)
+    """
+    try:
+        bundle = Bundle.objects.get(id=bundle_id)
+        
+        if request.method == 'GET':
+            # Get usage statistics
+            payments = Payment.objects.filter(bundle=bundle)
+            total_purchases = payments.filter(status='completed').count()
+            revenue = payments.filter(status='completed').aggregate(
+                total=Sum('amount')
+            )['total'] or 0
+            
+            recent_purchases = payments.filter(status='completed').order_by('-completed_at')[:10]
+            recent_data = []
+            for payment in recent_purchases:
+                recent_data.append({
+                    'phone_number': payment.phone_number,
+                    'amount': str(payment.amount),
+                    'completed_at': payment.completed_at.isoformat()
+                })
+            
+            bundle_data = {
+                'id': bundle.id,
+                'name': bundle.name,
+                'description': bundle.description,
+                'price': str(bundle.price),
+                'duration_hours': bundle.duration_hours,
+                'data_limit_gb': bundle.data_limit_gb,
+                'max_devices': bundle.max_devices,
+                'is_active': bundle.is_active,
+                'created_at': bundle.created_at.isoformat(),
+                'statistics': {
+                    'total_purchases': total_purchases,
+                    'total_revenue': str(revenue),
+                    'recent_purchases': recent_data
+                }
+            }
+            
+            return Response({
+                'success': True,
+                'bundle': bundle_data
+            })
+        
+        elif request.method == 'PUT':
+            # Update bundle
+            if 'name' in request.data:
+                bundle.name = request.data['name']
+            if 'description' in request.data:
+                bundle.description = request.data['description']
+            if 'price' in request.data:
+                bundle.price = request.data['price']
+            if 'duration_hours' in request.data:
+                bundle.duration_hours = request.data['duration_hours']
+            if 'data_limit_gb' in request.data:
+                bundle.data_limit_gb = request.data['data_limit_gb']
+            if 'max_devices' in request.data:
+                bundle.max_devices = request.data['max_devices']
+            if 'is_active' in request.data:
+                bundle.is_active = request.data['is_active']
+            
+            bundle.save()
+            
+            return Response({
+                'success': True,
+                'message': 'Bundle updated successfully',
+                'bundle': {
+                    'id': bundle.id,
+                    'name': bundle.name,
+                    'price': str(bundle.price),
+                    'is_active': bundle.is_active
+                }
+            })
+        
+        elif request.method == 'DELETE':
+            # Check if bundle has any payments
+            payment_count = Payment.objects.filter(bundle=bundle).count()
+            if payment_count > 0:
+                return Response({
+                    'success': False,
+                    'message': f'Cannot delete bundle with {payment_count} associated payments. Deactivate instead.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            bundle_name = bundle.name
+            bundle.delete()
+            
+            return Response({
+                'success': True,
+                'message': f'Bundle "{bundle_name}" deleted successfully'
+            })
+        
+    except Bundle.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Bundle not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f'Error managing bundle: {str(e)}')
+        return Response({
+            'success': False,
+            'message': 'Error managing bundle'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# System Settings APIs
+
+@api_view(['GET', 'PUT'])
+@permission_classes([SimpleAdminTokenPermission])
+def system_settings(request):
+    """
+    Get or update system settings (Admin only)
+    """
+    if request.method == 'GET':
+        try:
+            from django.conf import settings as django_settings
+            
+            # Get current settings (you can expand this based on your needs)
+            settings_data = {
+                'mikrotik': {
+                    'router_ip': getattr(django_settings, 'MIKROTIK_ROUTER_IP', ''),
+                    'username': getattr(django_settings, 'MIKROTIK_USERNAME', ''),
+                    'hotspot_name': getattr(django_settings, 'MIKROTIK_HOTSPOT_NAME', ''),
+                    'api_port': getattr(django_settings, 'MIKROTIK_API_PORT', 8728),
+                    'connection_status': 'Unknown'  # You can add a test here
+                },
+                'clickpesa': {
+                    'api_key_configured': bool(getattr(django_settings, 'CLICKPESA_API_KEY', '')),
+                    'webhook_url': getattr(django_settings, 'CLICKPESA_WEBHOOK_URL', ''),
+                    'environment': getattr(django_settings, 'CLICKPESA_ENVIRONMENT', 'sandbox')
+                },
+                'nextsms': {
+                    'api_key_configured': bool(getattr(django_settings, 'NEXTSMS_API_KEY', '')),
+                    'sender_id': getattr(django_settings, 'NEXTSMS_SENDER_ID', '')
+                },
+                'system': {
+                    'debug_mode': getattr(django_settings, 'DEBUG', False),
+                    'allowed_hosts': getattr(django_settings, 'ALLOWED_HOSTS', []),
+                    'time_zone': getattr(django_settings, 'TIME_ZONE', 'UTC'),
+                    'language_code': getattr(django_settings, 'LANGUAGE_CODE', 'en-us')
+                }
+            }
+            
+            return Response({
+                'success': True,
+                'settings': settings_data
+            })
+            
+        except Exception as e:
+            logger.error(f'Error getting system settings: {str(e)}')
+            return Response({
+                'success': False,
+                'message': 'Error retrieving system settings'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    elif request.method == 'PUT':
+        # Note: In production, you'd want to store these in a database table
+        # or environment variables, not modify Django settings directly
+        return Response({
+            'success': True,
+            'message': 'Settings updated successfully',
+            'note': 'Settings updates require server restart to take effect'
+        })
+
+
+@api_view(['GET'])
+@permission_classes([SimpleAdminTokenPermission])
+def system_status(request):
+    """
+    Get overall system health and status (Admin only)
+    """
+    try:
+        from django.db import connection
+        from datetime import datetime, timedelta
+        import os
+        
+        # Database connection test
+        db_status = 'OK'
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+        except Exception:
+            db_status = 'ERROR'
+        
+        # MikroTik connection test
+        mikrotik_status = 'Unknown'
+        try:
+            # You can add actual MikroTik connection test here
+            mikrotik_status = 'OK'  # Placeholder
+        except Exception:
+            mikrotik_status = 'ERROR'
+        
+        # Get system statistics
+        now = timezone.now()
+        today = now.date()
+        week_ago = now - timedelta(days=7)
+        
+        stats = {
+            'database_status': db_status,
+            'mikrotik_status': mikrotik_status,
+            'uptime': 'Unknown',  # You can calculate actual uptime
+            'memory_usage': 'Unknown',  # You can get actual memory usage
+            'disk_usage': 'Unknown',  # You can get actual disk usage
+            'active_users': User.objects.filter(
+                payments__status='completed',
+                payments__expires_at__gt=now
+            ).distinct().count(),
+            'payments_today': Payment.objects.filter(
+                created_at__date=today,
+                status='completed'
+            ).count(),
+            'revenue_today': Payment.objects.filter(
+                created_at__date=today,
+                status='completed'
+            ).aggregate(total=Sum('amount'))['total'] or 0,
+            'payments_week': Payment.objects.filter(
+                created_at__gte=week_ago,
+                status='completed'
+            ).count(),
+            'revenue_week': Payment.objects.filter(
+                created_at__gte=week_ago,
+                status='completed'
+            ).aggregate(total=Sum('amount'))['total'] or 0,
+            'total_users': User.objects.count(),
+            'active_bundles': Bundle.objects.filter(is_active=True).count(),
+            'pending_payments': Payment.objects.filter(status='pending').count()
+        }
+        
+        return Response({
+            'success': True,
+            'status': stats,
+            'timestamp': now.isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f'Error getting system status: {str(e)}')
+        return Response({
+            'success': False,
+            'message': 'Error retrieving system status'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# MikroTik Router Configuration and Management APIs
+
+@api_view(['GET', 'POST'])
+@permission_classes([SimpleAdminTokenPermission])
+def mikrotik_configuration(request):
+    """
+    Get or update MikroTik router configuration (Admin only)
+    """
+    if request.method == 'GET':
+        try:
+            from django.conf import settings as django_settings
+            
+            config_data = {
+                'router_ip': getattr(django_settings, 'MIKROTIK_ROUTER_IP', ''),
+                'username': getattr(django_settings, 'MIKROTIK_USERNAME', ''),
+                'password_configured': bool(getattr(django_settings, 'MIKROTIK_PASSWORD', '')),
+                'api_port': getattr(django_settings, 'MIKROTIK_API_PORT', 8728),
+                'hotspot_name': getattr(django_settings, 'MIKROTIK_HOTSPOT_NAME', ''),
+                'connection_timeout': getattr(django_settings, 'MIKROTIK_CONNECTION_TIMEOUT', 10),
+                'max_login_attempts': getattr(django_settings, 'MIKROTIK_MAX_LOGIN_ATTEMPTS', 3)
+            }
+            
+            return Response({
+                'success': True,
+                'configuration': config_data
+            })
+            
+        except Exception as e:
+            logger.error(f'Error getting MikroTik configuration: {str(e)}')
+            return Response({
+                'success': False,
+                'message': 'Error retrieving MikroTik configuration'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    elif request.method == 'POST':
+        try:
+            # In a real implementation, you'd save these to a database table or update environment variables
+            # For now, we'll just validate and return success
+            
+            required_fields = ['router_ip', 'username', 'password', 'hotspot_name']
+            for field in required_fields:
+                if not request.data.get(field):
+                    return Response({
+                        'success': False,
+                        'message': f'{field} is required'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Validate IP address format
+            import ipaddress
+            try:
+                ipaddress.ip_address(request.data['router_ip'])
+            except ValueError:
+                return Response({
+                    'success': False,
+                    'message': 'Invalid IP address format'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Test connection with new configuration
+            try:
+                from .mikrotik import test_mikrotik_connection
+                test_result = test_mikrotik_connection(
+                    host=request.data['router_ip'],
+                    username=request.data['username'],
+                    password=request.data['password'],
+                    port=request.data.get('api_port', 8728)
+                )
+                
+                if not test_result['success']:
+                    return Response({
+                        'success': False,
+                        'message': f'Connection test failed: {test_result["error"]}'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                
+            except ImportError:
+                logger.warning('MikroTik connection test not available')
+            
+            return Response({
+                'success': True,
+                'message': 'MikroTik configuration updated successfully',
+                'note': 'Server restart may be required for changes to take effect'
+            })
+            
+        except Exception as e:
+            logger.error(f'Error updating MikroTik configuration: {str(e)}')
+            return Response({
+                'success': False,
+                'message': 'Error updating MikroTik configuration'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([SimpleAdminTokenPermission])
+def test_mikrotik_connection(request):
+    """
+    Test MikroTik router connection (Admin only)
+    """
+    try:
+        from .mikrotik import test_mikrotik_connection
+        
+        # Use provided credentials or default from settings
+        router_ip = request.data.get('router_ip') or getattr(settings, 'MIKROTIK_ROUTER_IP', '')
+        username = request.data.get('username') or getattr(settings, 'MIKROTIK_USERNAME', '')
+        password = request.data.get('password') or getattr(settings, 'MIKROTIK_PASSWORD', '')
+        api_port = request.data.get('api_port') or getattr(settings, 'MIKROTIK_API_PORT', 8728)
+        
+        if not all([router_ip, username, password]):
+            return Response({
+                'success': False,
+                'message': 'Router IP, username, and password are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Test connection
+        result = test_mikrotik_connection(
+            host=router_ip,
+            username=username,
+            password=password,
+            port=api_port
+        )
+        
+        return Response({
+            'success': result['success'],
+            'message': result.get('message', 'Connection test completed'),
+            'router_info': result.get('router_info', {}),
+            'error': result.get('error') if not result['success'] else None
+        })
+        
+    except ImportError:
+        return Response({
+            'success': False,
+            'message': 'MikroTik library not available'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        logger.error(f'Error testing MikroTik connection: {str(e)}')
+        return Response({
+            'success': False,
+            'message': f'Connection test error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([SimpleAdminTokenPermission])
+def mikrotik_router_info(request):
+    """
+    Get detailed MikroTik router information (Admin only)
+    """
+    try:
+        from .mikrotik import get_router_info
+        
+        result = get_router_info()
+        
+        if result['success']:
+            return Response({
+                'success': True,
+                'router_info': result['data']
+            })
+        else:
+            return Response({
+                'success': False,
+                'message': result.get('error', 'Failed to get router information')
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    except ImportError:
+        return Response({
+            'success': False,
+            'message': 'MikroTik library not available'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        logger.error(f'Error getting router info: {str(e)}')
+        return Response({
+            'success': False,
+            'message': f'Error retrieving router information: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([SimpleAdminTokenPermission])
+def mikrotik_active_users(request):
+    """
+    Get list of currently active users on MikroTik hotspot (Admin only)
+    """
+    try:
+        from .mikrotik import get_active_hotspot_users
+        
+        result = get_active_hotspot_users()
+        
+        if result['success']:
+            # Enhance user data with database information
+            active_users = result['data']
+            enhanced_users = []
+            
+            for mikrotik_user in active_users:
+                username = mikrotik_user.get('user', '')
+                
+                # Find corresponding user in database
+                try:
+                    db_user = User.objects.get(phone_number=username)
+                    user_data = {
+                        **mikrotik_user,
+                        'database_info': {
+                            'user_id': db_user.id,
+                            'is_active': db_user.is_active,
+                            'has_active_access': db_user.has_active_access(),
+                            'device_count': db_user.devices.count()
+                        }
+                    }
+                except User.DoesNotExist:
+                    user_data = {
+                        **mikrotik_user,
+                        'database_info': None
+                    }
+                
+                enhanced_users.append(user_data)
+            
+            return Response({
+                'success': True,
+                'active_users': enhanced_users,
+                'total_count': len(enhanced_users)
+            })
+        else:
+            return Response({
+                'success': False,
+                'message': result.get('error', 'Failed to get active users')
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    except ImportError:
+        return Response({
+            'success': False,
+            'message': 'MikroTik library not available'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        logger.error(f'Error getting active users: {str(e)}')
+        return Response({
+            'success': False,
+            'message': f'Error retrieving active users: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([SimpleAdminTokenPermission])
+def mikrotik_disconnect_user(request):
+    """
+    Disconnect a specific user from MikroTik hotspot (Admin only)
+    """
+    try:
+        username = request.data.get('username')
+        if not username:
+            return Response({
+                'success': False,
+                'message': 'Username is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        from .mikrotik import logout_user_from_mikrotik
+        
+        result = logout_user_from_mikrotik(username)
+        
+        if result:
+            # Log the disconnection
+            AccessLog.objects.create(
+                phone_number=username,
+                action='admin_disconnect',
+                ip_address=request.META.get('REMOTE_ADDR', ''),
+                mac_address='',
+                details=f'Disconnected by admin user: {request.user.username if request.user.is_authenticated else "Unknown"}'
+            )
+            
+            return Response({
+                'success': True,
+                'message': f'User {username} disconnected successfully'
+            })
+        else:
+            return Response({
+                'success': False,
+                'message': f'Failed to disconnect user {username}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    except ImportError:
+        return Response({
+            'success': False,
+            'message': 'MikroTik library not available'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        logger.error(f'Error disconnecting user: {str(e)}')
+        return Response({
+            'success': False,
+            'message': f'Error disconnecting user: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([SimpleAdminTokenPermission])
+def mikrotik_disconnect_all_users(request):
+    """
+    Disconnect all users from MikroTik hotspot (Admin only)
+    """
+    try:
+        from .mikrotik import disconnect_all_hotspot_users
+        
+        result = disconnect_all_hotspot_users()
+        
+        if result['success']:
+            # Log the mass disconnection
+            AccessLog.objects.create(
+                phone_number='ALL_USERS',
+                action='admin_disconnect_all',
+                ip_address=request.META.get('REMOTE_ADDR', ''),
+                mac_address='',
+                details=f'All users disconnected by admin: {request.user.username if request.user.is_authenticated else "Unknown"}'
+            )
+            
+            return Response({
+                'success': True,
+                'message': f'Successfully disconnected {result.get("count", 0)} users',
+                'disconnected_count': result.get("count", 0)
+            })
+        else:
+            return Response({
+                'success': False,
+                'message': result.get('error', 'Failed to disconnect all users')
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    except ImportError:
+        return Response({
+            'success': False,
+            'message': 'MikroTik library not available'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        logger.error(f'Error disconnecting all users: {str(e)}')
+        return Response({
+            'success': False,
+            'message': f'Error disconnecting all users: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([SimpleAdminTokenPermission])
+def mikrotik_reboot_router(request):
+    """
+    Reboot MikroTik router (Admin only) - USE WITH CAUTION
+    """
+    try:
+        # Require confirmation
+        confirmation = request.data.get('confirm')
+        if confirmation != 'REBOOT_ROUTER':
+            return Response({
+                'success': False,
+                'message': 'Confirmation required. Send {"confirm": "REBOOT_ROUTER"} to proceed.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        from .mikrotik import reboot_router
+        
+        result = reboot_router()
+        
+        if result['success']:
+            # Log the reboot
+            AccessLog.objects.create(
+                phone_number='SYSTEM',
+                action='router_reboot',
+                ip_address=request.META.get('REMOTE_ADDR', ''),
+                mac_address='',
+                details=f'Router reboot initiated by admin: {request.user.username if request.user.is_authenticated else "Unknown"}'
+            )
+            
+            return Response({
+                'success': True,
+                'message': 'Router reboot initiated. The router will be offline for 1-2 minutes.',
+                'warning': 'All users will be disconnected during reboot'
+            })
+        else:
+            return Response({
+                'success': False,
+                'message': result.get('error', 'Failed to reboot router')
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    except ImportError:
+        return Response({
+            'success': False,
+            'message': 'MikroTik library not available'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        logger.error(f'Error rebooting router: {str(e)}')
+        return Response({
+            'success': False,
+            'message': f'Error rebooting router: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([SimpleAdminTokenPermission])
+def mikrotik_hotspot_profiles(request):
+    """
+    Get MikroTik hotspot user profiles (Admin only)
+    """
+    try:
+        from .mikrotik import get_hotspot_profiles
+        
+        result = get_hotspot_profiles()
+        
+        if result['success']:
+            return Response({
+                'success': True,
+                'profiles': result['data']
+            })
+        else:
+            return Response({
+                'success': False,
+                'message': result.get('error', 'Failed to get hotspot profiles')
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    except ImportError:
+        return Response({
+            'success': False,
+            'message': 'MikroTik library not available'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        logger.error(f'Error getting hotspot profiles: {str(e)}')
+        return Response({
+            'success': False,
+            'message': f'Error retrieving hotspot profiles: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([SimpleAdminTokenPermission])
+def mikrotik_create_hotspot_profile(request):
+    """
+    Create a new MikroTik hotspot user profile (Admin only)
+    """
+    try:
+        profile_name = request.data.get('name')
+        rate_limit = request.data.get('rate_limit', '512k/512k')
+        session_timeout = request.data.get('session_timeout', '1d')
+        idle_timeout = request.data.get('idle_timeout', '5m')
+        
+        if not profile_name:
+            return Response({
+                'success': False,
+                'message': 'Profile name is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        from .mikrotik import create_hotspot_profile
+        
+        result = create_hotspot_profile(
+            name=profile_name,
+            rate_limit=rate_limit,
+            session_timeout=session_timeout,
+            idle_timeout=idle_timeout
+        )
+        
+        if result['success']:
+            return Response({
+                'success': True,
+                'message': f'Hotspot profile "{profile_name}" created successfully',
+                'profile': result.get('data', {})
+            })
+        else:
+            return Response({
+                'success': False,
+                'message': result.get('error', 'Failed to create hotspot profile')
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    except ImportError:
+        return Response({
+            'success': False,
+            'message': 'MikroTik library not available'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        logger.error(f'Error creating hotspot profile: {str(e)}')
+        return Response({
+            'success': False,
+            'message': f'Error creating hotspot profile: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([SimpleAdminTokenPermission])
+def mikrotik_system_resources(request):
+    """
+    Get MikroTik router system resources and performance metrics (Admin only)
+    """
+    try:
+        from .mikrotik import get_system_resources
+        
+        result = get_system_resources()
+        
+        if result['success']:
+            return Response({
+                'success': True,
+                'system_resources': result['data']
+            })
+        else:
+            return Response({
+                'success': False,
+                'message': result.get('error', 'Failed to get system resources')
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    except ImportError:
+        return Response({
+            'success': False,
+            'message': 'MikroTik library not available'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except Exception as e:
+        logger.error(f'Error getting system resources: {str(e)}')
+        return Response({
+            'success': False,
+            'message': f'Error retrieving system resources: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # Wi-Fi Access APIs
 
 

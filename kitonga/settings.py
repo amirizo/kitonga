@@ -199,6 +199,10 @@ REST_FRAMEWORK = {
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='https://kitonga.klikcell.com,https://api.kitonga.klikcell.com', cast=Csv())
 
+CSRF_TRUSTED_ORIGINS = [
+    "https://kitonga.klikcell.com",
+]
+
 # Allow specific headers for CORS
 CORS_ALLOW_HEADERS = [
     'accept',
