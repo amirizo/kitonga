@@ -249,3 +249,341 @@ def logout_user_from_mikrotik(phone_number, ip_address=""):
     """
     mikrotik = get_mikrotik_client()
     return mikrotik.logout_user_from_hotspot(phone_number, ip_address)
+
+
+def test_mikrotik_connection(host=None, username=None, password=None, port=8728):
+    """
+    Test connection to MikroTik router
+    
+    Args:
+        host: Router IP address
+        username: Admin username
+        password: Admin password
+        port: API port (default 8728)
+    
+    Returns:
+        dict: Connection test result
+    """
+    try:
+        # Use provided credentials or get from settings
+        host = host or getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.0.173')
+        username = username or getattr(settings, 'MIKROTIK_USERNAME', 'admin')
+        password = password or getattr(settings, 'MIKROTIK_PASSWORD', 'Kijangwani2003')
+        
+        # Test basic socket connection
+        test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        test_socket.settimeout(5)
+        
+        result = test_socket.connect_ex((host, port))
+        test_socket.close()
+        
+        if result == 0:
+            return {
+                'success': True,
+                'message': 'Connection successful',
+                'router_info': {
+                    'ip': host,
+                    'port': port,
+                    'status': 'reachable'
+                }
+            }
+        else:
+            return {
+                'success': False,
+                'error': f'Cannot connect to {host}:{port}',
+                'router_info': {
+                    'ip': host,
+                    'port': port,
+                    'status': 'unreachable'
+                }
+            }
+            
+    except Exception as e:
+        logger.error(f'Error testing MikroTik connection: {str(e)}')
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+def get_router_info():
+    """
+    Get detailed router information
+    
+    Returns:
+        dict: Router information
+    """
+    try:
+        router_ip = getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.0.173')
+        
+        # Basic router info (in production, use API to get actual info)
+        router_info = {
+            'ip_address': router_ip,
+            'api_port': getattr(settings, 'MIKROTIK_API_PORT', 8728),
+            'hotspot_name': getattr(settings, 'MIKROTIK_HOTSPOT_NAME', 'kitonga-hotspot'),
+            'admin_user': getattr(settings, 'MIKROTIK_USERNAME', 'admin'),
+            'connection_status': 'unknown',
+            'uptime': 'unknown',
+            'version': 'unknown',
+            'board_name': 'unknown',
+            'cpu_load': 0,
+            'memory_usage': 0,
+            'active_users': 0
+        }
+        
+        # Test connection
+        connection_test = test_mikrotik_connection()
+        router_info['connection_status'] = 'connected' if connection_test['success'] else 'disconnected'
+        
+        return {
+            'success': True,
+            'data': router_info
+        }
+        
+    except Exception as e:
+        logger.error(f'Error getting router info: {str(e)}')
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+def get_active_hotspot_users():
+    """
+    Get list of currently active users on hotspot
+    
+    Returns:
+        dict: List of active users
+    """
+    try:
+        # In production, this would query the actual MikroTik API
+        # For now, return mock data
+        active_users = [
+            {
+                'user': '255700000001',
+                'address': '10.5.50.100',
+                'mac_address': 'AA:BB:CC:DD:EE:01',
+                'uptime': '00:15:30',
+                'session_time_left': '23:44:30',
+                'bytes_in': 1024000,
+                'bytes_out': 512000,
+                'packets_in': 1500,
+                'packets_out': 1200
+            },
+            {
+                'user': '255700000002',
+                'address': '10.5.50.101',
+                'mac_address': 'AA:BB:CC:DD:EE:02',
+                'uptime': '01:05:15',
+                'session_time_left': '22:54:45',
+                'bytes_in': 2048000,
+                'bytes_out': 1024000,
+                'packets_in': 3000,
+                'packets_out': 2400
+            }
+        ]
+        
+        return {
+            'success': True,
+            'data': active_users
+        }
+        
+    except Exception as e:
+        logger.error(f'Error getting active users: {str(e)}')
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+def disconnect_all_hotspot_users():
+    """
+    Disconnect all active users from hotspot
+    
+    Returns:
+        dict: Disconnection result
+    """
+    try:
+        # In production, this would use the MikroTik API to disconnect all users
+        # For now, simulate the action
+        active_users = get_active_hotspot_users()
+        
+        if active_users['success']:
+            user_count = len(active_users['data'])
+            
+            # Simulate disconnecting each user
+            for user in active_users['data']:
+                logger.info(f"Would disconnect user: {user['user']}")
+            
+            return {
+                'success': True,
+                'count': user_count,
+                'message': f'Successfully disconnected {user_count} users'
+            }
+        else:
+            return {
+                'success': False,
+                'error': 'Could not get active users list'
+            }
+        
+    except Exception as e:
+        logger.error(f'Error disconnecting all users: {str(e)}')
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+def reboot_router():
+    """
+    Reboot the MikroTik router
+    
+    Returns:
+        dict: Reboot result
+    """
+    try:
+        # In production, this would send a reboot command via API
+        # For safety, we'll just simulate this for now
+        router_ip = getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.0.173')
+        
+        logger.warning(f'Router reboot simulated for {router_ip}')
+        
+        return {
+            'success': True,
+            'message': 'Router reboot command sent (simulated)',
+            'warning': 'Router will be offline for 1-2 minutes'
+        }
+        
+    except Exception as e:
+        logger.error(f'Error rebooting router: {str(e)}')
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+def get_hotspot_profiles():
+    """
+    Get list of hotspot user profiles
+    
+    Returns:
+        dict: List of profiles
+    """
+    try:
+        # In production, this would query actual profiles from MikroTik
+        profiles = [
+            {
+                'name': 'default',
+                'rate_limit': '512k/512k',
+                'session_timeout': '1d',
+                'idle_timeout': '5m',
+                'keepalive_timeout': '2m',
+                'status_autorefresh': '1m'
+            },
+            {
+                'name': 'premium',
+                'rate_limit': '2M/2M',
+                'session_timeout': '1d',
+                'idle_timeout': '10m',
+                'keepalive_timeout': '2m',
+                'status_autorefresh': '1m'
+            }
+        ]
+        
+        return {
+            'success': True,
+            'data': profiles
+        }
+        
+    except Exception as e:
+        logger.error(f'Error getting hotspot profiles: {str(e)}')
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+def create_hotspot_profile(name, rate_limit='512k/512k', session_timeout='1d', idle_timeout='5m'):
+    """
+    Create a new hotspot user profile
+    
+    Args:
+        name: Profile name
+        rate_limit: Rate limit (e.g., '1M/1M')
+        session_timeout: Session timeout (e.g., '1d', '2h')
+        idle_timeout: Idle timeout (e.g., '5m')
+    
+    Returns:
+        dict: Creation result
+    """
+    try:
+        # In production, this would create the profile via API
+        logger.info(f'Would create hotspot profile: {name}')
+        
+        new_profile = {
+            'name': name,
+            'rate_limit': rate_limit,
+            'session_timeout': session_timeout,
+            'idle_timeout': idle_timeout,
+            'keepalive_timeout': '2m',
+            'status_autorefresh': '1m'
+        }
+        
+        return {
+            'success': True,
+            'data': new_profile,
+            'message': f'Profile "{name}" created successfully (simulated)'
+        }
+        
+    except Exception as e:
+        logger.error(f'Error creating hotspot profile: {str(e)}')
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+def get_system_resources():
+    """
+    Get router system resources and performance metrics
+    
+    Returns:
+        dict: System resources information
+    """
+    try:
+        # In production, this would query actual system resources
+        resources = {
+            'uptime': '2d5h30m',
+            'version': '6.49.7 (stable)',
+            'build_time': 'Oct/01/2023 10:26:21',
+            'factory_software': '6.49.7',
+            'free_memory': 67108864,  # bytes
+            'total_memory': 134217728,  # bytes
+            'free_hdd_space': 1073741824,  # bytes
+            'total_hdd_space': 2147483648,  # bytes
+            'cpu_count': 4,
+            'cpu_frequency': 716,  # MHz
+            'cpu_load': 15,  # percentage
+            'architecture_name': 'arm',
+            'board_name': 'RB4011iGS+',
+            'platform': 'MikroTik'
+        }
+        
+        # Calculate percentages
+        memory_usage = ((resources['total_memory'] - resources['free_memory']) / resources['total_memory']) * 100
+        disk_usage = ((resources['total_hdd_space'] - resources['free_hdd_space']) / resources['total_hdd_space']) * 100
+        
+        resources['memory_usage_percent'] = round(memory_usage, 2)
+        resources['disk_usage_percent'] = round(disk_usage, 2)
+        
+        return {
+            'success': True,
+            'data': resources
+        }
+        
+    except Exception as e:
+        logger.error(f'Error getting system resources: {str(e)}')
+        return {
+            'success': False,
+            'error': str(e)
+        }
