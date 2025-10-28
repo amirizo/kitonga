@@ -1,0 +1,394 @@
+{
+  "kitonga_wifi_api_guide": {
+    "base_url": "https://api.kitonga.klikcell.com",
+    "local_dev_url": "http://127.0.0.1:8000",
+    "authentication": {
+      "description": "Most endpoints require admin authentication token",
+      "header": "Authorization: Bearer YOUR_ADMIN_TOKEN",
+      "token_from_env": "SIMPLE_ADMIN_TOKEN"
+    },
+    "endpoints": {
+      "health_check": {
+        "method": "GET",
+        "url": "/health/",
+        "description": "System health check",
+        "authentication": "None",
+        "curl_example": "curl -X GET https://api.kitonga.klikcell.com/health/",
+        "response_example": {
+          "status": "healthy",
+          "timestamp": "2025-10-27T16:13:04Z",
+          "database": "connected",
+          "version": "1.0.0"
+        }
+      },
+      "admin_login": {
+        "method": "POST",
+        "url": "/auth/login/",
+        "description": "Admin login to get authentication token",
+        "authentication": "None",
+        "request_body": {
+          "username": "admin",
+          "password": "your_admin_password"
+        },
+        "curl_example": "curl -X POST https://api.kitonga.klikcell.com/auth/login/ -H \"Content-Type: application/json\" -d '{\"username\":\"admin\",\"password\":\"your_password\"}'",
+        "response_example": {
+          "success": true,
+          "token": "your-admin-token-here",
+          "user": {
+            "id": 1,
+            "username": "admin",
+            "email": "admin@kitonga.com"
+          },
+          "message": "Login successful"
+        }
+      },
+      "admin_logout": {
+        "method": "POST",
+        "url": "/auth/logout/",
+        "description": "Admin logout",
+        "authentication": "Required",
+        "curl_example": "curl -X POST https://api.kitonga.klikcell.com/auth/logout/ -H \"Authorization: Bearer YOUR_TOKEN\"",
+        "response_example": {
+          "success": true,
+          "message": "Logout successful"
+        }
+      },
+      "admin_profile": {
+        "method": "GET",
+        "url": "/auth/profile/",
+        "description": "Get admin profile information",
+        "authentication": "Required",
+        "curl_example": "curl -X GET https://api.kitonga.klikcell.com/auth/profile/ -H \"Authorization: Bearer YOUR_TOKEN\"",
+        "response_example": {
+          "id": 1,
+          "username": "admin",
+          "email": "admin@kitonga.com",
+          "first_name": "Admin",
+          "last_name": "User",
+          "is_staff": true,
+          "date_joined": "2025-01-01T00:00:00Z"
+        }
+      },
+      "verify_access": {
+        "method": "POST",
+        "url": "/verify/",
+        "description": "Verify user Wi-Fi access",
+        "authentication": "None",
+        "request_body": {
+          "phone_number": "255700000000",
+          "mac_address": "AA:BB:CC:DD:EE:FF",
+          "ip_address": "192.168.88.100"
+        },
+        "curl_example": "curl -X POST https://api.kitonga.klikcell.com/verify/ -H \"Content-Type: application/json\" -d '{\"phone_number\":\"255700000000\",\"mac_address\":\"AA:BB:CC:DD:EE:FF\",\"ip_address\":\"192.168.88.100\"}'",
+        "response_example": {
+          "has_access": true,
+          "user": {
+            "phone_number": "255700000000",
+            "subscription_end": "2025-10-28T16:00:00Z",
+            "devices_count": 1,
+            "max_devices": 1
+          },
+          "message": "Access granted"
+        }
+      },
+      "user_status": {
+        "method": "GET",
+        "url": "/user-status/{phone_number}/",
+        "description": "Get user status information",
+        "authentication": "None",
+        "example_url": "/user-status/255700000000/",
+        "curl_example": "curl -X GET https://api.kitonga.klikcell.com/user-status/255700000000/",
+        "response_example": {
+          "user": {
+            "phone_number": "255700000000",
+            "subscription_end": "2025-10-28T16:00:00Z",
+            "is_active": true,
+            "devices_count": 1,
+            "max_devices": 1,
+            "total_payments": 5000
+          },
+          "has_access": true,
+          "time_remaining": "23 hours, 45 minutes"
+        }
+      },
+      "list_bundles": {
+        "method": "GET",
+        "url": "/bundles/",
+        "description": "Get available Wi-Fi bundles",
+        "authentication": "None",
+        "curl_example": "curl -X GET https://api.kitonga.klikcell.com/bundles/",
+        "response_example": [
+          {
+            "id": 1,
+            "name": "Daily Access",
+            "price": 1000,
+            "duration_hours": 24,
+            "description": "24-hour Wi-Fi access",
+            "is_active": true
+          }
+        ]
+      },
+      "initiate_payment": {
+        "method": "POST",
+        "url": "/initiate-payment/",
+        "description": "Initiate ClickPesa payment",
+        "authentication": "None",
+        "request_body": {
+          "phone_number": "255700000000",
+          "bundle_id": 1,
+          "mac_address": "AA:BB:CC:DD:EE:FF"
+        },
+        "curl_example": "curl -X POST https://api.kitonga.klikcell.com/initiate-payment/ -H \"Content-Type: application/json\" -d '{\"phone_number\":\"255700000000\",\"bundle_id\":1,\"mac_address\":\"AA:BB:CC:DD:EE:FF\"}'",
+        "response_example": {
+          "success": true,
+          "payment_reference": "PAY-12345-67890",
+          "order_reference": "ORD-12345-67890",
+          "amount": 1000,
+          "phone_number": "255700000000",
+          "redirect_url": "https://checkout.clickpesa.com/...",
+          "message": "Payment initiated successfully"
+        }
+      },
+      "payment_status": {
+        "method": "GET",
+        "url": "/payment-status/{order_reference}/",
+        "description": "Check payment status",
+        "authentication": "None",
+        "example_url": "/payment-status/ORD-12345-67890/",
+        "curl_example": "curl -X GET https://api.kitonga.klikcell.com/payment-status/ORD-12345-67890/",
+        "response_example": {
+          "payment_status": "COMPLETED",
+          "order_reference": "ORD-12345-67890",
+          "amount": 1000,
+          "phone_number": "255700000000",
+          "payment_date": "2025-10-27T16:00:00Z",
+          "access_granted": true,
+          "subscription_end": "2025-10-28T16:00:00Z"
+        }
+      },
+      "list_user_devices": {
+        "method": "GET",
+        "url": "/devices/{phone_number}/",
+        "description": "List user's registered devices",
+        "authentication": "None",
+        "example_url": "/devices/255700000000/",
+        "curl_example": "curl -X GET https://api.kitonga.klikcell.com/devices/255700000000/",
+        "response_example": [
+          {
+            "id": 1,
+            "mac_address": "AA:BB:CC:DD:EE:FF",
+            "device_name": "iPhone",
+            "ip_address": "192.168.88.100",
+            "first_connected": "2025-10-27T10:00:00Z",
+            "last_seen": "2025-10-27T16:00:00Z",
+            "is_active": true
+          }
+        ]
+      },
+      "remove_device": {
+        "method": "POST",
+        "url": "/devices/remove/",
+        "description": "Remove device from user account",
+        "authentication": "None",
+        "request_body": {
+          "phone_number": "255700000000",
+          "mac_address": "AA:BB:CC:DD:EE:FF"
+        },
+        "curl_example": "curl -X POST https://api.kitonga.klikcell.com/devices/remove/ -H \"Content-Type: application/json\" -d '{\"phone_number\":\"255700000000\",\"mac_address\":\"AA:BB:CC:DD:EE:FF\"}'",
+        "response_example": {
+          "success": true,
+          "message": "Device removed successfully",
+          "devices_remaining": 0
+        }
+      },
+      "generate_vouchers": {
+        "method": "POST",
+        "url": "/vouchers/generate/",
+        "description": "Generate vouchers (Admin only)",
+        "authentication": "Required",
+        "request_body": {
+          "bundle_id": 1,
+          "quantity": 10,
+          "expiry_days": 30
+        },
+        "curl_example": "curl -X POST https://api.kitonga.klikcell.com/vouchers/generate/ -H \"Authorization: Bearer YOUR_TOKEN\" -H \"Content-Type: application/json\" -d '{\"bundle_id\":1,\"quantity\":10,\"expiry_days\":30}'",
+        "response_example": {
+          "success": true,
+          "vouchers_generated": 10,
+          "vouchers": [
+            {
+              "code": "KITONGA-12345",
+              "bundle": "Daily Access",
+              "expires_at": "2025-11-26T16:00:00Z"
+            }
+          ]
+        }
+      },
+      "redeem_voucher": {
+        "method": "POST",
+        "url": "/vouchers/redeem/",
+        "description": "Redeem voucher code",
+        "authentication": "None",
+        "request_body": {
+          "phone_number": "255700000000",
+          "voucher_code": "KITONGA-12345",
+          "mac_address": "AA:BB:CC:DD:EE:FF"
+        },
+        "curl_example": "curl -X POST https://api.kitonga.klikcell.com/vouchers/redeem/ -H \"Content-Type: application/json\" -d '{\"phone_number\":\"255700000000\",\"voucher_code\":\"KITONGA-12345\",\"mac_address\":\"AA:BB:CC:DD:EE:FF\"}'",
+        "response_example": {
+          "success": true,
+          "message": "Voucher redeemed successfully",
+          "access_granted": true,
+          "subscription_end": "2025-10-28T16:00:00Z",
+          "bundle": {
+            "name": "Daily Access",
+            "duration_hours": 24
+          }
+        }
+      },
+      "list_vouchers": {
+        "method": "GET",
+        "url": "/vouchers/list/",
+        "description": "List all vouchers (Admin only)",
+        "authentication": "Required",
+        "curl_example": "curl -X GET https://api.kitonga.klikcell.com/vouchers/list/ -H \"Authorization: Bearer YOUR_TOKEN\"",
+        "response_example": [
+          {
+            "id": 1,
+            "code": "KITONGA-12345",
+            "bundle": "Daily Access",
+            "is_used": false,
+            "created_at": "2025-10-27T10:00:00Z",
+            "expires_at": "2025-11-26T16:00:00Z",
+            "used_by": null,
+            "used_at": null
+          }
+        ]
+      },
+      "mikrotik_auth": {
+        "method": "POST",
+        "url": "/mikrotik/auth/",
+        "description": "Authenticate user with MikroTik hotspot",
+        "authentication": "None",
+        "request_body": {
+          "phone_number": "255700000000",
+          "mac_address": "AA:BB:CC:DD:EE:FF",
+          "ip_address": "192.168.88.100"
+        },
+        "curl_example": "curl -X POST https://api.kitonga.klikcell.com/mikrotik/auth/ -H \"Content-Type: application/json\" -d '{\"phone_number\":\"255700000000\",\"mac_address\":\"AA:BB:CC:DD:EE:FF\",\"ip_address\":\"192.168.88.100\"}'",
+        "response_example": {
+          "success": true,
+          "authenticated": true,
+          "message": "User authenticated successfully",
+          "mikrotik_response": "External authentication successful"
+        }
+      },
+      "mikrotik_logout": {
+        "method": "POST",
+        "url": "/mikrotik/logout/",
+        "description": "Logout user from MikroTik hotspot",
+        "authentication": "None",
+        "request_body": {
+          "phone_number": "255700000000",
+          "ip_address": "192.168.88.100"
+        },
+        "curl_example": "curl -X POST https://api.kitonga.klikcell.com/mikrotik/logout/ -H \"Content-Type: application/json\" -d '{\"phone_number\":\"255700000000\",\"ip_address\":\"192.168.88.100\"}'",
+        "response_example": {
+          "success": true,
+          "message": "User logged out successfully"
+        }
+      },
+      "mikrotik_status": {
+        "method": "GET",
+        "url": "/mikrotik/status/",
+        "description": "Check MikroTik router status (Admin only)",
+        "authentication": "Required",
+        "curl_example": "curl -X GET https://api.kitonga.klikcell.com/mikrotik/status/ -H \"Authorization: Bearer YOUR_TOKEN\"",
+        "response_example": {
+          "success": true,
+          "router_ip": "192.168.0.173",
+          "connection_status": "connected",
+          "hotspot_name": "kitonga-hotspot",
+          "active_users": 5
+        }
+      },
+      "dashboard_stats": {
+        "method": "GET",
+        "url": "/dashboard-stats/",
+        "description": "Get dashboard statistics (Admin only)",
+        "authentication": "Required",
+        "curl_example": "curl -X GET https://api.kitonga.klikcell.com/dashboard-stats/ -H \"Authorization: Bearer YOUR_TOKEN\"",
+        "response_example": {
+          "total_users": 150,
+          "active_users": 25,
+          "total_payments": 75000,
+          "today_revenue": 15000,
+          "pending_payments": 3,
+          "vouchers_available": 20,
+          "recent_payments": [
+            {
+              "phone_number": "255700000000",
+              "amount": 1000,
+              "date": "2025-10-27T15:30:00Z",
+              "status": "COMPLETED"
+            }
+          ]
+        }
+      },
+      "webhook_logs": {
+        "method": "GET",
+        "url": "/webhook-logs/",
+        "description": "Get payment webhook logs (Admin only)",
+        "authentication": "Required",
+        "curl_example": "curl -X GET https://api.kitonga.klikcell.com/webhook-logs/ -H \"Authorization: Bearer YOUR_TOKEN\"",
+        "response_example": [
+          {
+            "id": 1,
+            "payment_reference": "PAY-12345-67890",
+            "payment_status": "COMPLETED",
+            "amount": 1000,
+            "phone_number": "255700000000",
+            "webhook_data": {},
+            "processed_at": "2025-10-27T16:00:00Z"
+          }
+        ]
+      },
+      "force_logout": {
+        "method": "POST",
+        "url": "/force-logout/",
+        "description": "Force logout user (Admin only)",
+        "authentication": "Required",
+        "request_body": {
+          "phone_number": "255700000000"
+        },
+        "curl_example": "curl -X POST https://api.kitonga.klikcell.com/force-logout/ -H \"Authorization: Bearer YOUR_TOKEN\" -H \"Content-Type: application/json\" -d '{\"phone_number\":\"255700000000\"}'",
+        "response_example": {
+          "success": true,
+          "message": "User logged out successfully",
+          "mikrotik_response": "Logout successful"
+        }
+      }
+    },
+    "error_responses": {
+      "validation_error": {
+        "error": "Validation failed",
+        "details": {
+          "phone_number": ["This field is required."]
+        }
+      },
+      "authentication_error": {
+        "error": "Authentication required",
+        "message": "Invalid or missing authentication token"
+      },
+      "not_found": {
+        "error": "Not found",
+        "message": "The requested resource was not found"
+      },
+      "payment_error": {
+        "error": "Payment failed",
+        "message": "Payment could not be processed",
+        "code": "PAYMENT_FAILED"
+      }
+    }
+  }
+}
