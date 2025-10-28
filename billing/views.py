@@ -894,8 +894,7 @@ def manage_bundles(request):
                 description=request.data.get('description', ''),
                 price=request.data.get('price'),
                 duration_hours=request.data.get('duration_hours'),
-                data_limit_gb=request.data.get('data_limit_gb'),
-                max_devices=request.data.get('max_devices', 5),
+                display_order=request.data.get('display_order', 0),
                 is_active=request.data.get('is_active', True)
             )
             
@@ -950,10 +949,8 @@ def manage_bundle(request, bundle_id):
                 'description': bundle.description,
                 'price': str(bundle.price),
                 'duration_hours': bundle.duration_hours,
-                'data_limit_gb': bundle.data_limit_gb,
-                'max_devices': bundle.max_devices,
                 'is_active': bundle.is_active,
-                'created_at': bundle.created_at.isoformat(),
+                'display_order': bundle.display_order,
                 'statistics': {
                     'total_purchases': total_purchases,
                     'total_revenue': str(revenue),
@@ -976,10 +973,8 @@ def manage_bundle(request, bundle_id):
                 bundle.price = request.data['price']
             if 'duration_hours' in request.data:
                 bundle.duration_hours = request.data['duration_hours']
-            if 'data_limit_gb' in request.data:
-                bundle.data_limit_gb = request.data['data_limit_gb']
-            if 'max_devices' in request.data:
-                bundle.max_devices = request.data['max_devices']
+            if 'display_order' in request.data:
+                bundle.display_order = request.data['display_order']
             if 'is_active' in request.data:
                 bundle.is_active = request.data['is_active']
             

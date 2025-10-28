@@ -1,0 +1,475 @@
+{
+  "api_config": {
+    "base_url": "https://api.kitonga.klikcell.com/api/",
+    "dev_url": "http://127.0.0.1:8000/api/",
+    "authentication": {
+      "type": "dual_token",
+      "headers": {
+        "Authorization": "Token YOUR_AUTH_TOKEN",
+        "X-Admin-Access": "kitonga_admin_2025",
+        "Content-Type": "application/json"
+      }
+    }
+  },
+  "endpoints": {
+    "authentication": {
+      "login": {
+        "url": "/auth/login/",
+        "method": "POST",
+        "auth_required": false,
+        "description": "Admin login to get authentication tokens",
+        "request_body": {
+          "username": "string",
+          "password": "string"
+        },
+        "response": {
+          "success": true,
+          "token": "string",
+          "admin_access_token": "string",
+          "user": {
+            "id": "number",
+            "username": "string",
+            "email": "string",
+            "is_staff": "boolean"
+          }
+        }
+      },
+      "profile": {
+        "url": "/auth/profile/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get current admin profile"
+      },
+      "logout": {
+        "url": "/auth/logout/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Admin logout"
+      }
+    },
+    "user_management": {
+      "list_users": {
+        "url": "/admin/users/",
+        "short_url": "/users/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "List all Wi-Fi users with pagination and filtering",
+        "query_params": {
+          "page": "number (default: 1)",
+          "page_size": "number (default: 20)",
+          "phone_number": "string (filter)",
+          "is_active": "boolean (filter)"
+        },
+        "response": {
+          "success": true,
+          "users": [
+            {
+              "id": "number",
+              "phone_number": "string",
+              "is_active": "boolean",
+              "created_at": "ISO date",
+              "paid_until": "ISO date or null",
+              "has_active_access": "boolean",
+              "max_devices": "number",
+              "total_payments": "number",
+              "device_count": "number",
+              "payment_count": "number",
+              "last_payment": {
+                "amount": "string",
+                "bundle_name": "string",
+                "completed_at": "ISO date"
+              }
+            }
+          ],
+          "pagination": {
+            "total": "number",
+            "page": "number",
+            "page_size": "number",
+            "total_pages": "number"
+          }
+        }
+      },
+      "get_user": {
+        "url": "/admin/users/{user_id}/",
+        "short_url": "/users/{user_id}/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get detailed user information",
+        "path_params": {
+          "user_id": "number"
+        }
+      },
+      "update_user": {
+        "url": "/admin/users/{user_id}/update/",
+        "method": "PUT",
+        "auth_required": true,
+        "description": "Update user information",
+        "path_params": {
+          "user_id": "number"
+        },
+        "request_body": {
+          "is_active": "boolean",
+          "max_devices": "number",
+          "phone_number": "string"
+        }
+      },
+      "delete_user": {
+        "url": "/admin/users/{user_id}/delete/",
+        "method": "DELETE",
+        "auth_required": true,
+        "description": "Delete a user",
+        "path_params": {
+          "user_id": "number"
+        }
+      }
+    },
+    "payment_management": {
+      "list_payments": {
+        "url": "/admin/payments/",
+        "short_url": "/payments/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "List all payments with filtering and statistics",
+        "query_params": {
+          "page": "number (default: 1)",
+          "page_size": "number (default: 20)",
+          "status": "string (pending|completed|failed|cancelled)",
+          "phone_number": "string (filter)",
+          "date_from": "ISO date",
+          "date_to": "ISO date",
+          "bundle_id": "number"
+        },
+        "response": {
+          "success": true,
+          "payments": [
+            {
+              "id": "number",
+              "phone_number": "string",
+              "amount": "string",
+              "status": "string",
+              "order_reference": "string",
+              "bundle_name": "string",
+              "bundle_id": "number",
+              "created_at": "ISO date",
+              "completed_at": "ISO date or null",
+              "user_id": "number",
+              "payment_reference": "string",
+              "transaction_id": "string",
+              "payment_channel": "string"
+            }
+          ],
+          "pagination": {
+            "total": "number",
+            "page": "number",
+            "page_size": "number",
+            "total_pages": "number"
+          },
+          "summary": {
+            "total_amount": "string",
+            "pending_amount": "string",
+            "completed_count": "number",
+            "pending_count": "number",
+            "failed_count": "number"
+          }
+        }
+      },
+      "get_payment": {
+        "url": "/admin/payments/{payment_id}/",
+        "short_url": "/payments/{payment_id}/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get detailed payment information",
+        "path_params": {
+          "payment_id": "number"
+        }
+      },
+      "refund_payment": {
+        "url": "/admin/payments/{payment_id}/refund/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Process payment refund",
+        "path_params": {
+          "payment_id": "number"
+        },
+        "request_body": {
+          "reason": "string",
+          "amount": "number (optional, defaults to full amount)"
+        }
+      }
+    },
+    "bundle_management": {
+      "list_bundles": {
+        "url": "/admin/bundles/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "List all data bundles with usage statistics",
+        "response": {
+          "success": true,
+          "bundles": [
+            {
+              "id": "number",
+              "name": "string",
+              "description": "string",
+              "price": "string",
+              "duration_hours": "number",
+              "is_active": "boolean",
+              "display_order": "number",
+              "total_purchases": "number",
+              "revenue": "string"
+            }
+          ]
+        }
+      },
+      "create_bundle": {
+        "url": "/admin/bundles/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Create a new data bundle",
+        "request_body": {
+          "name": "string",
+          "description": "string",
+          "price": "number",
+          "duration_hours": "number",
+          "is_active": "boolean",
+          "display_order": "number"
+        }
+      },
+      "get_bundle": {
+        "url": "/admin/bundles/{bundle_id}/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get detailed bundle information",
+        "path_params": {
+          "bundle_id": "number"
+        }
+      },
+      "update_bundle": {
+        "url": "/admin/bundles/{bundle_id}/",
+        "method": "PUT",
+        "auth_required": true,
+        "description": "Update bundle information",
+        "path_params": {
+          "bundle_id": "number"
+        },
+        "request_body": {
+          "name": "string",
+          "description": "string",
+          "price": "number",
+          "duration_hours": "number",
+          "is_active": "boolean",
+          "display_order": "number"
+        }
+      },
+      "delete_bundle": {
+        "url": "/admin/bundles/{bundle_id}/",
+        "method": "DELETE",
+        "auth_required": true,
+        "description": "Delete a bundle",
+        "path_params": {
+          "bundle_id": "number"
+        }
+      }
+    },
+    "system_administration": {
+      "system_settings": {
+        "url": "/admin/settings/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get system configuration settings",
+        "response": {
+          "success": true,
+          "settings": {
+            "mikrotik": {
+              "router_ip": "string",
+              "username": "string",
+              "hotspot_name": "string",
+              "api_port": "number",
+              "connection_status": "string"
+            },
+            "clickpesa": {
+              "api_key_configured": "boolean",
+              "webhook_url": "string",
+              "environment": "string"
+            },
+            "nextsms": {
+              "api_key_configured": "boolean",
+              "sender_id": "string"
+            },
+            "system": {
+              "debug_mode": "boolean",
+              "allowed_hosts": ["string"],
+              "time_zone": "string",
+              "language_code": "string"
+            }
+          }
+        }
+      },
+      "system_status": {
+        "url": "/admin/status/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get system health and operational status",
+        "response": {
+          "success": true,
+          "status": {
+            "database_status": "string",
+            "mikrotik_status": "string",
+            "uptime": "string",
+            "memory_usage": "string",
+            "disk_usage": "string",
+            "active_users": "number",
+            "payments_today": "number",
+            "revenue_today": "number",
+            "payments_week": "number",
+            "revenue_week": "number",
+            "total_users": "number",
+            "active_bundles": "number",
+            "pending_payments": "number"
+          },
+          "timestamp": "ISO date"
+        }
+      }
+    },
+    "mikrotik_management": {
+      "test_connection": {
+        "url": "/admin/mikrotik/test-connection/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Test connection to MikroTik router",
+        "request_body": {
+          "router_ip": "string",
+          "username": "string",
+          "password": "string"
+        }
+      },
+      "router_config": {
+        "url": "/admin/mikrotik/config/",
+        "method": "GET|POST",
+        "auth_required": true,
+        "description": "Get or update MikroTik router configuration"
+      },
+      "router_info": {
+        "url": "/admin/mikrotik/router-info/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get router system information"
+      },
+      "active_users": {
+        "url": "/admin/mikrotik/active-users/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get list of active users on router"
+      },
+      "disconnect_user": {
+        "url": "/admin/mikrotik/disconnect-user/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Disconnect specific user from router",
+        "request_body": {
+          "username": "string"
+        }
+      },
+      "disconnect_all": {
+        "url": "/admin/mikrotik/disconnect-all/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Disconnect all users from router"
+      },
+      "reboot_router": {
+        "url": "/admin/mikrotik/reboot/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Reboot MikroTik router"
+      },
+      "hotspot_profiles": {
+        "url": "/admin/mikrotik/profiles/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get hotspot user profiles"
+      },
+      "create_profile": {
+        "url": "/admin/mikrotik/profiles/create/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Create new hotspot user profile",
+        "request_body": {
+          "name": "string",
+          "rate_limit": "string",
+          "session_timeout": "string"
+        }
+      },
+      "system_resources": {
+        "url": "/admin/mikrotik/resources/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get router system resources (CPU, memory, disk)"
+      }
+    },
+    "analytics": {
+      "dashboard_stats": {
+        "url": "/dashboard-stats/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get comprehensive dashboard analytics",
+        "response": {
+          "active_users": "number",
+          "revenue_30d": {
+            "period_days": "number",
+            "total_revenue": "number",
+            "total_transactions": "number",
+            "unique_users": "number",
+            "average_per_user": "number"
+          },
+          "revenue_7d": "object",
+          "revenue_today": "object",
+          "recent_payments": ["array"],
+          "recent_users": ["array"],
+          "payment_stats": ["array"],
+          "voucher_stats": "object",
+          "device_stats": "object"
+        }
+      },
+      "health_check": {
+        "url": "/health/",
+        "method": "GET",
+        "auth_required": false,
+        "description": "API health check endpoint",
+        "response": {
+          "status": "healthy",
+          "timestamp": "ISO date",
+          "version": "string",
+          "service": "string"
+        }
+      }
+    }
+  },
+  "frontend_examples": {
+    "javascript": {
+      "setup": "class KitongaAPI {\n  constructor(baseUrl, authToken, adminToken) {\n    this.baseUrl = baseUrl;\n    this.headers = {\n      'Authorization': `Token ${authToken}`,\n      'X-Admin-Access': adminToken,\n      'Content-Type': 'application/json'\n    };\n  }\n\n  async request(endpoint, options = {}) {\n    const url = `${this.baseUrl}${endpoint}`;\n    const config = {\n      headers: this.headers,\n      ...options\n    };\n    \n    const response = await fetch(url, config);\n    return await response.json();\n  }\n}",
+      "usage_examples": {
+        "fetch_users": "const api = new KitongaAPI('https://api.kitonga.klikcell.com/api/', authToken, 'kitonga_admin_2025');\n\n// Fetch users with pagination\nconst users = await api.request('admin/users/?page=1&page_size=20');\n\n// Fetch users with filters\nconst activeUsers = await api.request('admin/users/?is_active=true&phone_number=255');\n\n// Get specific user\nconst user = await api.request('admin/users/123/');",
+        "fetch_payments": "// Fetch all payments\nconst payments = await api.request('admin/payments/');\n\n// Fetch completed payments\nconst completedPayments = await api.request('admin/payments/?status=completed');\n\n// Fetch payments for specific user\nconst userPayments = await api.request('admin/payments/?phone_number=255712345678');\n\n// Fetch payments in date range\nconst datePayments = await api.request('admin/payments/?date_from=2025-10-01&date_to=2025-10-31');",
+        "manage_bundles": "// Fetch all bundles\nconst bundles = await api.request('admin/bundles/');\n\n// Create new bundle\nconst newBundle = await api.request('admin/bundles/', {\n  method: 'POST',\n  body: JSON.stringify({\n    name: 'Weekly Access',\n    description: '7 days internet access',\n    price: 5000,\n    duration_hours: 168,\n    is_active: true,\n    display_order: 2\n  })\n});",
+        "system_monitoring": "// Get system status\nconst status = await api.request('admin/status/');\n\n// Get system settings\nconst settings = await api.request('admin/settings/');\n\n// Get dashboard analytics\nconst analytics = await api.request('dashboard-stats/');\n\n// Health check\nconst health = await api.request('health/');",
+        "mikrotik_management": "// Test router connection\nconst testResult = await api.request('admin/mikrotik/test-connection/', {\n  method: 'POST',\n  body: JSON.stringify({\n    router_ip: '192.168.0.173',\n    username: 'admin',\n    password: 'router_password'\n  })\n});\n\n// Get active users on router\nconst activeRouterUsers = await api.request('admin/mikrotik/active-users/');\n\n// Disconnect user\nconst disconnectResult = await api.request('admin/mikrotik/disconnect-user/', {\n  method: 'POST',\n  body: JSON.stringify({\n    username: 'user123'\n  })\n});"
+      }
+    },
+    "react_hooks": "// Custom React hooks for API integration\nimport { useState, useEffect } from 'react';\n\n// Hook for fetching users\nexport const useUsers = (filters = {}) => {\n  const [users, setUsers] = useState([]);\n  const [loading, setLoading] = useState(true);\n  const [error, setError] = useState(null);\n  \n  useEffect(() => {\n    const fetchUsers = async () => {\n      try {\n        setLoading(true);\n        const params = new URLSearchParams(filters);\n        const response = await api.request(`admin/users/?${params}`);\n        if (response.success) {\n          setUsers(response.users);\n        } else {\n          setError(response.message);\n        }\n      } catch (err) {\n        setError(err.message);\n      } finally {\n        setLoading(false);\n      }\n    };\n    \n    fetchUsers();\n  }, [filters]);\n  \n  return { users, loading, error };\n};\n\n// Hook for payments\nexport const usePayments = (filters = {}) => {\n  const [payments, setPayments] = useState([]);\n  const [summary, setSummary] = useState({});\n  const [loading, setLoading] = useState(true);\n  \n  useEffect(() => {\n    const fetchPayments = async () => {\n      try {\n        setLoading(true);\n        const params = new URLSearchParams(filters);\n        const response = await api.request(`admin/payments/?${params}`);\n        if (response.success) {\n          setPayments(response.payments);\n          setSummary(response.summary);\n        }\n      } catch (err) {\n        console.error('Error fetching payments:', err);\n      } finally {\n        setLoading(false);\n      }\n    };\n    \n    fetchPayments();\n  }, [filters]);\n  \n  return { payments, summary, loading };\n};"
+  },
+  "testing_status": {
+    "tested_endpoints": [
+      "✅ POST /auth/login/ - Login and token generation",
+      "✅ GET /auth/profile/ - Admin profile retrieval",
+      "✅ GET /admin/users/ - User listing with pagination",
+      "✅ GET /users/ - Short alias user listing",
+      "✅ GET /admin/payments/ - Payment listing with summary",
+      "✅ GET /payments/ - Short alias payment listing",
+      "✅ GET /admin/bundles/ - Bundle listing with statistics",
+      "✅ GET /admin/settings/ - System settings",
+      "✅ GET /admin/status/ - System status monitoring",
+      "✅ POST /admin/mikrotik/test-connection/ - MikroTik connection test",
+      "✅ GET /dashboard-stats/ - Analytics dashboard",
+      "✅ GET /health/ - Health check"
+    ]
+  }
+}
