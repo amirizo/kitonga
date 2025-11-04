@@ -42,12 +42,22 @@ The RouterOS API parameters didn't match, so you need to manually configure:
    - HTTP Cookie Auth URL: `https://api.kitonga.klikcell.com/api/mikrotik/auth/`
    - HTTP Cookie Logout URL: `https://api.kitonga.klikcell.com/api/mikrotik/logout/`
 
-### CLI Alternative:
+### CLI Alternative (First check command availability):
+**⚠️ RouterOS 6.49.19 has different command syntax! Try these diagnostic commands first:**
+
 ```bash
-/ip hotspot user-profile set [find name="default"] login-by=cookie
-/ip hotspot user-profile set [find name="default"] http-cookie-auth-url="https://api.kitonga.klikcell.com/api/mikrotik/auth/"
-/ip hotspot user-profile set [find name="default"] http-cookie-logout-url="https://api.kitonga.klikcell.com/api/mikrotik/logout/"
+# Check what hotspot commands are available
+/ip hotspot ?
+
+# Check server profiles (might work instead)
+/ip hotspot server-profile ?
+/ip hotspot server-profile print
+
+# If user-profile doesn't work, try:
+/ip hotspot user ?
 ```
+
+**If CLI commands don't work, use the Web Interface method above (RECOMMENDED)**
 
 ---
 

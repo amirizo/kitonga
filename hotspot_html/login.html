@@ -1,196 +1,129 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
+    <meta charset="utf-8">
+    <title>Kitonga WiFi - Connecting...</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kitonga WiFi - Login</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
         body {
-            font-family: 'Arial', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 20px;
+            color: white;
         }
-        
         .container {
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            overflow: hidden;
+            background: rgba(255,255,255,0.95);
+            color: #333;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+            text-align: center;
             max-width: 400px;
             width: 100%;
         }
-        
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            text-align: center;
+        .logo {
+            font-size: 3em;
+            margin-bottom: 20px;
+            color: #667eea;
         }
-        
-        .header h1 {
-            font-size: 28px;
-            margin-bottom: 10px;
-        }
-        
-        .header p {
-            opacity: 0.9;
-            font-size: 16px;
-        }
-        
-        .form-container {
-            padding: 40px 30px;
-        }
-        
-        .input-group {
-            margin-bottom: 25px;
-            position: relative;
-        }
-        
-        .input-group label {
-            display: block;
-            margin-bottom: 8px;
+        h1 {
+            margin-bottom: 20px;
             color: #333;
-            font-weight: 600;
         }
-        
-        .input-group input {
-            width: 100%;
-            padding: 15px;
-            border: 2px solid #e1e1e1;
-            border-radius: 10px;
-            font-size: 16px;
-            transition: border-color 0.3s;
+        .loading {
+            font-size: 18px;
+            color: #666;
+            margin: 20px 0;
         }
-        
-        .input-group input:focus {
-            outline: none;
-            border-color: #667eea;
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
         }
-        
-        .login-btn {
-            width: 100%;
-            padding: 15px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .redirect-btn {
+            background: #667eea;
             color: white;
             border: none;
-            border-radius: 10px;
+            padding: 15px 30px;
+            border-radius: 8px;
             font-size: 16px;
-            font-weight: 600;
             cursor: pointer;
-            transition: transform 0.2s;
-        }
-        
-        .login-btn:hover {
-            transform: translateY(-2px);
-        }
-        
-        .info {
-            background: #f8f9fa;
-            padding: 20px;
+            text-decoration: none;
+            display: inline-block;
             margin-top: 20px;
-            border-radius: 10px;
-            text-align: center;
+            transition: background 0.3s;
         }
-        
-        .info h3 {
-            color: #333;
-            margin-bottom: 10px;
+        .redirect-btn:hover {
+            background: #5a6fd8;
         }
-        
-        .info p {
-            color: #666;
+        .info {
             font-size: 14px;
-            line-height: 1.5;
-        }
-        
-        .wifi-icon {
-            font-size: 48px;
-            margin-bottom: 10px;
-        }
-        
-        @media (max-width: 480px) {
-            .container {
-                margin: 10px;
-            }
-            
-            .header {
-                padding: 20px;
-            }
-            
-            .form-container {
-                padding: 30px 20px;
-            }
+            color: #888;
+            margin-top: 20px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <div class="wifi-icon">📶</div>
-            <h1>Kitonga WiFi</h1>
-            <p>Welcome to our high-speed internet service</p>
-        </div>
+        <div class="logo">📶</div>
+        <h1>Welcome to Kitonga WiFi</h1>
+        <div class="loading">Redirecting to portal...</div>
+        <div class="spinner"></div>
         
-        <div class="form-container">
-            <form name="login" action="$(link-login-only)" method="post">
-                <input type="hidden" name="dst" value="$(link-orig)">
-                <input type="hidden" name="popup" value="true">
-                
-                <div class="input-group">
-                    <label for="username">Phone Number</label>
-                    <input type="text" 
-                           id="username" 
-                           name="username" 
-                           placeholder="Enter your phone number (e.g., 255700000000)"
-                           pattern="255[0-9]{9}"
-                           required
-                           autocomplete="tel">
-                </div>
-                
-                <button type="submit" class="login-btn">
-                    Connect to Internet
-                </button>
-            </form>
-            
-            <div class="info">
-                <h3>📱 How to Connect</h3>
-                <p>
-                    1. Enter your phone number (starting with 255)<br>
-                    2. Make sure you have an active internet bundle<br>
-                    3. Click "Connect to Internet" to get online<br><br>
-                    <strong>Need a bundle?</strong> Visit our portal to purchase.
-                </p>
-            </div>
+        <a href="#" id="manualRedirect" class="redirect-btn" style="display:none;">
+            Continue to Portal
+        </a>
+        
+        <div class="info">
+            <p>You'll be redirected to our portal to check your access status and make payments if needed.</p>
         </div>
     </div>
-    
+
     <script>
-        // Auto-format phone number
-        document.getElementById('username').addEventListener('input', function(e) {
-            let value = e.target.value.replace(/\D/g, '');
-            if (!value.startsWith('255') && value.length > 0) {
-                value = '255' + value;
-            }
-            if (value.length > 12) {
-                value = value.substring(0, 12);
-            }
-            e.target.value = value;
+        // Build the redirect URL with MikroTik parameters
+        const params = new URLSearchParams({
+            // MikroTik template variables
+            mac: '$(mac)',
+            ip: '$(ip)', 
+            username: '$(username)',
+            // MikroTik login links for after payment
+            link_login: '$(link-login)',
+            link_login_only: '$(link-login-only)',
+            link_orig: '$(link-orig)',
+            // Indicate this is from MikroTik
+            source: 'mikrotik',
+            redirect: 'hotspot'
         });
         
-        // Show error if authentication failed
-        if (window.location.search.includes('failed')) {
-            alert('Login failed. Please check if you have an active internet bundle and try again.');
-        }
+        const redirectUrl = `https://kitonga.klikcell.com/?${params.toString()}`;
+        
+        // Set manual redirect button
+        document.getElementById('manualRedirect').href = redirectUrl;
+        
+        // Auto-redirect after 3 seconds
+        setTimeout(() => {
+            window.location.href = redirectUrl;
+        }, 3000);
+        
+        // Show manual button after 5 seconds if auto-redirect fails
+        setTimeout(() => {
+            document.getElementById('manualRedirect').style.display = 'inline-block';
+            document.querySelector('.loading').textContent = 'Click below if not redirected automatically:';
+            document.querySelector('.spinner').style.display = 'none';
+        }, 5000);
     </script>
 </body>
 </html>
