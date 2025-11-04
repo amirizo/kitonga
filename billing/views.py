@@ -2597,10 +2597,10 @@ def mikrotik_auth(request):
         # Log successful access
         AccessLog.objects.create(
             user=user,
-            mac_address=mac_address,
-            ip_address=ip_address,
-            authenticated=True,
-            notes='Mikrotik authentication successful'
+            ip_address=ip_address or '127.0.0.1',
+            mac_address=mac_address or '',
+            access_granted=True,
+            denial_reason=''
         )
         
         logger.info(f'Mikrotik auth successful for {username}')
@@ -2639,9 +2639,10 @@ def mikrotik_logout(request):
         user = User.objects.get(phone_number=username)
         AccessLog.objects.create(
             user=user,
-            ip_address=ip_address,
-            authenticated=False,
-            notes='Mikrotik logout'
+            ip_address=ip_address or '127.0.0.1',
+            mac_address='',
+            access_granted=False,
+            denial_reason='Mikrotik logout'
         )
         
         logger.info(f'Mikrotik logout successful for {username}')
@@ -2852,10 +2853,10 @@ def mikrotik_user_status(request):
             'recent_activity': [
                 {
                     'timestamp': log.timestamp.isoformat(),
-                    'authenticated': log.authenticated,
+                    'access_granted': log.access_granted,
                     'ip_address': log.ip_address,
                     'mac_address': log.mac_address,
-                    'notes': log.notes or ''
+                    'denial_reason': log.denial_reason or ''
                 } for log in recent_logs
             ]
         })
