@@ -2,128 +2,17 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Kitonga WiFi - Connecting...</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            margin: 0;
-            padding: 20px;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-        }
-        .container {
-            background: rgba(255,255,255,0.95);
-            color: #333;
-            padding: 40px;
-            border-radius: 15px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
-            text-align: center;
-            max-width: 400px;
-            width: 100%;
-        }
-        .logo {
-            font-size: 3em;
-            margin-bottom: 20px;
-            color: #667eea;
-        }
-        h1 {
-            margin-bottom: 20px;
-            color: #333;
-        }
-        .loading {
-            font-size: 18px;
-            color: #666;
-            margin: 20px 0;
-        }
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .redirect-btn {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            border-radius: 8px;
-            font-size: 16px;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-            margin-top: 20px;
-            transition: background 0.3s;
-        }
-        .redirect-btn:hover {
-            background: #5a6fd8;
-        }
-        .info {
-            font-size: 14px;
-            color: #888;
-            margin-top: 20px;
-        }
-    </style>
+    <title>Kitonga WiFi</title>
+    <meta http-equiv="refresh" content="0;url=https://kitonga.klikcell.com/?mac=$(mac)&ip=$(ip)&username=$(username)&link_login=$(link-login)&link_orig=$(link-orig)&source=mikrotik">
+    <script>
+        window.location.href = "https://kitonga.klikcell.com/?mac=$(mac)&ip=$(ip)&username=$(username)&link_login=$(link-login)&link_orig=$(link-orig)&source=mikrotik";
+    </script>
 </head>
 <body>
-    <div class="container">
-        <div class="logo">📶</div>
-        <h1>Welcome to Kitonga WiFi</h1>
-        <div class="loading">Redirecting to portal...</div>
-        <div class="spinner"></div>
-        
-        <a href="#" id="manualRedirect" class="redirect-btn" style="display:none;">
-            Continue to Portal
-        </a>
-        
-        <div class="info">
-            <p>You'll be redirected to our portal to check your access status and make payments if needed.</p>
-        </div>
+    <div style="text-align:center; padding:50px; font-family:Arial;">
+        <h2>Kitonga WiFi</h2>
+        <p>Redirecting to portal...</p>
+        <p><a href="https://kitonga.klikcell.com/?mac=$(mac)&ip=$(ip)&username=$(username)&link_login=$(link-login)&link_orig=$(link-orig)&source=mikrotik">Click here if not redirected automatically</a></p>
     </div>
-
-    <script>
-        // Build the redirect URL with MikroTik parameters
-        const params = new URLSearchParams({
-            // MikroTik template variables
-            mac: '$(mac)',
-            ip: '$(ip)', 
-            username: '$(username)',
-            // MikroTik login links for after payment
-            link_login: '$(link-login)',
-            link_login_only: '$(link-login-only)',
-            link_orig: '$(link-orig)',
-            // Indicate this is from MikroTik
-            source: 'mikrotik',
-            redirect: 'hotspot'
-        });
-        
-        const redirectUrl = `https://kitonga.klikcell.com/?${params.toString()}`;
-        
-        // Set manual redirect button
-        document.getElementById('manualRedirect').href = redirectUrl;
-        
-        // Auto-redirect after 3 seconds
-        setTimeout(() => {
-            window.location.href = redirectUrl;
-        }, 3000);
-        
-        // Show manual button after 5 seconds if auto-redirect fails
-        setTimeout(() => {
-            document.getElementById('manualRedirect').style.display = 'inline-block';
-            document.querySelector('.loading').textContent = 'Click below if not redirected automatically:';
-            document.querySelector('.spinner').style.display = 'none';
-        }, 5000);
-    </script>
 </body>
 </html>

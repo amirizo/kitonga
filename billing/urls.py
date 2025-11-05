@@ -63,6 +63,7 @@ urlpatterns = [
     path('mikrotik/logout/', views.mikrotik_logout, name='mikrotik_logout'),
     path('mikrotik/status/', views.mikrotik_status_check, name='mikrotik_status_check'),
     path('mikrotik/user-status/', views.mikrotik_user_status, name='mikrotik_user_status'),
+    path('mikrotik/debug-user/', views.debug_user_access, name='debug_user_access'),
     
     # MikroTik Configuration and Management endpoints (Admin only)
     path('admin/mikrotik/config/', views.mikrotik_configuration, name='mikrotik_configuration'),
