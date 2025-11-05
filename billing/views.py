@@ -2812,12 +2812,50 @@ def debug_user_access(request):
         # Core access check
         has_access = user.has_active_access()
         
-        # Get payment history
-        payments = user.payments.filter(status='completed').order_by('-completed_at')
-        last_payment = payments.first()
+        return Response({
+            'success': True,
+            'debug_info': {
+                'phone_number': user.phone_number,
+                'current_time': now.isoformat(),
+                'system_check': {
+                    'has_active_access': has_access,
+                    'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+                    'is_active': user.is_active
+                }
+            }
+        })
         
-        # Get voucher history
+    except User.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': f'User {phone_number} not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def mikrotik_user_status(request):
+    """
+    Check individual user status for MikroTik (used by MikroTik hotspot for external authentication)
+    Returns both a concise summary and an extended debug payload for admin troubleshooting.
+    """
+    username = request.GET.get('username')
+    
+    if not username:
+        return Response({
+            'success': False,
+            'message': 'Username is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        user = User.objects.get(phone_number=username)
+        now = timezone.now()
+        has_access = user.has_active_access()
+        
+        # Payment and voucher history
+        payments = user.payments.filter(status='completed').order_by('-completed_at')
         vouchers = user.vouchers_used.filter(is_used=True).order_by('-used_at')
+        last_payment = payments.first()
         last_voucher = vouchers.first()
         
         # Determine access method and last extension
@@ -2826,14 +2864,15 @@ def debug_user_access(request):
         last_extension_date = None
         
         if last_payment and last_voucher:
-            if last_payment.completed_at > last_voucher.used_at:
-                access_method = 'payment'
-                last_extension_source = 'payment'
-                last_extension_date = last_payment.completed_at
-            else:
-                access_method = 'voucher'
-                last_extension_source = 'voucher'
-                last_extension_date = last_voucher.used_at
+            if last_payment.completed_at and last_voucher.used_at:
+                if last_payment.completed_at > last_voucher.used_at:
+                    access_method = 'payment'
+                    last_extension_source = 'payment'
+                    last_extension_date = last_payment.completed_at
+                else:
+                    access_method = 'voucher'
+                    last_extension_source = 'voucher'
+                    last_extension_date = last_voucher.used_at
         elif last_payment:
             access_method = 'payment'
             last_extension_source = 'payment'
@@ -2843,29 +2882,33 @@ def debug_user_access(request):
             last_extension_source = 'voucher'
             last_extension_date = last_voucher.used_at
         
-        # Device information
+        # Device and activity info
         all_devices = user.devices.all().order_by('-last_seen')
         active_devices = user.get_active_devices()
-        
-        # Recent access logs
         recent_logs = AccessLog.objects.filter(user=user).order_by('-timestamp')[:10]
         
-        # Access validation details
-        time_remaining = None
+        time_remaining_hours = None
         if user.paid_until and user.paid_until > now:
-            time_remaining = int((user.paid_until - now).total_seconds() / 3600)
+            time_remaining_hours = int((user.paid_until - now).total_seconds() / 3600)
         
         return Response({
             'success': True,
-            'debug_info': {
+            'user_summary': {
                 'phone_number': user.phone_number,
+                'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+                'is_active': user.is_active,
+                'has_active_access': has_access,
+                'device_count': active_devices.count(),
+                'max_devices': user.max_devices
+            },
+            'debug_info': {
                 'current_time': now.isoformat(),
                 'system_check': {
                     'has_active_access': has_access,
                     'paid_until': user.paid_until.isoformat() if user.paid_until else None,
                     'is_active': user.is_active,
-                    'time_remaining_hours': time_remaining,
-                    'access_expired': user.paid_until < now if user.paid_until else True
+                    'time_remaining_hours': time_remaining_hours,
+                    'access_expired': (user.paid_until < now) if user.paid_until else True
                 },
                 'access_details': {
                     'access_method': access_method,
@@ -2879,7 +2922,7 @@ def debug_user_access(request):
                     'max_devices': user.max_devices,
                     'active_devices_count': active_devices.count(),
                     'total_devices_count': all_devices.count(),
-                    'can_add_device': user.can_add_device(),
+                    'can_add_device': getattr(user, 'can_add_device', lambda: False)(),
                     'device_limit_reached': active_devices.count() >= user.max_devices
                 }
             },
@@ -2907,8 +2950,8 @@ def debug_user_access(request):
                     'ip_address': device.ip_address,
                     'device_name': device.device_name or 'Unknown',
                     'is_active': device.is_active,
-                    'first_seen': device.first_seen.isoformat(),
-                    'last_seen': device.last_seen.isoformat()
+                    'first_seen': device.first_seen.isoformat() if device.first_seen else None,
+                    'last_seen': device.last_seen.isoformat() if device.last_seen else None
                 } for device in all_devices
             ],
             'recent_activity': [
@@ -2931,7 +2974,7 @@ def debug_user_access(request):
     except User.DoesNotExist:
         return Response({
             'success': False,
-            'message': f'User {phone_number} not found',
+            'message': f'User {username} not found',
             'suggestion': 'User needs to make a payment or redeem a voucher first'
         }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:

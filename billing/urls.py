@@ -31,7 +31,7 @@ urlpatterns = [
     path('webhook-logs/', views.webhook_logs, name='webhook_logs'),
     path('dashboard-stats/', views.dashboard_stats, name='dashboard_stats'),
     path('force-logout/', views.force_user_logout, name='force_user_logout'),
-    path('test-user-access/', views.test_user_access, name='test_user_access'),
+    path('debug-user-access/', views.debug_user_access, name='debug_user_access'),
     
     # User Management endpoints (Admin only)
     path('admin/users/', views.list_users, name='list_users'),
