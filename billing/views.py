@@ -1561,7 +1561,7 @@ def mikrotik_reboot_router(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@api_view(['GET'])
+@api_view(['GET', 'POST'])
 @permission_classes([SimpleAdminTokenPermission])
 def mikrotik_hotspot_profiles(request):
     """
@@ -1692,6 +1692,7 @@ def verify_access(request):
     """
     Verify if a user has valid access
     Called by captive portal to check access status
+    Works for both payment and voucher users through unified access checking
     """
     serializer = VerifyAccessSerializer(data=request.data)
     if not serializer.is_valid():
@@ -1703,15 +1704,48 @@ def verify_access(request):
     
     try:
         user = User.objects.get(phone_number=phone_number)
+        
+        # Core access check - works for both payment and voucher users
         has_access = user.has_active_access()
         denial_reason = ''
         device = None
+        access_method = 'unknown'
+        
+        # Determine how user got access (for better logging and debugging)
+        if user.paid_until:
+            # Check if user has payment history
+            has_payments = user.payments.filter(status='completed').exists()
+            # Check if user has voucher history  
+            has_vouchers = user.vouchers_used.filter(is_used=True).exists()
+            
+            if has_payments and has_vouchers:
+                access_method = 'payment_and_voucher'
+            elif has_payments:
+                access_method = 'payment'
+            elif has_vouchers:
+                access_method = 'voucher'
+            else:
+                access_method = 'manual'  # Manually extended by admin
         
         if not has_access:
-            denial_reason = 'Access expired or payment required'
-            logger.info(f'Access denied for {phone_number}: {denial_reason} (paid_until: {user.paid_until})')
+            # Provide more specific denial reasons
+            if not user.is_active:
+                denial_reason = 'User account is deactivated'
+            elif not user.paid_until:
+                denial_reason = 'No payment or voucher redemption found'
+            else:
+                from django.utils import timezone
+                now = timezone.now()
+                if user.paid_until <= now:
+                    expired_hours = int((now - user.paid_until).total_seconds() / 3600)
+                    denial_reason = f'Access expired {expired_hours} hours ago - payment or voucher required'
+                else:
+                    denial_reason = 'Access verification failed'
+            
+            logger.info(f'Access denied for {phone_number}: {denial_reason} (method: {access_method}, paid_until: {user.paid_until})')
+            
         elif mac_address:
-            # User has access, now check device limit
+            # User has access, now check device management
             device, created = Device.objects.get_or_create(
                 user=user,
                 mac_address=mac_address,
@@ -1723,7 +1757,7 @@ def verify_access(request):
                 device.ip_address = ip_address
                 device.is_active = True
                 device.save()
-                logger.info(f'Updated existing device for {phone_number}: {mac_address}')
+                logger.info(f'Updated existing device for {phone_number}: {mac_address} (method: {access_method})')
             else:
                 # New device - check if limit reached
                 active_devices = user.get_active_devices().count()
@@ -1732,15 +1766,15 @@ def verify_access(request):
                     denial_reason = f'Device limit reached ({user.max_devices} devices max)'
                     device.is_active = False
                     device.save()
-                    logger.warning(f'Device limit exceeded for {phone_number}: {active_devices}/{user.max_devices}')
+                    logger.warning(f'Device limit exceeded for {phone_number}: {active_devices}/{user.max_devices} (method: {access_method})')
                 else:
-                    logger.info(f'New device registered for {phone_number}: {mac_address} ({active_devices}/{user.max_devices})')
+                    logger.info(f'New device registered for {phone_number}: {mac_address} ({active_devices}/{user.max_devices}, method: {access_method})')
         
-        # Log access attempt
+        # Log access attempt with enhanced information
         AccessLog.objects.create(
             user=user,
             device=device,
-            ip_address=ip_address,
+            ip_address=ip_address or '127.0.0.1',
             mac_address=mac_address,
             access_granted=has_access,
             denial_reason=denial_reason
@@ -1749,18 +1783,31 @@ def verify_access(request):
         # Update user status if expired (deactivate if no valid access)
         if not has_access and user.is_active and not denial_reason.startswith('Device limit'):
             user.deactivate_access()
-            logger.info(f'User {phone_number} deactivated due to expired access')
+            logger.info(f'User {phone_number} deactivated due to expired access (method was: {access_method})')
         
-        return Response({
+        # Enhanced response with access method information
+        response_data = {
             'access_granted': has_access,
             'denial_reason': denial_reason,
-            'user': UserSerializer(user).data
-        })
+            'user': UserSerializer(user).data,
+            'access_method': access_method,
+            'debug_info': {
+                'has_payments': user.payments.filter(status='completed').exists(),
+                'has_vouchers': user.vouchers_used.filter(is_used=True).exists(),
+                'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+                'is_active': user.is_active,
+                'device_count': user.get_active_devices().count(),
+                'max_devices': user.max_devices
+            }
+        }
+        
+        return Response(response_data)
         
     except User.DoesNotExist:
         return Response({
             'access_granted': False,
-            'message': 'User not found. Please register and pay to access Wi-Fi.'
+            'message': 'User not found. Please register and pay to access Wi-Fi.',
+            'suggestion': 'Make a payment or redeem a voucher to create account and get access'
         }, status=status.HTTP_404_NOT_FOUND)
 
 
@@ -2156,7 +2203,8 @@ def generate_vouchers(request):
 @permission_classes([AllowAny])
 def redeem_voucher(request):
     """
-    Redeem a voucher code
+    Redeem a voucher code and grant internet access
+    Creates user account if needed and enables device access
     """
     serializer = RedeemVoucherSerializer(data=request.data)
     if not serializer.is_valid():
@@ -2164,54 +2212,211 @@ def redeem_voucher(request):
     
     voucher_code = serializer.validated_data['voucher_code']
     phone_number = serializer.validated_data['phone_number']
+    # Optional device information for immediate access
+    ip_address = request.data.get('ip_address', request.META.get('REMOTE_ADDR'))
+    mac_address = request.data.get('mac_address', '')
     
     try:
         voucher = Voucher.objects.get(code=voucher_code)
         
-        # Get or create user
-        user, created = User.objects.get_or_create(phone_number=phone_number)
+        # Check if voucher is already used
+        if voucher.is_used:
+            logger.warning(f'Attempt to redeem already used voucher {voucher_code} by {phone_number}')
+            return Response({
+                'success': False,
+                'message': 'Voucher has already been used',
+                'voucher_info': {
+                    'code': voucher_code,
+                    'used_at': voucher.used_at.isoformat() if voucher.used_at else None,
+                    'used_by': voucher.used_by.phone_number if voucher.used_by else None
+                }
+            }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Redeem voucher
+        # Get or create user
+        user, created = User.objects.get_or_create(
+            phone_number=phone_number,
+            defaults={'max_devices': 1}  # Default device limit
+        )
+        
+        if created:
+            logger.info(f'Created new user {phone_number} via voucher redemption')
+        
+        # Redeem voucher - this will extend user access
         success, message = voucher.redeem(user)
         
         if success:
-            logger.info(f'Voucher {voucher_code} redeemed by {phone_number}')
+            logger.info(f'Voucher {voucher_code} redeemed by {phone_number} - access granted for {voucher.duration_hours} hours')
             
-            from .nextsms import NextSMSAPI
-            from .models import SMSLog
+            # Handle device registration if MAC address provided
+            device = None
+            device_info = {}
+            mikrotik_integration_info = {}
             
-            nextsms = NextSMSAPI()
-            sms_result = nextsms.send_voucher_confirmation(
-                phone_number,
-                voucher_code,
-                voucher.duration_hours
+            if mac_address:
+                device, device_created = Device.objects.get_or_create(
+                    user=user,
+                    mac_address=mac_address,
+                    defaults={'ip_address': ip_address or '127.0.0.1', 'is_active': True}
+                )
+                
+                if device_created:
+                    active_devices = user.get_active_devices().count()
+                    if active_devices <= user.max_devices:
+                        device_info = {
+                            'device_registered': True,
+                            'device_id': device.id,
+                            'mac_address': mac_address,
+                            'device_count': active_devices,
+                            'max_devices': user.max_devices
+                        }
+                        logger.info(f'Registered device {mac_address} for voucher user {phone_number} ({active_devices}/{user.max_devices})')
+                    else:
+                        # Device limit exceeded
+                        device.is_active = False
+                        device.save()
+                        device_info = {
+                            'device_registered': False,
+                            'device_limit_exceeded': True,
+                            'device_count': active_devices,
+                            'max_devices': user.max_devices,
+                            'warning': 'Device limit exceeded. Please remove an existing device first.'
+                        }
+                        logger.warning(f'Device limit exceeded for voucher user {phone_number}: {active_devices}/{user.max_devices}')
+                else:
+                    # Update existing device
+                    device.ip_address = ip_address or device.ip_address
+                    device.is_active = True
+                    device.save()
+                    device_info = {
+                        'device_registered': True,
+                        'device_id': device.id,
+                        'mac_address': mac_address,
+                        'existing_device_updated': True
+                    }
+                    logger.info(f'Updated existing device {mac_address} for voucher user {phone_number}')
+                
+                # Try to authenticate with MikroTik immediately after successful voucher redemption
+                try:
+                    mikrotik_auth_result = authenticate_user_with_mikrotik(phone_number, mac_address, ip_address)
+                    mikrotik_integration_info = {
+                        'mikrotik_auth_attempted': True,
+                        'mikrotik_auth_success': mikrotik_auth_result,
+                        'ready_for_internet': mikrotik_auth_result and user.has_active_access()
+                    }
+                    
+                    if mikrotik_auth_result:
+                        logger.info(f'Successfully authenticated voucher user {phone_number} with MikroTik router')
+                    else:
+                        logger.warning(f'Failed to authenticate voucher user {phone_number} with MikroTik router')
+                        
+                except Exception as e:
+                    logger.error(f'MikroTik authentication error for voucher user {phone_number}: {str(e)}')
+                    mikrotik_integration_info = {
+                        'mikrotik_auth_attempted': True,
+                        'mikrotik_auth_success': False,
+                        'mikrotik_error': str(e),
+                        'ready_for_internet': user.has_active_access()  # User still has access, just MikroTik sync failed
+                    }
+            else:
+                # No MAC address provided, but user still gets access for when they connect
+                device_info = {
+                    'device_registered': False,
+                    'message': 'No device registered. User can connect with any device within device limit.',
+                    'max_devices': user.max_devices
+                }
+                mikrotik_integration_info = {
+                    'mikrotik_auth_attempted': False,
+                    'ready_for_internet': user.has_active_access(),
+                    'note': 'Device will be registered when user connects to WiFi'
+                }
+            
+            # Create access log for voucher redemption
+            AccessLog.objects.create(
+                user=user,
+                device=device,
+                ip_address=ip_address or '127.0.0.1',
+                mac_address=mac_address,
+                access_granted=True,
+                denial_reason=f'Voucher redeemed: {voucher_code} - Access granted for {voucher.duration_hours} hours'
             )
             
-            # Log SMS
-            SMSLog.objects.create(
-                phone_number=phone_number,
-                message=f'Voucher redemption: {voucher_code}',
-                sms_type='voucher',
-                success=sms_result['success'],
-                response_data=sms_result.get('data')
-            )
+            # Send SMS confirmation
+            try:
+                from .nextsms import NextSMSAPI
+                from .models import SMSLog
+                
+                nextsms = NextSMSAPI()
+                sms_result = nextsms.send_voucher_confirmation(
+                    phone_number,
+                    voucher_code,
+                    voucher.duration_hours
+                )
+                
+                # Log SMS
+                SMSLog.objects.create(
+                    phone_number=phone_number,
+                    message=f'Voucher redemption: {voucher_code}',
+                    sms_type='voucher',
+                    success=sms_result['success'],
+                    response_data=sms_result.get('data')
+                )
+                
+                sms_sent = sms_result['success']
+            except Exception as e:
+                logger.error(f'SMS notification failed for voucher redemption {voucher_code}: {str(e)}')
+                sms_sent = False
             
-            return Response({
+            # Enhanced response with access and device information
+            response_data = {
                 'success': True,
                 'message': message,
-                'user': UserSerializer(user).data
-            }, status=status.HTTP_200_OK)
+                'user': UserSerializer(user).data,
+                'voucher_info': {
+                    'code': voucher_code,
+                    'duration_hours': voucher.duration_hours,
+                    'redeemed_at': voucher.used_at.isoformat(),
+                    'batch_id': voucher.batch_id
+                },
+                'access_info': {
+                    'has_active_access': user.has_active_access(),
+                    'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+                    'access_method': 'voucher',
+                    'can_connect_to_wifi': user.has_active_access(),
+                    'instructions': 'Connect to WiFi network. Your device will automatically get internet access.'
+                },
+                'device_info': device_info,
+                'mikrotik_integration': mikrotik_integration_info,
+                'sms_notification_sent': sms_sent,
+                'next_steps': [
+                    '1. Connect your device to the WiFi network',
+                    '2. Open your browser - you should automatically get internet access',
+                    '3. If prompted, enter your phone number to authenticate',
+                    f'4. Your access is valid until {user.paid_until.strftime("%Y-%m-%d %H:%M") if user.paid_until else "N/A"}'
+                ]
+            }
+            
+            return Response(response_data, status=status.HTTP_200_OK)
+            
         else:
+            # Voucher redemption failed
+            logger.error(f'Voucher redemption failed for {voucher_code} by {phone_number}: {message}')
             return Response({
                 'success': False,
                 'message': message
             }, status=status.HTTP_400_BAD_REQUEST)
             
     except Voucher.DoesNotExist:
+        logger.warning(f'Invalid voucher code {voucher_code} attempted by {phone_number}')
         return Response({
             'success': False,
             'message': 'Invalid voucher code'
         }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f'Error during voucher redemption {voucher_code} by {phone_number}: {str(e)}')
+        return Response({
+            'success': False,
+            'message': 'Voucher redemption failed due to system error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
@@ -2546,76 +2751,133 @@ def webhook_logs(request):
 
 
 # Mikrotik Integration APIs
-@api_view(['POST', 'GET'])
-@permission_classes([AllowAny])
+from django.views.decorators.csrf import csrf_exempt
+from django.http import HttpResponse
+import json
+
+@csrf_exempt
 def mikrotik_auth(request):
     """
     Mikrotik hotspot authentication endpoint
     
     This endpoint is called by Mikrotik router for external authentication
     Mikrotik expects HTTP 200 for success, 403 for deny
+    
+    Works for both payment and voucher users through unified access checking
+    Handles both form data and JSON data from MikroTik routers
     """
-    # Get parameters from Mikrotik (can be POST or GET)
+    # Get parameters from Mikrotik (can be POST or GET, form data or JSON)
+    username = None
+    password = ''
+    mac_address = ''
+    ip_address = ''
+    
     if request.method == 'POST':
-        username = request.data.get('username') or request.POST.get('username')
-        password = request.data.get('password') or request.POST.get('password', '')
-        mac_address = request.data.get('mac') or request.POST.get('mac', '')
-        ip_address = request.data.get('ip') or request.POST.get('ip', '')
+        # Try to get from form data first (most common for MikroTik)
+        username = request.POST.get('username')
+        password = request.POST.get('password', '')
+        mac_address = request.POST.get('mac', '')
+        ip_address = request.POST.get('ip', '')
+        
+        # If not found in form data, try JSON
+        if not username:
+            try:
+                json_data = json.loads(request.body.decode('utf-8'))
+                username = json_data.get('username')
+                password = json_data.get('password', '')
+                mac_address = json_data.get('mac', '')
+                ip_address = json_data.get('ip', '')
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
     else:
+        # GET request
         username = request.GET.get('username')
         password = request.GET.get('password', '')
         mac_address = request.GET.get('mac', '')
         ip_address = request.GET.get('ip', '')
     
-    logger.info(f'Mikrotik auth request: username={username}, mac={mac_address}, ip={ip_address}')
+    logger.info(f'Mikrotik auth request: method={request.method}, username={username}, mac={mac_address}, ip={ip_address}')
     
     if not username:
         logger.warning('Mikrotik auth failed: No username provided')
-        return Response('No username provided', status=403)
+        return HttpResponse('No username provided', status=403)
     
     try:
         # Check if user exists and has valid access
         user = User.objects.get(phone_number=username)
         
-        # Check if user has active access (works for both payment and voucher users)
+        # Determine access method for better logging
+        access_method = 'unknown'
+        if user.paid_until:
+            has_payments = user.payments.filter(status='completed').exists()
+            has_vouchers = user.vouchers_used.filter(is_used=True).exists()
+            
+            if has_payments and has_vouchers:
+                access_method = 'payment_and_voucher'
+            elif has_payments:
+                access_method = 'payment'
+            elif has_vouchers:
+                access_method = 'voucher'
+            else:
+                access_method = 'manual'
+        
+        # Check if user has active access (unified logic for both payment and voucher users)
         has_access = user.has_active_access()
         denial_reason = ''
         device = None
         
         if not has_access:
-            denial_reason = 'Access expired or payment required'
-            logger.info(f'Access denied for {username}: {denial_reason} (paid_until: {user.paid_until})')
-        elif mac_address:
-            # User has access, now check device limit
-            device, created = Device.objects.get_or_create(
-                user=user,
-                mac_address=mac_address,
-                defaults={'ip_address': ip_address, 'is_active': True}
-            )
-            
-            if created:
-                # New device - check if limit exceeded
-                active_devices = user.get_active_devices().count()
-                if active_devices > user.max_devices:
-                    has_access = False
-                    denial_reason = f'Device limit reached ({user.max_devices} devices max)'
-                    device.is_active = False
-                    device.save()
-                    logger.warning(f'Device limit exceeded for {username}: {active_devices}/{user.max_devices}')
-                else:
-                    logger.info(f'New device registered for {username}: {mac_address} ({active_devices}/{user.max_devices})')
+            # Provide specific denial reasons based on user state
+            if not user.is_active:
+                denial_reason = 'User account deactivated'
+            elif not user.paid_until:
+                denial_reason = 'No payment or voucher found - please pay or redeem voucher'
             else:
-                # Update existing device
-                device.ip_address = ip_address
-                device.is_active = True
-                device.save()
-                logger.info(f'Existing device updated for {username}: {mac_address}')
+                from django.utils import timezone
+                now = timezone.now()
+                if user.paid_until <= now:
+                    expired_hours = int((now - user.paid_until).total_seconds() / 3600)
+                    denial_reason = f'Access expired {expired_hours} hours ago - please pay or redeem voucher'
+                else:
+                    denial_reason = 'Access verification failed'
+            
+            logger.info(f'MikroTik access denied for {username}: {denial_reason} (method: {access_method}, paid_until: {user.paid_until})')
+        else:
+            # User has access - handle device registration if MAC address provided
+            if mac_address:
+                # User has access, now check device limit
+                device, created = Device.objects.get_or_create(
+                    user=user,
+                    mac_address=mac_address,
+                    defaults={'ip_address': ip_address, 'is_active': True}
+                )
+                
+                if created:
+                    # New device - check if limit exceeded
+                    active_devices = user.get_active_devices().count()
+                    if active_devices > user.max_devices:
+                        has_access = False
+                        denial_reason = f'Device limit reached ({user.max_devices} devices max)'
+                        device.is_active = False
+                        device.save()
+                        logger.warning(f'Device limit exceeded for {username}: {active_devices}/{user.max_devices} (method: {access_method})')
+                    else:
+                        logger.info(f'New device registered for {username}: {mac_address} ({active_devices}/{user.max_devices}, method: {access_method})')
+                else:
+                    # Update existing device
+                    device.ip_address = ip_address
+                    device.is_active = True
+                    device.save()
+                    logger.info(f'Existing device updated for {username}: {mac_address} (method: {access_method})')
+            else:
+                # No MAC address provided - still allow access but log it
+                logger.warning(f'Authentication request for {username} without MAC address - allowing access (method: {access_method})')
         
-        # Log access attempt
+        # Log access attempt with enhanced information
         AccessLog.objects.create(
             user=user,
             device=device,
-            ip_address=ip_address,
+            ip_address=ip_address or '127.0.0.1',
             mac_address=mac_address,
             access_granted=has_access,
             denial_reason=denial_reason
@@ -2624,36 +2886,56 @@ def mikrotik_auth(request):
         # Update user status if expired (deactivate if no valid access)
         if not has_access and user.is_active and not denial_reason.startswith('Device limit'):
             user.deactivate_access()
-            logger.info(f'User {username} deactivated due to expired access')
+            logger.info(f'User {username} deactivated due to expired access (method was: {access_method})')
         
-        # Return simple success response for Mikrotik
-        return Response('OK', status=200)
+        # Return appropriate response for MikroTik based on access status
+        if has_access:
+            logger.info(f'MikroTik auth SUCCESS for {username}: Access granted (method: {access_method})')
+            return HttpResponse('OK', status=200)
+        else:
+            logger.warning(f'Mikrotik auth DENIED for {username}: {denial_reason} (method: {access_method})')
+            return HttpResponse(denial_reason, status=403)
         
     except User.DoesNotExist:
-        logger.warning(f'Mikrotik auth failed for {username}: User not found')
-        return Response('User not found', status=403)
+        logger.warning(f'Mikrotik auth failed for {username}: User not found - no payment or voucher history')
+        return HttpResponse('User not found - please make payment or redeem voucher', status=403)
     except Exception as e:
         logger.error(f'Error in Mikrotik authentication for {username}: {str(e)}')
-        return Response('Authentication error', status=500)
+        return HttpResponse('Authentication error', status=500)
 
 
-@api_view(['POST', 'GET'])
-@permission_classes([AllowAny])
+@csrf_exempt
 def mikrotik_logout(request):
     """
     Mikrotik hotspot logout endpoint
+    
+    Handles both form data and JSON data from MikroTik routers
     """
+    username = None
+    ip_address = ''
+    
     if request.method == 'POST':
-        username = request.data.get('username') or request.POST.get('username')
-        ip_address = request.data.get('ip') or request.POST.get('ip', '')
+        # Try form data first
+        username = request.POST.get('username')
+        ip_address = request.POST.get('ip', '')
+        
+        # If not found in form data, try JSON
+        if not username:
+            try:
+                json_data = json.loads(request.body.decode('utf-8'))
+                username = json_data.get('username')
+                ip_address = json_data.get('ip', '')
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
     else:
+        # GET request
         username = request.GET.get('username')
         ip_address = request.GET.get('ip', '')
     
-    logger.info(f'Mikrotik logout request: username={username}, ip={ip_address}')
+    logger.info(f'Mikrotik logout request: method={request.method}, username={username}, ip={ip_address}')
     
     if not username:
-        return Response('No username provided', status=400)
+        return HttpResponse('No username provided', status=400)
     
     try:
         # Log the logout
@@ -2667,15 +2949,15 @@ def mikrotik_logout(request):
         )
         
         logger.info(f'Mikrotik logout successful for {username}')
-        return Response('OK', status=200)
+        return HttpResponse('OK', status=200)
         
     except User.DoesNotExist:
         # User not found but still return OK
         logger.info(f'Mikrotik logout for unknown user {username}')
-        return Response('OK', status=200)
+        return HttpResponse('OK', status=200)
     except Exception as e:
         logger.error(f'Error in Mikrotik logout for {username}: {str(e)}')
-        return Response('Logout error', status=500)
+        return HttpResponse('Logout error', status=500)
 
 
 @api_view(['GET'])
@@ -2783,25 +3065,23 @@ def force_user_logout(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@api_view(['POST', 'GET'])
+@api_view(['POST'])
 @permission_classes([AllowAny])
-def debug_user_access(request):
+def test_voucher_access(request):
     """
-    Debug endpoint to troubleshoot user access issues for both payment and voucher users
-    Provides comprehensive information about user status, access method, and system behavior
+    Test endpoint specifically for voucher users to verify their access and MikroTik integration
+    This helps debug voucher-related access issues
     """
-    if request.method == 'POST':
-        phone_number = request.data.get('phone_number')
-    else:
-        phone_number = request.GET.get('phone_number')
+    phone_number = request.data.get('phone_number')
+    mac_address = request.data.get('mac_address', '')
+    ip_address = request.data.get('ip_address', request.META.get('REMOTE_ADDR', '127.0.0.1'))
     
     if not phone_number:
         return Response({
             'success': False,
             'message': 'Phone number is required',
             'usage': {
-                'GET': '/api/mikrotik/debug-user/?phone_number=255123456789',
-                'POST': '{"phone_number": "255123456789"}'
+                'POST': '{"phone_number": "255123456789", "mac_address": "AA:BB:CC:DD:EE:FF", "ip_address": "192.168.1.100"}'
             }
         }, status=status.HTTP_400_BAD_REQUEST)
     
@@ -2809,177 +3089,122 @@ def debug_user_access(request):
         user = User.objects.get(phone_number=phone_number)
         now = timezone.now()
         
-        # Core access check
-        has_access = user.has_active_access()
-        
-        return Response({
-            'success': True,
-            'debug_info': {
-                'phone_number': user.phone_number,
-                'current_time': now.isoformat(),
-                'system_check': {
-                    'has_active_access': has_access,
-                    'paid_until': user.paid_until.isoformat() if user.paid_until else None,
-                    'is_active': user.is_active
-                }
-            }
-        })
-        
-    except User.DoesNotExist:
-        return Response({
-            'success': False,
-            'message': f'User {phone_number} not found'
-        }, status=status.HTTP_404_NOT_FOUND)
-
-
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def mikrotik_user_status(request):
-    """
-    Check individual user status for MikroTik (used by MikroTik hotspot for external authentication)
-    Returns both a concise summary and an extended debug payload for admin troubleshooting.
-    """
-    username = request.GET.get('username')
-    
-    if not username:
-        return Response({
-            'success': False,
-            'message': 'Username is required'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
-    try:
-        user = User.objects.get(phone_number=username)
-        now = timezone.now()
-        has_access = user.has_active_access()
-        
-        # Payment and voucher history
-        payments = user.payments.filter(status='completed').order_by('-completed_at')
+        # Check if user has voucher history
         vouchers = user.vouchers_used.filter(is_used=True).order_by('-used_at')
-        last_payment = payments.first()
+        if not vouchers.exists():
+            return Response({
+                'success': False,
+                'message': 'User has no voucher history',
+                'suggestion': 'User needs to redeem a voucher first',
+                'user_info': {
+                    'phone_number': phone_number,
+                    'has_payments': user.payments.filter(status='completed').exists(),
+                    'has_vouchers': False
+                }
+            })
+        
+        # Test core access
+        has_access = user.has_active_access()
         last_voucher = vouchers.first()
         
-        # Determine access method and last extension
-        access_method = 'none'
-        last_extension_source = 'none'
-        last_extension_date = None
+        # Test verify_access endpoint behavior
+        verify_access_simulation = {
+            'would_grant_access': has_access,
+            'denial_reason': 'None' if has_access else 'Access expired or no valid voucher',
+            'user_is_active': user.is_active,
+            'paid_until': user.paid_until.isoformat() if user.paid_until else None
+        }
         
-        if last_payment and last_voucher:
-            if last_payment.completed_at and last_voucher.used_at:
-                if last_payment.completed_at > last_voucher.used_at:
-                    access_method = 'payment'
-                    last_extension_source = 'payment'
-                    last_extension_date = last_payment.completed_at
-                else:
-                    access_method = 'voucher'
-                    last_extension_source = 'voucher'
-                    last_extension_date = last_voucher.used_at
-        elif last_payment:
-            access_method = 'payment'
-            last_extension_source = 'payment'
-            last_extension_date = last_payment.completed_at
-        elif last_voucher:
-            access_method = 'voucher'
-            last_extension_source = 'voucher'
-            last_extension_date = last_voucher.used_at
+        # Test MikroTik authentication behavior
+        mikrotik_auth_simulation = {
+            'would_authenticate': has_access,
+            'http_status_expected': 200 if has_access else 403,
+            'response_expected': 'Authentication success' if has_access else 'Access denied - payment or voucher required'
+        }
         
-        # Device and activity info
-        all_devices = user.devices.all().order_by('-last_seen')
-        active_devices = user.get_active_devices()
-        recent_logs = AccessLog.objects.filter(user=user).order_by('-timestamp')[:10]
+        # Device management test
+        device_info = {}
+        if mac_address:
+            try:
+                device = Device.objects.get(user=user, mac_address=mac_address)
+                device_info = {
+                    'device_exists': True,
+                    'device_active': device.is_active,
+                    'device_id': device.id,
+                    'last_seen': device.last_seen.isoformat()
+                }
+            except Device.DoesNotExist:
+                device_info = {
+                    'device_exists': False,
+                    'would_create_device': user.get_active_devices().count() < user.max_devices,
+                    'current_device_count': user.get_active_devices().count(),
+                    'max_devices': user.max_devices
+                }
         
-        time_remaining_hours = None
-        if user.paid_until and user.paid_until > now:
-            time_remaining_hours = int((user.paid_until - now).total_seconds() / 3600)
+        # Access logs for this user
+        recent_logs = AccessLog.objects.filter(user=user).order_by('-timestamp')[:3]
         
         return Response({
             'success': True,
-            'user_summary': {
-                'phone_number': user.phone_number,
-                'paid_until': user.paid_until.isoformat() if user.paid_until else None,
-                'is_active': user.is_active,
-                'has_active_access': has_access,
-                'device_count': active_devices.count(),
-                'max_devices': user.max_devices
-            },
-            'debug_info': {
-                'current_time': now.isoformat(),
-                'system_check': {
+            'voucher_access_test': {
+                'user_info': {
+                    'phone_number': phone_number,
+                    'created_at': user.created_at.isoformat(),
+                    'is_active': user.is_active,
+                    'max_devices': user.max_devices
+                },
+                'voucher_info': {
+                    'total_vouchers_redeemed': vouchers.count(),
+                    'last_voucher': {
+                        'code': last_voucher.code,
+                        'duration_hours': last_voucher.duration_hours,
+                        'used_at': last_voucher.used_at.isoformat(),
+                        'batch_id': last_voucher.batch_id
+                    } if last_voucher else None,
+                    'all_vouchers': [
+                        {
+                            'code': v.code,
+                            'duration_hours': v.duration_hours,
+                            'used_at': v.used_at.isoformat() if v.used_at else None
+                        } for v in vouchers[:5]
+                    ]
+                },
+                'access_status': {
                     'has_active_access': has_access,
                     'paid_until': user.paid_until.isoformat() if user.paid_until else None,
-                    'is_active': user.is_active,
-                    'time_remaining_hours': time_remaining_hours,
-                    'access_expired': (user.paid_until < now) if user.paid_until else True
+                    'time_remaining_hours': round((user.paid_until - now).total_seconds() / 3600, 1) if user.paid_until and has_access else 0,
+                    'access_method': 'voucher'
                 },
-                'access_details': {
-                    'access_method': access_method,
-                    'last_extension_source': last_extension_source,
-                    'last_extension_date': last_extension_date.isoformat() if last_extension_date else None,
-                    'total_payments': payments.count(),
-                    'total_vouchers': vouchers.count(),
-                    'can_authenticate': has_access
+                'api_simulation': {
+                    'verify_access_endpoint': verify_access_simulation,
+                    'mikrotik_auth_endpoint': mikrotik_auth_simulation
                 },
-                'device_management': {
-                    'max_devices': user.max_devices,
-                    'active_devices_count': active_devices.count(),
-                    'total_devices_count': all_devices.count(),
-                    'can_add_device': getattr(user, 'can_add_device', lambda: False)(),
-                    'device_limit_reached': active_devices.count() >= user.max_devices
-                }
-            },
-            'payment_history': [
-                {
-                    'id': payment.id,
-                    'amount': str(payment.amount),
-                    'bundle_hours': payment.bundle.duration_hours if payment.bundle else 24,
-                    'completed_at': payment.completed_at.isoformat() if payment.completed_at else None,
-                    'payment_reference': payment.payment_reference or 'N/A'
-                } for payment in payments[:5]
-            ],
-            'voucher_history': [
-                {
-                    'code': voucher.code,
-                    'duration_hours': voucher.duration_hours,
-                    'used_at': voucher.used_at.isoformat() if voucher.used_at else None,
-                    'batch_id': voucher.batch_id or 'N/A'
-                } for voucher in vouchers[:5]
-            ],
-            'devices': [
-                {
-                    'id': device.id,
-                    'mac_address': device.mac_address,
-                    'ip_address': device.ip_address,
-                    'device_name': device.device_name or 'Unknown',
-                    'is_active': device.is_active,
-                    'first_seen': device.first_seen.isoformat() if device.first_seen else None,
-                    'last_seen': device.last_seen.isoformat() if device.last_seen else None
-                } for device in all_devices
-            ],
-            'recent_activity': [
-                {
-                    'timestamp': log.timestamp.isoformat(),
-                    'access_granted': log.access_granted,
-                    'ip_address': log.ip_address,
-                    'mac_address': log.mac_address,
-                    'denial_reason': log.denial_reason or 'N/A',
-                    'device_id': log.device.id if log.device else None
-                } for log in recent_logs
-            ],
-            'mikrotik_test': {
-                'would_allow_auth': has_access,
-                'denial_reason': 'Access expired or payment required' if not has_access else 'None',
-                'recommended_action': 'Make payment or redeem voucher' if not has_access else 'User should have access'
+                'device_management': device_info,
+                'recent_access_logs': [
+                    {
+                        'timestamp': log.timestamp.isoformat(),
+                        'access_granted': log.access_granted,
+                        'denial_reason': log.denial_reason or 'Access granted',
+                        'mac_address': log.mac_address
+                    } for log in recent_logs
+                ],
+                'recommendations': [
+                    'User has valid voucher access - should be able to connect to WiFi' if has_access else 'Voucher access has expired - user needs to redeem a new voucher',
+                    f'Last voucher was used {(now - last_voucher.used_at).days} days ago' if last_voucher and last_voucher.used_at else 'No recent voucher usage',
+                    f'User can connect {user.max_devices - user.get_active_devices().count()} more devices' if user.get_active_devices().count() < user.max_devices else 'User has reached device limit'
+                ]
             }
         })
         
     except User.DoesNotExist:
         return Response({
             'success': False,
-            'message': f'User {username} not found',
-            'suggestion': 'User needs to make a payment or redeem a voucher first'
+            'message': f'User {phone_number} not found',
+            'suggestion': 'User needs to redeem a voucher first to create an account'
         }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
-        logger.error(f'Debug user access error: {str(e)}')
+        logger.error(f'Test voucher access error: {str(e)}')
         return Response({
             'success': False,
-            'message': f'Debug error: {str(e)}'
+            'message': f'Test error: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

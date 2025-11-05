@@ -57,13 +57,29 @@ class User(models.Model):
         super().save(*args, **kwargs)
     
     def has_active_access(self):
-        """Check if user has valid paid access"""
+        """
+        Check if user has valid paid access
+        
+        This method works for both payment and voucher users since both
+        access methods set the paid_until field through extend_access()
+        
+        Returns:
+            bool: True if user has active access, False otherwise
+        """
+        if not self.is_active:
+            return False
         if not self.paid_until:
             return False
         return timezone.now() < self.paid_until
     
-    def extend_access(self, hours=24):
-        """Extend user access by specified hours"""
+    def extend_access(self, hours=24, source='payment'):
+        """
+        Extend user access by specified hours
+        
+        Args:
+            hours (int): Number of hours to extend access
+            source (str): Source of extension ('payment', 'voucher', 'manual')
+        """
         now = timezone.now()
         if self.paid_until and self.paid_until > now:
             # Extend from current expiry
@@ -71,8 +87,13 @@ class User(models.Model):
         else:
             # Start fresh from now
             self.paid_until = now + timedelta(hours=hours)
+        
         self.is_active = True
-        self.total_payments += 1
+        
+        # Only increment total_payments for actual payments, not vouchers
+        if source == 'payment':
+            self.total_payments += 1
+        
         self.expiry_notification_sent = False
         self.save()
     
@@ -140,19 +161,19 @@ class Payment(models.Model):
         return f"{self.phone_number} - TSh {self.amount} - {self.status}"
     
     def mark_completed(self, payment_reference=None, channel=None):
-        """Mark payment as completed"""
+        """Mark payment as completed and extend user access"""
         self.status = 'completed'
         self.payment_reference = payment_reference
         self.payment_channel = channel
         self.completed_at = timezone.now()
         self.save()
         
-        # Extend user access based on bundle duration
+        # Extend user access based on bundle duration, specify source as payment
         if self.bundle:
-            self.user.extend_access(hours=self.bundle.duration_hours)
+            self.user.extend_access(hours=self.bundle.duration_hours, source='payment')
         else:
             # Default to 24 hours if no bundle specified
-            self.user.extend_access(hours=24)
+            self.user.extend_access(hours=24, source='payment')
     
     def mark_failed(self):
         """Mark payment as failed"""
@@ -207,7 +228,7 @@ class Voucher(models.Model):
         return f"{self.code} - {self.duration_hours}hrs - {'Used' if self.is_used else 'Available'}"
     
     def redeem(self, user):
-        """Redeem voucher for a user"""
+        """Redeem voucher for a user and extend their access"""
         if self.is_used:
             return False, "Voucher has already been used"
         
@@ -216,8 +237,8 @@ class Voucher(models.Model):
         self.used_by = user
         self.save()
         
-        # Extend user access
-        user.extend_access(hours=self.duration_hours)
+        # Extend user access, specify source as voucher
+        user.extend_access(hours=self.duration_hours, source='voucher')
         
         return True, f"Voucher redeemed successfully. Access granted for {self.duration_hours} hours."
     

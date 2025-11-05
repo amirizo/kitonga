@@ -1,18 +1,425 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Kitonga WiFi</title>
-    <meta http-equiv="refresh" content="0;url=https://kitonga.klikcell.com/?mac=$(mac)&ip=$(ip)&username=$(username)&link_login=$(link-login)&link_orig=$(link-orig)&source=mikrotik">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kitonga WiFi - Welcome</title>
+    
+    <!-- Preconnect to portal for faster loading -->
+    <link rel="preconnect" href="https://kitonga.klikcell.com">
+    <link rel="dns-prefetch" href="https://kitonga.klikcell.com">
+    
     <script>
-        window.location.href = "https://kitonga.klikcell.com/?mac=$(mac)&ip=$(ip)&username=$(username)&link_login=$(link-login)&link_orig=$(link-orig)&source=mikrotik";
+        // Enhanced JavaScript with device detection and error handling
+        (function() {
+            // Collect device and browser information
+            const deviceInfo = {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                language: navigator.language,
+                screen: screen.width + 'x' + screen.height,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                timestamp: new Date().toISOString(),
+                referrer: document.referrer || 'direct'
+            };
+            
+            // Device type detection
+            function getDeviceType() {
+                const ua = navigator.userAgent;
+                if (/tablet|ipad|playbook|silk/i.test(ua)) return 'tablet';
+                if (/mobile|iphone|ipod|android|blackberry|opera|mini|windows\sce|palm|smartphone|iemobile/i.test(ua)) return 'mobile';
+                return 'desktop';
+            }
+            
+            // Browser detection
+            function getBrowser() {
+                const ua = navigator.userAgent;
+                if (ua.includes('Chrome') && !ua.includes('Edg')) return 'chrome';
+                if (ua.includes('Safari') && !ua.includes('Chrome')) return 'safari';
+                if (ua.includes('Firefox')) return 'firefox';
+                if (ua.includes('Edg')) return 'edge';
+                return 'other';
+            }
+            
+            // OS detection
+            function getOS() {
+                const platform = navigator.platform;
+                const ua = navigator.userAgent;
+                if (/Mac/.test(platform)) return 'macos';
+                if (/Win/.test(platform)) return 'windows';
+                if (/Linux/.test(platform)) return 'linux';
+                if (/iPhone|iPad|iPod/.test(ua)) return 'ios';
+                if (/Android/.test(ua)) return 'android';
+                return 'other';
+            }
+            
+            // Build enhanced redirect URL
+            function buildRedirectUrl() {
+                const baseUrl = 'https://kitonga.klikcell.com/';
+                const params = new URLSearchParams({
+                    // MikroTik variables
+                    mac: '$(mac)',
+                    ip: '$(ip)', 
+                    username: '$(username)',
+                    link_login: '$(link-login)',
+                    link_orig: '$(link-orig)',
+                    source: 'mikrotik',
+                    
+                    // Device information
+                    device_type: getDeviceType(),
+                    browser: getBrowser(),
+                    os: getOS(),
+                    screen_size: deviceInfo.screen,
+                    language: deviceInfo.language,
+                    timezone: deviceInfo.timezone,
+                    user_agent: encodeURIComponent(deviceInfo.userAgent),
+                    timestamp: deviceInfo.timestamp,
+                    
+                    // Session information
+                    session_id: Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                    portal_version: '2.0'
+                });
+                
+                return baseUrl + '?' + params.toString();
+            }
+            
+            // Enhanced redirect with retry logic
+            function performRedirect() {
+                const redirectUrl = buildRedirectUrl();
+                
+                try {
+                    // Log redirect attempt (for debugging)
+                    console.log('Redirecting to:', redirectUrl);
+                    
+                    // Store redirect info in sessionStorage for potential debugging
+                    if (typeof(Storage) !== "undefined") {
+                        sessionStorage.setItem('kitonga_redirect_attempt', JSON.stringify({
+                            url: redirectUrl,
+                            timestamp: new Date().toISOString(),
+                            device: deviceInfo
+                        }));
+                    }
+                    
+                    // Perform redirect
+                    window.location.href = redirectUrl;
+                    
+                } catch (error) {
+                    console.error('Redirect failed:', error);
+                    // Show manual link if redirect fails
+                    document.getElementById('manual-redirect').style.display = 'block';
+                    document.getElementById('loading-section').style.display = 'none';
+                }
+            }
+            
+            // Wait for DOM to be ready, then redirect
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', function() {
+                    setTimeout(performRedirect, 500); // Small delay for better UX
+                });
+            } else {
+                setTimeout(performRedirect, 500);
+            }
+            
+        })();
     </script>
+    
+    <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+            --accent-color: #f093fb;
+            --text-light: rgba(255, 255, 255, 0.9);
+            --text-muted: rgba(255, 255, 255, 0.7);
+            --glass-bg: rgba(255, 255, 255, 0.1);
+            --glass-border: rgba(255, 255, 255, 0.2);
+        }
+        
+        * {
+            box-sizing: border-box;
+        }
+        
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 50%, var(--accent-color) 100%);
+            background-size: 400% 400%;
+            animation: gradientShift 8s ease infinite;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: var(--text-light);
+            overflow-x: hidden;
+        }
+        
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        
+        .container {
+            text-align: center;
+            background: var(--glass-bg);
+            padding: 50px 40px;
+            border-radius: 20px;
+            backdrop-filter: blur(20px);
+            box-shadow: 
+                0 8px 32px rgba(0, 0, 0, 0.3),
+                0 0 0 1px var(--glass-border);
+            max-width: 450px;
+            width: 90%;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8), transparent);
+            animation: shimmer 2s infinite;
+        }
+        
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        
+        .logo {
+            font-size: 3em;
+            font-weight: 700;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.5);
+            letter-spacing: -1px;
+        }
+        
+        .brand-name {
+            font-size: 1.8em;
+            font-weight: 600;
+            margin-bottom: 30px;
+            color: var(--text-light);
+            text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .loading-section {
+            margin: 30px 0;
+        }
+        
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid white;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .pulse-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: white;
+            margin: 0 2px;
+            animation: pulse 1.4s infinite ease-in-out both;
+        }
+        
+        .pulse-dot:nth-child(1) { animation-delay: -0.32s; }
+        .pulse-dot:nth-child(2) { animation-delay: -0.16s; }
+        
+        @keyframes pulse {
+            0%, 80%, 100% {
+                transform: scale(0);
+                opacity: 0.5;
+            }
+            40% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+        
+        .message {
+            margin: 20px 0;
+            font-size: 1.2em;
+            font-weight: 500;
+        }
+        
+        .info {
+            font-size: 0.95em;
+            opacity: 0.8;
+            margin: 20px 0;
+            line-height: 1.4;
+        }
+        
+        .manual-section {
+            display: none;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--glass-border);
+        }
+        
+        .manual-link {
+            display: inline-block;
+            background: linear-gradient(45deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.1));
+            color: white;
+            text-decoration: none;
+            padding: 15px 30px;
+            border-radius: 30px;
+            margin: 10px;
+            transition: all 0.3s ease;
+            border: 1px solid var(--glass-border);
+            font-weight: 600;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .manual-link::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s ease;
+        }
+        
+        .manual-link:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+            text-decoration: none;
+            color: white;
+        }
+        
+        .manual-link:hover::before {
+            left: 100%;
+        }
+        
+        .device-info {
+            font-size: 0.8em;
+            color: var(--text-muted);
+            margin-top: 25px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #4CAF50;
+            margin-right: 8px;
+            animation: statusPulse 2s infinite;
+        }
+        
+        @keyframes statusPulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, white, rgba(255, 255, 255, 0.8));
+            border-radius: 2px;
+            animation: progressLoad 3s ease-in-out infinite;
+        }
+        
+        @keyframes progressLoad {
+            0% { width: 0%; }
+            50% { width: 70%; }
+            100% { width: 100%; }
+        }
+        
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .container {
+                padding: 40px 30px;
+                margin: 20px;
+            }
+            
+            .logo {
+                font-size: 2.5em;
+            }
+            
+            .brand-name {
+                font-size: 1.5em;
+            }
+            
+            .message {
+                font-size: 1.1em;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .container {
+                padding: 30px 20px;
+            }
+            
+            .logo {
+                font-size: 2em;
+            }
+            
+            .brand-name {
+                font-size: 1.3em;
+            }
+        }
+    </style>
 </head>
 <body>
-    <div style="text-align:center; padding:50px; font-family:Arial;">
-        <h2>Kitonga WiFi</h2>
-        <p>Redirecting to portal...</p>
-        <p><a href="https://kitonga.klikcell.com/?mac=$(mac)&ip=$(ip)&username=$(username)&link_login=$(link-login)&link_orig=$(link-orig)&source=mikrotik">Click here if not redirected automatically</a></p>
+    <div class="container">
+        <div class="logo">📶 Kitonga WiFi</div>
+        
+        <div class="loading">
+            <div class="spinner"></div>
+        </div>
+        
+        <div class="message">
+            Connecting you to WiFi portal...
+        </div>
+        
+        <div class="info">
+            You will be redirected automatically
+        </div>
+        
+        <!-- Manual fallback link -->
+        <a href="https://kitonga.klikcell.com/?mac=$(mac)&ip=$(ip)&username=$(username)&link_login=$(link-login)&link_orig=$(link-orig)&source=mikrotik" class="manual-link">
+            Continue to Portal
+        </a>
     </div>
+    
+    <!-- Debug info (hidden by default) -->
+    <!-- 
+    MikroTik Variables:
+    MAC: $(mac)
+    IP: $(ip)
+    Username: $(username)
+    Login Link: $(link-login)
+    Original Link: $(link-orig)
+    -->
 </body>
 </html>

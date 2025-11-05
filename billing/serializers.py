@@ -139,6 +139,9 @@ class GenerateVouchersSerializer(serializers.Serializer):
 class RedeemVoucherSerializer(serializers.Serializer):
     voucher_code = serializers.CharField(max_length=16)
     phone_number = serializers.CharField(max_length=15)
+    # Optional device information for immediate access setup
+    ip_address = serializers.IPAddressField(required=False)
+    mac_address = serializers.CharField(max_length=17, required=False)
     
     def validate_voucher_code(self, value):
         # Remove spaces and convert to uppercase
@@ -158,4 +161,12 @@ class RedeemVoucherSerializer(serializers.Serializer):
         if not value.isdigit():
             raise serializers.ValidationError('Phone number must contain only digits')
         
+        return value
+    
+    def validate_mac_address(self, value):
+        if value:
+            # Basic MAC address format validation
+            import re
+            if not re.match(r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$', value):
+                raise serializers.ValidationError('Invalid MAC address format')
         return value

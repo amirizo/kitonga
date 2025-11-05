@@ -26,6 +26,7 @@ urlpatterns = [
     path('vouchers/generate/', views.generate_vouchers, name='generate_vouchers'),
     path('vouchers/redeem/', views.redeem_voucher, name='redeem_voucher'),
     path('vouchers/list/', views.list_vouchers, name='list_vouchers'),
+    path('vouchers/test-access/', views.test_voucher_access, name='test_voucher_access'),
     
     # Admin endpoints
     path('webhook-logs/', views.webhook_logs, name='webhook_logs'),
