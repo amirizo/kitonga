@@ -32,7 +32,7 @@ urlpatterns = [
     path('webhook-logs/', views.webhook_logs, name='webhook_logs'),
     path('dashboard-stats/', views.dashboard_stats, name='dashboard_stats'),
     path('force-logout/', views.force_user_logout, name='force_user_logout'),
-    path('debug-user-access/', views.debug_user_access, name='debug_user_access'),
+    # path('debug-user-access/', views.debug_user_access, name='debug_user_access'),  # Commented out - function not implemented
     
     # User Management endpoints (Admin only)
     path('admin/users/', views.list_users, name='list_users'),
@@ -64,7 +64,7 @@ urlpatterns = [
     path('mikrotik/logout/', views.mikrotik_logout, name='mikrotik_logout'),
     path('mikrotik/status/', views.mikrotik_status_check, name='mikrotik_status_check'),
     path('mikrotik/user-status/', views.mikrotik_user_status, name='mikrotik_user_status'),
-    path('mikrotik/debug-user/', views.debug_user_access, name='debug_user_access'),
+    # path('mikrotik/debug-user/', views.debug_user_access, name='debug_user_access'),  # Function not implemented
     
     # MikroTik Configuration and Management endpoints (Admin only)
     path('admin/mikrotik/config/', views.mikrotik_configuration, name='mikrotik_configuration'),

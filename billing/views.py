@@ -2752,7 +2752,7 @@ def webhook_logs(request):
 
 # Mikrotik Integration APIs
 from django.views.decorators.csrf import csrf_exempt
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 import json
 
 @csrf_exempt
@@ -3012,6 +3012,146 @@ def mikrotik_status_check(request):
             'router_ip': getattr(settings, 'MIKROTIK_ROUTER_IP', 'Not configured'),
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@csrf_exempt  
+def mikrotik_user_status(request):
+    """
+    Check the status of a specific user on MikroTik hotspot
+    
+    Can be used both for internal checking and by MikroTik router for user validation
+    Accepts username via GET parameter, POST form data, or JSON
+    """
+    try:
+        # Get username from different sources
+        username = None
+        
+        if request.method == 'GET':
+            username = request.GET.get('username')
+        elif request.method == 'POST':
+            # Try form data first (MikroTik format)
+            username = request.POST.get('username')
+            
+            # If not found, try JSON
+            if not username:
+                try:
+                    json_data = json.loads(request.body.decode('utf-8'))
+                    username = json_data.get('username')
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    pass
+        
+        if not username:
+            return JsonResponse({
+                'success': False,
+                'message': 'Username is required'
+            }, status=400)
+        
+        # Check if user exists in our database
+        try:
+            user = User.objects.get(phone_number=username)
+        except User.DoesNotExist:
+            # Check if it's a voucher
+            try:
+                voucher = Voucher.objects.get(code=username)
+                return JsonResponse({
+                    'success': True,
+                    'user_type': 'voucher',
+                    'username': username,
+                    'is_active': not voucher.is_used,
+                    'status': 'valid' if not voucher.is_used else 'invalid',
+                    'voucher_info': {
+                        'code': voucher.code,
+                        'duration_hours': voucher.duration_hours,
+                        'is_used': voucher.is_used,
+                        'used_at': voucher.used_at.isoformat() if voucher.used_at else None,
+                        'created_at': voucher.created_at.isoformat(),
+                        'batch_id': voucher.batch_id
+                    }
+                })
+            except Voucher.DoesNotExist:
+                return JsonResponse({
+                    'success': False,
+                    'message': 'User not found',
+                    'username': username,
+                    'user_type': 'unknown'
+                }, status=404)
+        
+        # User found - check their status
+        has_active_access = user.has_active_access()
+        
+        # Get device information
+        devices = user.devices.all()
+        device_info = []
+        for device in devices:
+            device_info.append({
+                'mac_address': device.mac_address,
+                'first_seen': device.first_seen.isoformat(),
+                'last_seen': device.last_seen.isoformat(),
+                'is_active': device.is_active
+            })
+        
+        # Get payment information
+        latest_payment = user.payments.filter(status='completed').order_by('-created_at').first()
+        payment_info = None
+        if latest_payment:
+            payment_info = {
+                'bundle_name': latest_payment.bundle.name,
+                'amount': str(latest_payment.amount),
+                'paid_at': latest_payment.created_at.isoformat(),
+                'expires_at': user.paid_until.isoformat() if user.paid_until else None
+            }
+        
+        # Try to get MikroTik active session info
+        mikrotik_session = None
+        try:
+            from .mikrotik import get_active_hotspot_users
+            active_users_result = get_active_hotspot_users()
+            if active_users_result['success']:
+                for active_user in active_users_result['data']:
+                    if active_user.get('user') == username:
+                        mikrotik_session = {
+                            'session_id': active_user.get('id'),
+                            'ip_address': active_user.get('address'),
+                            'mac_address': active_user.get('mac-address'),
+                            'session_time': active_user.get('session-time'),
+                            'bytes_in': active_user.get('bytes-in'),
+                            'bytes_out': active_user.get('bytes-out'),
+                            'packets_in': active_user.get('packets-in'),
+                            'packets_out': active_user.get('packets-out')
+                        }
+                        break
+        except Exception as e:
+            logger.warning(f'Could not get MikroTik session info for {username}: {str(e)}')
+        
+        return JsonResponse({
+            'success': True,
+            'user_type': 'payment_user',
+            'username': username,
+            'is_active': user.is_active,
+            'has_active_access': has_active_access,
+            'status': 'active' if has_active_access else 'inactive',
+            'user_info': {
+                'user_id': user.id,
+                'phone_number': user.phone_number,
+                'is_active': user.is_active,
+                'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+                'created_at': user.created_at.isoformat(),
+                'device_count': len(device_info)
+            },
+            'devices': device_info,
+            'payment_info': payment_info,
+            'mikrotik_session': mikrotik_session,
+            'timestamp': timezone.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f'MikroTik user status check failed for {username}: {str(e)}')
+        return JsonResponse({
+            'success': False,
+            'message': f'Failed to check user status: {str(e)}',
+            'username': username if 'username' in locals() else None,
+            'error': str(e)
+        }, status=500)
 
 
 @api_view(['POST'])
