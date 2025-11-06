@@ -2351,25 +2351,48 @@ def redeem_voucher(request):
                 
                 # Try to authenticate with MikroTik immediately after successful voucher redemption
                 try:
+                    # Call MikroTik authentication to grant immediate internet access
                     mikrotik_auth_result = authenticate_user_with_mikrotik(phone_number, mac_address, ip_address)
+                    
+                    # Also try to trigger immediate login if we have device info
+                    immediate_login_success = False
+                    if mac_address and ip_address:
+                        try:
+                            # Make a direct call to MikroTik login endpoint to grant immediate access
+                            from .mikrotik import trigger_immediate_hotspot_login
+                            login_result = trigger_immediate_hotspot_login(phone_number, mac_address, ip_address)
+                            immediate_login_success = login_result.get('success', False)
+                            if immediate_login_success:
+                                logger.info(f'Immediate MikroTik login successful for voucher user {phone_number}')
+                            else:
+                                logger.warning(f'Immediate MikroTik login failed for voucher user {phone_number}: {login_result.get("message", "Unknown error")}')
+                        except Exception as login_error:
+                            logger.error(f'Error during immediate MikroTik login for {phone_number}: {str(login_error)}')
+                    
                     mikrotik_integration_info = {
                         'mikrotik_auth_attempted': True,
                         'mikrotik_auth_success': mikrotik_auth_result,
-                        'ready_for_internet': mikrotik_auth_result and user.has_active_access()
+                        'immediate_login_attempted': bool(mac_address and ip_address),
+                        'immediate_login_success': immediate_login_success,
+                        'ready_for_internet': (mikrotik_auth_result and user.has_active_access()) or immediate_login_success,
+                        'auto_connect_status': 'success' if immediate_login_success else 'will_authenticate_on_next_connection'
                     }
                     
-                    if mikrotik_auth_result:
-                        logger.info(f'Successfully authenticated voucher user {phone_number} with MikroTik router')
+                    if mikrotik_auth_result or immediate_login_success:
+                        logger.info(f'MikroTik integration successful for voucher user {phone_number} (auth: {mikrotik_auth_result}, login: {immediate_login_success})')
                     else:
-                        logger.warning(f'Failed to authenticate voucher user {phone_number} with MikroTik router')
+                        logger.warning(f'MikroTik integration incomplete for voucher user {phone_number} - user will authenticate on next WiFi connection')
                         
                 except Exception as e:
                     logger.error(f'MikroTik authentication error for voucher user {phone_number}: {str(e)}')
                     mikrotik_integration_info = {
                         'mikrotik_auth_attempted': True,
                         'mikrotik_auth_success': False,
+                        'immediate_login_attempted': bool(mac_address and ip_address),
+                        'immediate_login_success': False,
                         'mikrotik_error': str(e),
-                        'ready_for_internet': user.has_active_access()  # User still has access, just MikroTik sync failed
+                        'ready_for_internet': user.has_active_access(),  # User still has access, just MikroTik sync failed
+                        'auto_connect_status': 'will_authenticate_on_next_connection'
                     }
             else:
                 # No MAC address provided, but user still gets access for when they connect
@@ -2436,16 +2459,17 @@ def redeem_voucher(request):
                     'paid_until': user.paid_until.isoformat() if user.paid_until else None,
                     'access_method': 'voucher',
                     'can_connect_to_wifi': user.has_active_access(),
-                    'instructions': 'Connect to WiFi network. Your device will automatically get internet access.'
+                    'instructions': 'Your internet access is now active!' if mikrotik_integration_info.get('immediate_login_success', False) else 'Connect to WiFi network. Your device will automatically get internet access.'
                 },
                 'device_info': device_info,
                 'mikrotik_integration': mikrotik_integration_info,
                 'sms_notification_sent': sms_sent,
                 'next_steps': [
-                    '1. Connect your device to the WiFi network',
-                    '2. Open your browser - you should automatically get internet access',
-                    '3. If prompted, enter your phone number to authenticate',
-                    f'4. Your access is valid until {user.paid_until.strftime("%Y-%m-%d %H:%M") if user.paid_until else "N/A"}'
+                    '1. Connect your device to the WiFi network' if not immediate_login_success else '1. ✅ Your device is already connected and should have internet access',
+                    '2. Open your browser - you should automatically get internet access' if immediate_login_success else '2. Open your browser and you should automatically get internet access',
+                    '3. If prompted, enter your phone number to authenticate' if not immediate_login_success else '3. ✅ Authentication completed automatically',
+                    f'4. Your access is valid until {user.paid_until.strftime("%Y-%m-%d %H:%M") if user.paid_until else "N/A"}',
+                    '5. If you still cannot access internet, disconnect and reconnect to WiFi' if not immediate_login_success else '5. ✅ Internet access should be working now'
                 ]
             }
             
