@@ -1245,3 +1245,33 @@ WARNING 2025-11-03 12:55:41,441 log 3534471 139634286716736 Not Found: /
 WARNING 2025-11-03 12:55:41,623 log 3534471 139634286716736 Not Found: /css/support_parent.css
 WARNING 2025-11-03 12:55:41,824 log 3534471 139634286716736 Not Found: /js/lkk_ch.js
 WARNING 2025-11-03 12:55:42,024 log 3534471 139634286716736 Not Found: /js/twint_ch.js
+INFO 2025-11-06 14:17:32,324 mikrotik 19490 8650318144 New device registered for 255684106419: AA:BB:CC:DD:EE:FF -> 192.168.1.100 (connection: wifi, method: diagnostic_test, devices: 1/1)
+INFO 2025-11-06 14:17:32,408 mikrotik 19490 8650318144 Would attempt admin bypass for user 255684106419
+INFO 2025-11-06 14:17:32,408 mikrotik 19490 8650318144 Successfully logged 255684106419 into MikroTik hotspot - MAC: AA:BB:CC:DD:EE:FF, IP: 192.168.1.100
+INFO 2025-11-06 14:17:32,472 mikrotik 19490 8650318144 Would attempt admin bypass for user 255684106419
+INFO 2025-11-06 14:17:32,473 mikrotik 19490 8650318144 Successfully logged 255684106419 into MikroTik hotspot - MAC: AA:BB:CC:DD:EE:FF, IP: 192.168.1.100
+INFO 2025-11-06 14:20:02,365 autoreload 20329 8650318144 Watching for file changes with StatReloader
+INFO 2025-11-06 14:20:28,658 mikrotik 20384 8650318144 Device connection tracked for 255684106419: AA:BB:CC:DD:EE:FF -> 192.168.1.100 (connection: wifi, method: diagnostic_test)
+INFO 2025-11-06 14:20:28,704 mikrotik 20384 8650318144 Would attempt admin bypass for user 255684106419
+INFO 2025-11-06 14:20:28,704 mikrotik 20384 8650318144 Successfully logged 255684106419 into MikroTik hotspot - MAC: AA:BB:CC:DD:EE:FF, IP: 192.168.1.100
+INFO 2025-11-06 14:20:28,712 basehttp 20329 6189051904 "POST /api/verify/ HTTP/1.1" 301 0
+INFO 2025-11-06 14:20:28,730 basehttp 20329 6189051904 code 400, message Bad request version ('\x00\x02\x01\x00\x00')
+ERROR 2025-11-06 14:20:28,731 basehttp 20329 6189051904 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-06 14:20:28,734 basehttp 20329 6189051904 "POST /api/mikrotik/auth/ HTTP/1.1" 301 0
+INFO 2025-11-06 14:20:28,740 basehttp 20329 6189051904 code 400, message Bad request version ('\x00\x02\x01\x00\x00')
+ERROR 2025-11-06 14:20:28,741 basehttp 20329 6189051904 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-06 14:20:28,781 mikrotik 20384 8650318144 Would attempt admin bypass for user 255684106419
+INFO 2025-11-06 14:20:28,781 mikrotik 20384 8650318144 Successfully logged 255684106419 into MikroTik hotspot - MAC: AA:BB:CC:DD:EE:FF, IP: 192.168.1.100
+INFO 2025-11-06 14:20:40,257 basehttp 20329 6189051904 "POST /api/mikrotik/auth/ HTTP/1.1" 301 0
+INFO 2025-11-06 14:20:48,514 basehttp 20329 6189051904 "POST /mikrotik/auth/ HTTP/1.1" 301 0
+INFO 2025-11-06 14:21:23,218 basehttp 20329 6189051904 "POST /api/mikrotik/auth/ HTTP/1.1" 301 0
+INFO 2025-11-06 14:22:26,303 views 21624 8650318144 Mikrotik auth request: method=POST, username=255684106419, mac=AA:BB:CC:DD:EE:FF, ip=192.168.1.100, frontend=True
+INFO 2025-11-06 14:22:26,307 mikrotik 21624 8650318144 Device connection tracked for 255684106419: AA:BB:CC:DD:EE:FF -> 192.168.1.100 (connection: wifi, method: voucher)
+INFO 2025-11-06 14:22:26,308 views 21624 8650318144 Enhanced device tracking successful for 255684106419: AA:BB:CC:DD:EE:FF -> 192.168.1.100 (method: voucher)
+INFO 2025-11-06 14:22:26,310 views 21624 8650318144 MikroTik auth SUCCESS for 255684106419: Access granted (method: voucher)
+INFO 2025-11-06 14:22:26,310 views 21624 8650318144 Mikrotik auth request: method=POST, username=255684106419, mac=AA:BB:CC:DD:EE:FF, ip=192.168.1.100, frontend=False
+INFO 2025-11-06 14:22:26,312 mikrotik 21624 8650318144 Device connection tracked for 255684106419: AA:BB:CC:DD:EE:FF -> 192.168.1.100 (connection: wifi, method: voucher)
+INFO 2025-11-06 14:22:26,312 views 21624 8650318144 Enhanced device tracking successful for 255684106419: AA:BB:CC:DD:EE:FF -> 192.168.1.100 (method: voucher)
+INFO 2025-11-06 14:22:26,313 views 21624 8650318144 MikroTik auth SUCCESS for 255684106419: Access granted (method: voucher)
+INFO 2025-11-06 14:22:26,313 views 21624 8650318144 Mikrotik logout request: method=POST, username=255684106419, ip=192.168.1.100, frontend=True
+INFO 2025-11-06 14:22:26,314 views 21624 8650318144 Mikrotik logout successful for 255684106419

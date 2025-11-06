@@ -50,10 +50,9 @@ class User(models.Model):
     
     def save(self, *args, **kwargs):
         """Override save to ensure max_devices defaults to 1"""
-        if not self.pk:  # New user
-            # Always default to 1 device per user
-            if not hasattr(self, 'max_devices') or self.max_devices is None:
-                self.max_devices = 1
+        # Always ensure max_devices has a value (for both new and existing users)
+        if self.max_devices is None:
+            self.max_devices = 1
         super().save(*args, **kwargs)
     
     def has_active_access(self):

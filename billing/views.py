@@ -3010,7 +3010,15 @@ def mikrotik_auth(request):
     
     Works for both payment and voucher users through unified access checking
     Handles both form data and JSON data from MikroTik routers
+    Enhanced to handle frontend API calls with JSON responses
     """
+    # Detect if this is a frontend API call or MikroTik router call
+    is_frontend_call = (
+        request.content_type == 'application/json' or 
+        'application/json' in request.META.get('HTTP_ACCEPT', '') or
+        request.META.get('HTTP_USER_AGENT', '').startswith('Mozilla/')
+    )
+    
     # Get parameters from Mikrotik (can be POST or GET, form data or JSON)
     username = None
     password = ''
@@ -3028,7 +3036,7 @@ def mikrotik_auth(request):
         if not username:
             try:
                 json_data = json.loads(request.body.decode('utf-8'))
-                username = json_data.get('username')
+                username = json_data.get('username') or json_data.get('phone_number')
                 password = json_data.get('password', '')
                 mac_address = json_data.get('mac', '')
                 ip_address = json_data.get('ip', '')
@@ -3041,11 +3049,18 @@ def mikrotik_auth(request):
         mac_address = request.GET.get('mac', '')
         ip_address = request.GET.get('ip', '')
     
-    logger.info(f'Mikrotik auth request: method={request.method}, username={username}, mac={mac_address}, ip={ip_address}')
+    logger.info(f'Mikrotik auth request: method={request.method}, username={username}, mac={mac_address}, ip={ip_address}, frontend={is_frontend_call}')
     
     if not username:
         logger.warning('Mikrotik auth failed: No username provided')
-        return HttpResponse('No username provided', status=403)
+        error_msg = 'No username provided'
+        if is_frontend_call:
+            return JsonResponse({
+                'error': error_msg,
+                'auth-state': 0,
+                'success': False
+            }, status=400)
+        return HttpResponse(error_msg, status=403)
     
     try:
         # Check if user exists and has valid access
@@ -3156,34 +3171,84 @@ def mikrotik_auth(request):
                 logger.warning(f'Authentication request for {username} without MAC address - allowing access (method: {access_method})')
         
         # Log access attempt with enhanced information
-        AccessLog.objects.create(
-            user=user,
-            device=device,
-            ip_address=ip_address or '127.0.0.1',
-            mac_address=mac_address,
-            access_granted=has_access,
-            denial_reason=denial_reason
-        )
+        try:
+            AccessLog.objects.create(
+                user=user,
+                device=device,
+                ip_address=ip_address or '127.0.0.1',
+                mac_address=mac_address,
+                access_granted=has_access,
+                denial_reason=denial_reason
+            )
+        except Exception as log_error:
+            logger.error(f'Access log error for {username}: {str(log_error)}')
         
         # Update user status if expired (deactivate if no valid access)
         if not has_access and user.is_active and not denial_reason.startswith('Device limit'):
             user.deactivate_access()
             logger.info(f'User {username} deactivated due to expired access (method was: {access_method})')
         
-        # Return appropriate response for MikroTik based on access status
+        # Return appropriate response based on caller type
+        device_count = user.devices.filter(is_active=True).count() if hasattr(user, 'devices') else 0
+        max_devices = getattr(user, 'max_devices', 3) or 3
+        
         if has_access:
             logger.info(f'MikroTik auth SUCCESS for {username}: Access granted (method: {access_method})')
-            return HttpResponse('OK', status=200)
+            
+            if is_frontend_call:
+                return JsonResponse({
+                    'auth-state': 1,
+                    'success': True,
+                    'message': 'Authentication successful',
+                    'user': username,
+                    'device_count': device_count,
+                    'max_devices': max_devices,
+                    'access_type': access_method
+                })
+            else:
+                return HttpResponse('OK', status=200)
         else:
             logger.warning(f'Mikrotik auth DENIED for {username}: {denial_reason} (method: {access_method})')
-            return HttpResponse(denial_reason, status=403)
+            
+            if is_frontend_call:
+                return JsonResponse({
+                    'error': denial_reason,
+                    'auth-state': 0,
+                    'success': False,
+                    'message': denial_reason,
+                    'device_count': device_count,
+                    'max_devices': max_devices
+                }, status=403)
+            else:
+                return HttpResponse(denial_reason, status=403)
         
     except User.DoesNotExist:
         logger.warning(f'Mikrotik auth failed for {username}: User not found - no payment or voucher history')
-        return HttpResponse('User not found - please make payment or redeem voucher', status=403)
+        error_msg = 'User not found - please make payment or redeem voucher'
+        
+        if is_frontend_call:
+            return JsonResponse({
+                'error': error_msg,
+                'auth-state': 0,
+                'success': False,
+                'message': error_msg
+            }, status=404)
+        else:
+            return HttpResponse(error_msg, status=403)
+            
     except Exception as e:
         logger.error(f'Error in Mikrotik authentication for {username}: {str(e)}')
-        return HttpResponse('Authentication error', status=500)
+        error_msg = 'Authentication error'
+        
+        if is_frontend_call:
+            return JsonResponse({
+                'error': error_msg,
+                'auth-state': 0,
+                'success': False,
+                'message': str(e)
+            }, status=500)
+        else:
+            return HttpResponse(error_msg, status=500)
 
 
 @csrf_exempt
@@ -3192,54 +3257,108 @@ def mikrotik_logout(request):
     Mikrotik hotspot logout endpoint
     
     Handles both form data and JSON data from MikroTik routers
+    Fixed to handle frontend API calls properly
     """
+    # Detect if this is a frontend API call
+    is_frontend_call = (
+        request.content_type == 'application/json' or 
+        'application/json' in request.META.get('HTTP_ACCEPT', '') or
+        request.META.get('HTTP_USER_AGENT', '').startswith('Mozilla/')
+    )
+    
     username = None
     ip_address = ''
     
     if request.method == 'POST':
-        # Try form data first
-        username = request.POST.get('username')
-        ip_address = request.POST.get('ip', '')
-        
-        # If not found in form data, try JSON
-        if not username:
-            try:
+        # Try JSON first (for frontend API calls)
+        try:
+            if request.content_type == 'application/json':
                 json_data = json.loads(request.body.decode('utf-8'))
-                username = json_data.get('username')
-                ip_address = json_data.get('ip', '')
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                pass
+                username = json_data.get('username') or json_data.get('phone_number')
+                ip_address = json_data.get('ip') or json_data.get('ip_address', '')
+            else:
+                # Try form data (for MikroTik router calls)
+                username = request.POST.get('username')
+                ip_address = request.POST.get('ip', '')
+                
+                # If not found in form data, try JSON anyway
+                if not username:
+                    json_data = json.loads(request.body.decode('utf-8'))
+                    username = json_data.get('username') or json_data.get('phone_number')
+                    ip_address = json_data.get('ip') or json_data.get('ip_address', '')
+        except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
+            # Fallback to form data
+            username = request.POST.get('username')
+            ip_address = request.POST.get('ip', '')
     else:
         # GET request
         username = request.GET.get('username')
         ip_address = request.GET.get('ip', '')
     
-    logger.info(f'Mikrotik logout request: method={request.method}, username={username}, ip={ip_address}')
+    logger.info(f'Mikrotik logout request: method={request.method}, username={username}, ip={ip_address}, frontend={is_frontend_call}')
     
     if not username:
-        return HttpResponse('No username provided', status=400)
+        error_msg = 'No username provided'
+        if is_frontend_call:
+            return JsonResponse({
+                'error': error_msg,
+                'success': False,
+                'message': error_msg
+            }, status=400)
+        return HttpResponse(error_msg, status=400)
     
     try:
         # Log the logout
         user = User.objects.get(phone_number=username)
-        AccessLog.objects.create(
-            user=user,
-            ip_address=ip_address or '127.0.0.1',
-            mac_address='',
-            access_granted=False,
-            denial_reason='Mikrotik logout'
-        )
+        
+        # Create access log for logout
+        try:
+            AccessLog.objects.create(
+                user=user,
+                ip_address=ip_address or '127.0.0.1',
+                mac_address='',
+                access_granted=False,
+                denial_reason='Mikrotik logout'
+            )
+        except Exception as log_error:
+            logger.error(f'Access log error during logout for {username}: {str(log_error)}')
         
         logger.info(f'Mikrotik logout successful for {username}')
-        return HttpResponse('OK', status=200)
+        
+        if is_frontend_call:
+            return JsonResponse({
+                'success': True,
+                'message': 'Logout successful',
+                'user': username
+            })
+        else:
+            return HttpResponse('OK', status=200)
         
     except User.DoesNotExist:
-        # User not found but still return OK
+        # User not found but still return OK for MikroTik compatibility
         logger.info(f'Mikrotik logout for unknown user {username}')
-        return HttpResponse('OK', status=200)
+        
+        if is_frontend_call:
+            return JsonResponse({
+                'success': True,
+                'message': 'Logout completed',
+                'warning': 'User not found'
+            })
+        else:
+            return HttpResponse('OK', status=200)
+            
     except Exception as e:
         logger.error(f'Error in Mikrotik logout for {username}: {str(e)}')
-        return HttpResponse('Logout error', status=500)
+        error_msg = 'Logout error'
+        
+        if is_frontend_call:
+            return JsonResponse({
+                'error': error_msg,
+                'success': False,
+                'message': str(e)
+            }, status=500)
+        else:
+            return HttpResponse(error_msg, status=500)
 
 
 @api_view(['GET'])
