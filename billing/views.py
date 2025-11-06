@@ -2375,7 +2375,17 @@ def redeem_voucher(request):
                         'immediate_login_attempted': bool(mac_address and ip_address),
                         'immediate_login_success': immediate_login_success,
                         'ready_for_internet': (mikrotik_auth_result and user.has_active_access()) or immediate_login_success,
-                        'auto_connect_status': 'success' if immediate_login_success else 'will_authenticate_on_next_connection'
+                        'auto_connect_status': 'success' if immediate_login_success else 'will_authenticate_on_next_connection',
+                        'device_tracking': {
+                            'device_registered': bool(device),
+                            'device_id': device.id if device else None,
+                            'mac_address': mac_address,
+                            'ip_address': ip_address,
+                            'device_name': device.device_name if device else None,
+                            'is_new_device': device_info.get('device_registered', False) and 'device_id' in device_info,
+                            'device_count': user.get_active_devices().count(),
+                            'max_devices': user.max_devices
+                        }
                     }
                     
                     if mikrotik_auth_result or immediate_login_success:
@@ -2392,7 +2402,16 @@ def redeem_voucher(request):
                         'immediate_login_success': False,
                         'mikrotik_error': str(e),
                         'ready_for_internet': user.has_active_access(),  # User still has access, just MikroTik sync failed
-                        'auto_connect_status': 'will_authenticate_on_next_connection'
+                        'auto_connect_status': 'will_authenticate_on_next_connection',
+                        'device_tracking': {
+                            'device_registered': bool(device),
+                            'device_id': device.id if device else None,
+                            'mac_address': mac_address,
+                            'ip_address': ip_address,
+                            'note': 'Device tracked in database but MikroTik sync failed - will authenticate on next connection',
+                            'device_count': user.get_active_devices().count(),
+                            'max_devices': user.max_devices
+                        }
                     }
             else:
                 # No MAC address provided, but user still gets access for when they connect
@@ -2404,7 +2423,13 @@ def redeem_voucher(request):
                 mikrotik_integration_info = {
                     'mikrotik_auth_attempted': False,
                     'ready_for_internet': user.has_active_access(),
-                    'note': 'Device will be registered when user connects to WiFi'
+                    'note': 'Device will be registered when user connects to WiFi',
+                    'device_tracking': {
+                        'device_registered': False,
+                        'message': 'No device registered yet - will track when user connects to WiFi',
+                        'max_devices': user.max_devices,
+                        'current_device_count': user.get_active_devices().count()
+                    }
                 }
             
             # Create access log for voucher redemption
@@ -2923,11 +2948,16 @@ def mikrotik_auth(request):
         else:
             # User has access - handle device registration if MAC address provided
             if mac_address:
-                # User has access, now check device limit
+                # User has access, now check device limit and track device activity
                 device, created = Device.objects.get_or_create(
                     user=user,
                     mac_address=mac_address,
-                    defaults={'ip_address': ip_address, 'is_active': True}
+                    defaults={
+                        'ip_address': ip_address, 
+                        'is_active': True,
+                        'device_name': f'Device-{mac_address[-8:]}',  # Use last 8 chars of MAC
+                        'first_seen': timezone.now()
+                    }
                 )
                 
                 if created:
@@ -2940,13 +2970,14 @@ def mikrotik_auth(request):
                         device.save()
                         logger.warning(f'Device limit exceeded for {username}: {active_devices}/{user.max_devices} (method: {access_method})')
                     else:
-                        logger.info(f'New device registered for {username}: {mac_address} ({active_devices}/{user.max_devices}, method: {access_method})')
+                        logger.info(f'New device registered for {username}: {mac_address} -> {ip_address} ({active_devices}/{user.max_devices}, method: {access_method})')
                 else:
-                    # Update existing device
+                    # Update existing device with current session info
                     device.ip_address = ip_address
                     device.is_active = True
+                    device.last_seen = timezone.now()
                     device.save()
-                    logger.info(f'Existing device updated for {username}: {mac_address} (method: {access_method})')
+                    logger.info(f'Device activity tracked for {username}: {mac_address} -> {ip_address} (method: {access_method})')
             else:
                 # No MAC address provided - still allow access but log it
                 logger.warning(f'Authentication request for {username} without MAC address - allowing access (method: {access_method})')

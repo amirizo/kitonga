@@ -7,6 +7,7 @@ import hashlib
 import binascii
 import logging
 from django.conf import settings
+from django.utils import timezone
 from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
@@ -753,34 +754,69 @@ def trigger_immediate_hotspot_login(phone_number, mac_address, ip_address):
         # Get MikroTik client
         mikrotik = get_mikrotik_client()
         
+        # Track device in database before attempting login
+        device_tracked = False
+        try:
+            from .models import User, Device
+            user = User.objects.get(phone_number=phone_number)
+            
+            # Ensure device is properly tracked
+            device, device_created = Device.objects.get_or_create(
+                user=user,
+                mac_address=mac_address,
+                defaults={
+                    'ip_address': ip_address,
+                    'is_active': True,
+                    'device_name': f'Device-{mac_address[-8:]}'  # Use last 8 chars of MAC as name
+                }
+            )
+            
+            if not device_created:
+                # Update existing device info
+                device.ip_address = ip_address
+                device.is_active = True
+                device.last_seen = timezone.now()
+                device.save()
+                logger.info(f'Updated device tracking for {phone_number}: {mac_address} -> {ip_address}')
+            else:
+                logger.info(f'Created new device tracking for {phone_number}: {mac_address} -> {ip_address}')
+            
+            device_tracked = True
+            
+        except Exception as device_error:
+            logger.error(f'Error tracking device for {phone_number}: {str(device_error)}')
+        
         # Method 1: Try direct hotspot login
         login_result = mikrotik.perform_hotspot_login(phone_number, mac_address, ip_address)
         
         if login_result:
-            logger.info(f'Immediate hotspot login successful for {phone_number}')
+            logger.info(f'Immediate hotspot login successful for {phone_number} - device tracked: {device_tracked}')
             return {
                 'success': True,
                 'message': 'User logged into hotspot successfully',
-                'method': 'direct_login'
+                'method': 'direct_login',
+                'device_tracked': device_tracked
             }
         
         # Method 2: Try adding to active users list
         add_result = mikrotik.add_hotspot_active_user(phone_number, ip_address, mac_address)
         
         if add_result:
-            logger.info(f'User {phone_number} added to active hotspot users')
+            logger.info(f'User {phone_number} added to active hotspot users - device tracked: {device_tracked}')
             return {
                 'success': True,
                 'message': 'User added to active hotspot users',
-                'method': 'active_user_add'
+                'method': 'active_user_add',
+                'device_tracked': device_tracked
             }
         
         # Method 3: Prepare for authentication on next connection
-        logger.warning(f'Direct login methods failed for {phone_number}, user will authenticate on next connection')
+        logger.warning(f'Direct login methods failed for {phone_number}, user will authenticate on next connection - device tracked: {device_tracked}')
         return {
             'success': False,
             'message': 'Direct login failed, user will authenticate on next WiFi connection',
-            'method': 'deferred_auth'
+            'method': 'deferred_auth',
+            'device_tracked': device_tracked
         }
         
     except Exception as e:
@@ -788,7 +824,8 @@ def trigger_immediate_hotspot_login(phone_number, mac_address, ip_address):
         return {
             'success': False,
             'message': f'Login error: {str(e)}',
-            'method': 'error'
+            'method': 'error',
+            'device_tracked': False
         }
 
 
