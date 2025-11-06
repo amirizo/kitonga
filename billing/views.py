@@ -1824,8 +1824,30 @@ def initiate_payment(request):
     phone_number = serializer.validated_data['phone_number']
     bundle_id = serializer.validated_data.get('bundle_id')
     
+    # Optional device information for immediate access after payment
+    ip_address = request.data.get('ip_address', request.META.get('REMOTE_ADDR'))
+    mac_address = request.data.get('mac_address', '')
+    
     # Get or create user
     user, created = User.objects.get_or_create(phone_number=phone_number)
+    
+    # Register device if MAC address provided
+    device = None
+    if mac_address:
+        device, device_created = Device.objects.get_or_create(
+            user=user,
+            mac_address=mac_address,
+            defaults={'ip_address': ip_address or '127.0.0.1', 'is_active': True}
+        )
+        
+        if device_created:
+            logger.info(f'New device registered during payment initiation for {phone_number}: {mac_address}')
+        else:
+            # Update existing device
+            device.ip_address = ip_address or '127.0.0.1'
+            device.is_active = True
+            device.save()
+            logger.info(f'Device updated during payment initiation for {phone_number}: {mac_address}')
     
     # Get bundle or use default
     if bundle_id:
@@ -1976,16 +1998,48 @@ def clickpesa_webhook(request):
                 )
                 logger.info(f'Payment completed: {order_reference} - {transaction_id}')
                 
+                # Try to authenticate user with MikroTik immediately after payment
+                mikrotik_auth_result = None
+                try:
+                    from .mikrotik import authenticate_user_with_mikrotik
+                    
+                    # Try to find device information from recent access logs or request
+                    user = payment.user
+                    device = user.devices.filter(is_active=True).first()
+                    
+                    if device:
+                        mikrotik_auth_result = authenticate_user_with_mikrotik(
+                            phone_number=payment.phone_number,
+                            mac_address=device.mac_address,
+                            ip_address=device.ip_address
+                        )
+                        logger.info(f'MikroTik authentication after payment for {payment.phone_number}: {mikrotik_auth_result}')
+                    else:
+                        logger.info(f'No active device found for {payment.phone_number} - user will authenticate on next WiFi connection')
+                        
+                except Exception as e:
+                    logger.error(f'MikroTik authentication failed after payment for {payment.phone_number}: {str(e)}')
+                    mikrotik_auth_result = {'success': False, 'error': str(e)}
+                
                 from .nextsms import NextSMSAPI
                 from .models import SMSLog
                 
                 nextsms = NextSMSAPI()
                 duration_hours = payment.bundle.duration_hours if payment.bundle else 24
-                sms_result = nextsms.send_payment_confirmation(
-                    payment.phone_number,
-                    payment.amount,
-                    duration_hours
-                )
+                
+                # Enhanced SMS with connection instructions
+                if mikrotik_auth_result and mikrotik_auth_result.get('success'):
+                    sms_result = nextsms.send_payment_confirmation_with_auth_success(
+                        payment.phone_number,
+                        payment.amount,
+                        duration_hours
+                    )
+                else:
+                    sms_result = nextsms.send_payment_confirmation_with_reconnect_instructions(
+                        payment.phone_number,
+                        payment.amount,
+                        duration_hours
+                    )
                 
                 # Log SMS
                 SMSLog.objects.create(

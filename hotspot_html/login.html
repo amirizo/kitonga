@@ -85,7 +85,7 @@
         </div>
 
         <div class="message">
-            Connecting you to the WiFi portal... <span class="countdown" id="countdown">3</span>
+            Connecting you to the WiFi portal... <span class="countdown" id="countdown">2</span>
         </div>
 
         <div class="info small" id="status">Preparing connection, please wait.</div>
@@ -203,7 +203,10 @@
                 uamport: uamport || undefined,
                 source: 'mikrotik',
                 ua: ua,
-                ts: ts
+                ts: ts,
+                // Add device info for payment integration
+                device_mac: mac || ap_mac || undefined,
+                device_ip: ip || uamip || undefined
             };
 
             // Build final URL
@@ -237,55 +240,36 @@
                 }
             });
 
-            // Try to redirect after countdown; show friendly status and attempt simple reachability check
+            // Simplified redirect logic - just redirect after a short countdown
             var countdownEl = document.getElementById('countdown');
             var statusEl = document.getElementById('status');
-            var attempts = 0;
-            var maxAttempts = 3;
-            var waitSeconds = 3;
+            var waitSeconds = 2; // Reduced wait time
 
-            function tryRedirect(){
-                // Basic reachability test using Image beacon (doesn't require CORS)
-                attempts++;
-                statusEl.textContent = 'Connecting to portal... (attempt ' + attempts + ' of ' + maxAttempts + ')';
-
-                var img = new Image();
-                var pingUrl = finalUrl + (finalUrl.indexOf('?') === -1 ? '?_ping=1' : '&_ping=1');
-                var timedOut = false;
-                var to = setTimeout(function(){ timedOut = true; img.src = ''; onFailure(); }, 3500);
-
-                img.onload = function(){ if (timedOut) return; clearTimeout(to); onSuccess(); };
-                img.onerror = function(){ if (timedOut) return; clearTimeout(to); onFailure(); };
-
-                // Start image request
-                try { img.src = pingUrl; } catch(e){ clearTimeout(to); onFailure(); }
-            }
-
-            function onSuccess(){
-                // direct redirect
+            function doRedirect(){
+                statusEl.textContent = 'Redirecting to portal...';
+                // Direct redirect without connectivity testing
                 window.location.replace(finalUrl);
             }
 
-            function onFailure(){
-                if (attempts < maxAttempts){
-                    // retry after short backoff
-                    statusEl.textContent = 'Portal not reachable, retrying... (' + attempts + '/' + maxAttempts + ')';
-                    setTimeout(tryRedirect, 1200 * attempts);
-                } else {
-                    statusEl.textContent = 'Unable to reach portal. You can try the manual link below.';
-                    // Reveal manual link visibly
-                    manual.style.display = 'inline-block';
-                }
-            }
-
-            // Show countdown and then attempt redirect
+            // Show countdown and then redirect immediately
             var counter = waitSeconds;
             countdownEl.textContent = counter;
+            
+            // Update countdown display
             var counterTimer = setInterval(function(){
                 counter -= 1;
                 countdownEl.textContent = counter;
-                if (counter <= 0){ clearInterval(counterTimer); tryRedirect(); }
+                if (counter <= 0){ 
+                    clearInterval(counterTimer); 
+                    doRedirect(); 
+                }
             }, 1000);
+
+            // Also provide immediate redirect option
+            setTimeout(function(){
+                manual.style.display = 'inline-block';
+                manual.style.opacity = '0.8';
+            }, 500);
 
             // If user clicks manual link, open in same tab
             manual.addEventListener('click', function(e){
