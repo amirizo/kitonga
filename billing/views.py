@@ -3402,3 +3402,112 @@ def test_voucher_access(request):
             'success': False,
             'message': f'Test error: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def trigger_device_authentication(request):
+    """
+    Manually trigger MikroTik authentication for a user's device
+    This can be called after payment to activate internet access
+    """
+    phone_number = request.data.get('phone_number')
+    mac_address = request.data.get('mac_address', '')
+    ip_address = request.data.get('ip_address', request.META.get('REMOTE_ADDR'))
+    
+    if not phone_number:
+        return Response({
+            'success': False,
+            'message': 'Phone number is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        # Check if user exists and has valid access
+        user = User.objects.get(phone_number=phone_number)
+        
+        if not user.has_active_access():
+            return Response({
+                'success': False,
+                'message': 'User does not have active access. Please make payment or redeem voucher first.',
+                'user_status': {
+                    'has_access': False,
+                    'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+                    'is_active': user.is_active
+                }
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Register/update device if MAC address provided
+        device = None
+        if mac_address:
+            device, created = Device.objects.get_or_create(
+                user=user,
+                mac_address=mac_address,
+                defaults={'ip_address': ip_address, 'is_active': True}
+            )
+            
+            if not created:
+                device.ip_address = ip_address
+                device.is_active = True
+                device.save()
+        
+        # Try MikroTik authentication
+        mikrotik_result = None
+        try:
+            from .mikrotik import authenticate_user_with_mikrotik
+            mikrotik_result = authenticate_user_with_mikrotik(
+                phone_number=phone_number,
+                mac_address=mac_address,
+                ip_address=ip_address
+            )
+        except Exception as e:
+            logger.error(f'MikroTik authentication error for {phone_number}: {str(e)}')
+            mikrotik_result = {'success': False, 'error': str(e)}
+        
+        # Log the attempt
+        AccessLog.objects.create(
+            user=user,
+            device=device,
+            ip_address=ip_address or '127.0.0.1',
+            mac_address=mac_address,
+            access_granted=True,
+            denial_reason=f'Manual authentication trigger - MikroTik result: {mikrotik_result.get("success", False)}'
+        )
+        
+        response_data = {
+            'success': True,
+            'message': 'Authentication triggered successfully',
+            'user_status': {
+                'phone_number': phone_number,
+                'has_access': user.has_active_access(),
+                'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+                'is_active': user.is_active
+            },
+            'device_info': {
+                'mac_address': mac_address,
+                'ip_address': ip_address,
+                'device_registered': device is not None
+            },
+            'mikrotik_result': mikrotik_result,
+            'instructions': [
+                'Your device authentication has been triggered.',
+                'If you still cannot access internet:',
+                '1. Disconnect from WiFi and reconnect',
+                '2. Open a web browser and try to visit any website',
+                '3. You should automatically get internet access',
+                '4. If problems persist, contact support'
+            ]
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+        
+    except User.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'User not found. Please make payment or redeem voucher first.'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f'Error in manual authentication trigger: {str(e)}')
+        return Response({
+            'success': False,
+            'message': 'Authentication trigger failed due to system error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

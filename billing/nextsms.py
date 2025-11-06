@@ -255,3 +255,36 @@ class NextSMSAPI:
             'message': f'Sent {len(results)} SMS messages',
             'details': results
         }
+    
+    def send_payment_confirmation_with_auth_success(self, phone_number, amount, duration_hours):
+        """
+        Send payment confirmation with successful MikroTik authentication
+        """
+        message = (
+            f"✅ KITONGA WiFi: Payment successful! TSh {amount:,.0f} received. "
+            f"You're now connected with {duration_hours}h internet access. "
+            f"Your device is automatically authenticated. Enjoy browsing!"
+        )
+        
+        return self.send_sms(
+            phone_number=phone_number,
+            message=message,
+            reference=f'payment_auth_success_{phone_number}'
+        )
+    
+    def send_payment_confirmation_with_reconnect_instructions(self, phone_number, amount, duration_hours):
+        """
+        Send payment confirmation with instructions to reconnect for authentication
+        """
+        message = (
+            f"✅ KITONGA WiFi: Payment successful! TSh {amount:,.0f} received. "
+            f"Access granted for {duration_hours}h. "
+            f"Please DISCONNECT and RECONNECT to WiFi to activate internet access. "
+            f"Or restart your WiFi connection."
+        )
+        
+        return self.send_sms(
+            phone_number=phone_number,
+            message=message,
+            reference=f'payment_reconnect_{phone_number}'
+        )

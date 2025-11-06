@@ -21,6 +21,7 @@ urlpatterns = [
     path('user-status/<str:phone_number>/', views.user_status, name='user_status'),
     path('devices/<str:phone_number>/', views.list_user_devices, name='list_user_devices'),
     path('devices/remove/', views.remove_device, name='remove_device'),
+    path('trigger-auth/', views.trigger_device_authentication, name='trigger_device_authentication'),
     
     # Voucher endpoints
     path('vouchers/generate/', views.generate_vouchers, name='generate_vouchers'),

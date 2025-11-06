@@ -37,22 +37,40 @@ class MikrotikIntegration:
             dict: Success status and message
         """
         try:
-            # For Mikrotik external authentication, we just return success
-            # The actual authentication is handled by Django
-            # Mikrotik will allow/deny based on our HTTP response
+            # Try to add user to active hotspot users if we have the necessary info
+            if mac_address and ip_address:
+                success = self.add_hotspot_active_user(
+                    username=phone_number,
+                    address=ip_address,
+                    mac_address=mac_address
+                )
+                
+                if success:
+                    logger.info(f'Successfully added {phone_number} to MikroTik active users - MAC: {mac_address}, IP: {ip_address}')
+                    return {
+                        'success': True,
+                        'message': 'User added to MikroTik active hotspot users',
+                        'mikrotik_response': 'User authenticated and activated',
+                        'method': 'active_user_add'
+                    }
+                else:
+                    logger.warning(f'Failed to add {phone_number} to MikroTik active users - falling back to external auth')
             
-            logger.info(f'Mikrotik authentication request for user {phone_number}')
+            # Fallback to external authentication validation
+            logger.info(f'MikroTik external authentication validated for user {phone_number}')
             return {
                 'success': True,
-                'message': 'User authentication validated by Django',
-                'mikrotik_response': 'External authentication successful'
+                'message': 'User authentication validated by Django (external auth)',
+                'mikrotik_response': 'External authentication successful',
+                'method': 'external_auth'
             }
             
         except Exception as e:
-            logger.error(f'Error in Mikrotik authentication for user {phone_number}: {str(e)}')
+            logger.error(f'Error in MikroTik authentication for user {phone_number}: {str(e)}')
             return {
                 'success': False,
-                'message': f'Authentication error: {str(e)}'
+                'message': f'Authentication error: {str(e)}',
+                'method': 'error'
             }
     
     def logout_user_from_hotspot(self, phone_number, ip_address=""):
