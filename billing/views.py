@@ -31,7 +31,13 @@ from .serializers import (
 from .clickpesa import ClickPesaAPI
 from .utils import get_active_users_count, get_revenue_statistics
 from .permissions import SimpleAdminTokenPermission
-from .mikrotik import authenticate_user_with_mikrotik, logout_user_from_mikrotik
+from .mikrotik import (
+    authenticate_user_with_mikrotik, 
+    logout_user_from_mikrotik, 
+    track_device_connection,
+    enhance_device_tracking_for_payment,
+    enhance_device_tracking_for_voucher
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1759,8 +1765,12 @@ def verify_access(request):
                 )
                 
                 if device_tracking_result['success']:
-                    device = user.devices.get(mac_address=mac_address)
-                    logger.info(f'Enhanced device tracking successful during access verification for {phone_number}: {mac_address} (method: {access_method})')
+                    try:
+                        device = user.devices.get(mac_address=mac_address)
+                        logger.info(f'Enhanced device tracking successful during access verification for {phone_number}: {mac_address} (method: {access_method})')
+                    except Device.DoesNotExist:
+                        logger.warning(f'Device tracking reported success but device not found during access verification for {phone_number}: {mac_address}')
+                        device = None
                 else:
                     # Check if device limit was exceeded
                     if device_tracking_result.get('device_limit_exceeded'):
@@ -2348,6 +2358,10 @@ def redeem_voucher(request):
         if success:
             logger.info(f'Voucher {voucher_code} redeemed by {phone_number} - access granted for {voucher.duration_hours} hours')
             
+            # Initialize variables that will be used throughout the response
+            immediate_login_success = False
+            mikrotik_auth_result = False
+            
             # Handle device registration if MAC address provided
             device = None
             device_info = {}
@@ -2401,6 +2415,44 @@ def redeem_voucher(request):
                         mac_address=mac_address,
                         defaults={'ip_address': ip_address or '127.0.0.1', 'is_active': True}
                     )
+                    
+                    if device_created:
+                        active_devices = user.get_active_devices().count()
+                        if active_devices <= user.max_devices:
+                            device_info = {
+                                'device_registered': True,
+                                'device_id': device.id,
+                                'mac_address': mac_address,
+                                'device_count': active_devices,
+                                'max_devices': user.max_devices,
+                                'fallback_registration': True
+                            }
+                            logger.info(f'Fallback device registration successful for voucher user {phone_number}: {mac_address}')
+                        else:
+                            # Device limit exceeded
+                            device.is_active = False
+                            device.save()
+                            device_info = {
+                                'device_registered': False,
+                                'device_limit_exceeded': True,
+                                'device_count': active_devices,
+                                'max_devices': user.max_devices,
+                                'warning': 'Device limit exceeded. Please remove an existing device first.'
+                            }
+                            logger.warning(f'Device limit exceeded for voucher user {phone_number}: {active_devices}/{user.max_devices}')
+                    else:
+                        # Update existing device
+                        device.ip_address = ip_address or device.ip_address
+                        device.is_active = True
+                        device.save()
+                        device_info = {
+                            'device_registered': True,
+                            'device_id': device.id,
+                            'mac_address': mac_address,
+                            'existing_device_updated': True,
+                            'fallback_registration': True
+                        }
+                        logger.info(f'Fallback device update successful for voucher user {phone_number}: {mac_address}')
                 
                 if device_created:
                     active_devices = user.get_active_devices().count()
@@ -2440,11 +2492,12 @@ def redeem_voucher(request):
                 
                 # Try to authenticate with MikroTik immediately after successful voucher redemption
                 try:
+                    from .mikrotik import authenticate_user_with_mikrotik
+                    
                     # Call MikroTik authentication to grant immediate internet access
                     mikrotik_auth_result = authenticate_user_with_mikrotik(phone_number, mac_address, ip_address)
                     
                     # Also try to trigger immediate login if we have device info
-                    immediate_login_success = False
                     if mac_address and ip_address:
                         try:
                             # Make a direct call to MikroTik login endpoint to grant immediate access
@@ -3051,8 +3104,12 @@ def mikrotik_auth(request):
                     )
                     
                     if device_tracking_result['success']:
-                        device = user.devices.get(mac_address=mac_address)
-                        logger.info(f'Enhanced device tracking successful for {username}: {mac_address} -> {ip_address} (method: {access_method})')
+                        try:
+                            device = user.devices.get(mac_address=mac_address)
+                            logger.info(f'Enhanced device tracking successful for {username}: {mac_address} -> {ip_address} (method: {access_method})')
+                        except Device.DoesNotExist:
+                            logger.warning(f'Device tracking reported success but device not found for {username}: {mac_address}')
+                            device = None
                     else:
                         # Check if device limit was exceeded
                         if device_tracking_result.get('device_limit_exceeded'):
