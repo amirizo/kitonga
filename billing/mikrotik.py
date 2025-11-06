@@ -758,28 +758,43 @@ def trigger_immediate_hotspot_login(phone_number, mac_address, ip_address):
         device_tracked = False
         try:
             from .models import User, Device
+            from django.utils import timezone
             user = User.objects.get(phone_number=phone_number)
             
-            # Ensure device is properly tracked
+            # Ensure device is properly tracked with enhanced tracking
             device, device_created = Device.objects.get_or_create(
                 user=user,
                 mac_address=mac_address,
                 defaults={
                     'ip_address': ip_address,
                     'is_active': True,
-                    'device_name': f'Device-{mac_address[-8:]}'  # Use last 8 chars of MAC as name
+                    'device_name': f'Device-{mac_address[-8:]}',  # Use last 8 chars of MAC as name
+                    'first_seen': timezone.now()
                 }
             )
             
             if not device_created:
-                # Update existing device info
+                # Update existing device info with enhanced tracking
                 device.ip_address = ip_address
                 device.is_active = True
                 device.last_seen = timezone.now()
                 device.save()
-                logger.info(f'Updated device tracking for {phone_number}: {mac_address} -> {ip_address}')
+                logger.info(f'Updated device tracking for {phone_number}: {mac_address} -> {ip_address} (connection: WiFi voucher)')
             else:
-                logger.info(f'Created new device tracking for {phone_number}: {mac_address} -> {ip_address}')
+                # Check device limits for new device
+                active_devices = user.get_active_devices().count()
+                if active_devices > user.max_devices:
+                    device.is_active = False
+                    device.save()
+                    logger.warning(f'Device limit exceeded for {phone_number}: {active_devices}/{user.max_devices}')
+                    return {
+                        'success': False,
+                        'message': f'Device limit exceeded ({user.max_devices} devices max)',
+                        'method': 'device_limit_exceeded',
+                        'device_tracked': True
+                    }
+                else:
+                    logger.info(f'Created new device tracking for {phone_number}: {mac_address} -> {ip_address} (connection: WiFi voucher, {active_devices}/{user.max_devices})')
             
             device_tracked = True
             
@@ -864,5 +879,216 @@ def force_user_hotspot_login(phone_number, mac_address=None, ip_address=None):
             'success': False,
             'message': f'Force login error: {str(e)}',
             'method': 'error'
+        }
+
+
+def track_device_connection(phone_number, mac_address, ip_address, connection_type='wifi', access_method='unknown'):
+    """
+    Track device connection when user connects to WiFi
+    This is called from both payment and voucher flows to ensure device tracking
+    
+    Args:
+        phone_number: User's phone number
+        mac_address: User's MAC address
+        ip_address: User's IP address
+        connection_type: Type of connection ('wifi', 'ethernet', etc.)
+        access_method: How user got access ('payment', 'voucher', 'manual')
+    
+    Returns:
+        dict: Device tracking result with success status and device info
+    """
+    try:
+        from .models import User, Device
+        from django.utils import timezone
+        
+        # Get user
+        try:
+            user = User.objects.get(phone_number=phone_number)
+        except User.DoesNotExist:
+            logger.error(f'Device tracking failed: User {phone_number} not found')
+            return {
+                'success': False,
+                'message': 'User not found',
+                'device_tracked': False
+            }
+        
+        # Check if user has active access
+        if not user.has_active_access():
+            logger.warning(f'Device tracking attempt for user without access: {phone_number}')
+            return {
+                'success': False,
+                'message': 'User does not have active access',
+                'device_tracked': False
+            }
+        
+        # Track device connection
+        device, device_created = Device.objects.get_or_create(
+            user=user,
+            mac_address=mac_address,
+            defaults={
+                'ip_address': ip_address,
+                'is_active': True,
+                'device_name': f'Device-{mac_address[-8:]}',
+                'first_seen': timezone.now()
+            }
+        )
+        
+        device_info = {
+            'device_id': device.id,
+            'mac_address': mac_address,
+            'ip_address': ip_address,
+            'device_name': device.device_name,
+            'is_new_device': device_created,
+            'first_seen': device.first_seen.isoformat(),
+            'last_seen': device.last_seen.isoformat()
+        }
+        
+        if device_created:
+            # New device - check device limits
+            active_devices = user.get_active_devices().count()
+            
+            if active_devices > user.max_devices:
+                # Device limit exceeded - deactivate device
+                device.is_active = False
+                device.save()
+                
+                logger.warning(f'Device limit exceeded for {phone_number}: {active_devices}/{user.max_devices} (connection: {connection_type}, method: {access_method})')
+                
+                return {
+                    'success': False,
+                    'message': f'Device limit exceeded. Maximum {user.max_devices} devices allowed.',
+                    'device_tracked': True,
+                    'device_info': device_info,
+                    'device_limit_exceeded': True,
+                    'active_devices': active_devices,
+                    'max_devices': user.max_devices
+                }
+            else:
+                logger.info(f'New device registered for {phone_number}: {mac_address} -> {ip_address} (connection: {connection_type}, method: {access_method}, devices: {active_devices}/{user.max_devices})')
+        else:
+            # Existing device - update connection info
+            device.ip_address = ip_address
+            device.is_active = True
+            device.last_seen = timezone.now()
+            device.save()
+            
+            logger.info(f'Device connection tracked for {phone_number}: {mac_address} -> {ip_address} (connection: {connection_type}, method: {access_method})')
+        
+        # Update device info with current status
+        device_info.update({
+            'is_active': device.is_active,
+            'last_seen': device.last_seen.isoformat(),
+            'device_count': user.get_active_devices().count(),
+            'max_devices': user.max_devices,
+            'connection_type': connection_type,
+            'access_method': access_method
+        })
+        
+        return {
+            'success': True,
+            'message': 'Device connection tracked successfully',
+            'device_tracked': True,
+            'device_info': device_info,
+            'device_limit_exceeded': False
+        }
+        
+    except Exception as e:
+        logger.error(f'Error tracking device connection for {phone_number}: {str(e)}')
+        return {
+            'success': False,
+            'message': f'Device tracking error: {str(e)}',
+            'device_tracked': False
+        }
+
+
+def enhance_device_tracking_for_payment(payment_user, mac_address, ip_address):
+    """
+    Enhanced device tracking specifically for payment users
+    
+    Args:
+        payment_user: User object who made payment
+        mac_address: Device MAC address
+        ip_address: Device IP address
+    
+    Returns:
+        dict: Device tracking result
+    """
+    try:
+        if not mac_address:
+            logger.warning(f'Payment device tracking: No MAC address provided for {payment_user.phone_number}')
+            return {
+                'success': False,
+                'message': 'No MAC address provided',
+                'device_tracked': False
+            }
+        
+        # Track device with payment method
+        result = track_device_connection(
+            phone_number=payment_user.phone_number,
+            mac_address=mac_address,
+            ip_address=ip_address,
+            connection_type='wifi',
+            access_method='payment'
+        )
+        
+        if result['success']:
+            logger.info(f'Payment device tracking successful for {payment_user.phone_number}: {mac_address}')
+        else:
+            logger.warning(f'Payment device tracking failed for {payment_user.phone_number}: {result["message"]}')
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f'Error in payment device tracking for {payment_user.phone_number}: {str(e)}')
+        return {
+            'success': False,
+            'message': f'Payment device tracking error: {str(e)}',
+            'device_tracked': False
+        }
+
+
+def enhance_device_tracking_for_voucher(voucher_user, mac_address, ip_address):
+    """
+    Enhanced device tracking specifically for voucher users
+    
+    Args:
+        voucher_user: User object who redeemed voucher
+        mac_address: Device MAC address
+        ip_address: Device IP address
+    
+    Returns:
+        dict: Device tracking result
+    """
+    try:
+        if not mac_address:
+            logger.warning(f'Voucher device tracking: No MAC address provided for {voucher_user.phone_number}')
+            return {
+                'success': False,
+                'message': 'No MAC address provided',
+                'device_tracked': False
+            }
+        
+        # Track device with voucher method
+        result = track_device_connection(
+            phone_number=voucher_user.phone_number,
+            mac_address=mac_address,
+            ip_address=ip_address,
+            connection_type='wifi',
+            access_method='voucher'
+        )
+        
+        if result['success']:
+            logger.info(f'Voucher device tracking successful for {voucher_user.phone_number}: {mac_address}')
+        else:
+            logger.warning(f'Voucher device tracking failed for {voucher_user.phone_number}: {result["message"]}')
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f'Error in voucher device tracking for {voucher_user.phone_number}: {str(e)}')
+        return {
+            'success': False,
+            'message': f'Voucher device tracking error: {str(e)}',
+            'device_tracked': False
         }
 

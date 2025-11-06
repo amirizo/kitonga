@@ -1746,29 +1746,56 @@ def verify_access(request):
             
         elif mac_address:
             # User has access, now check device management
-            device, created = Device.objects.get_or_create(
-                user=user,
-                mac_address=mac_address,
-                defaults={'ip_address': ip_address, 'is_active': True}
-            )
-            
-            if not created:
-                # Update existing device
-                device.ip_address = ip_address
-                device.is_active = True
-                device.save()
-                logger.info(f'Updated existing device for {phone_number}: {mac_address} (method: {access_method})')
-            else:
-                # New device - check if limit reached
-                active_devices = user.get_active_devices().count()
-                if active_devices > user.max_devices:
-                    has_access = False
-                    denial_reason = f'Device limit reached ({user.max_devices} devices max)'
-                    device.is_active = False
-                    device.save()
-                    logger.warning(f'Device limit exceeded for {phone_number}: {active_devices}/{user.max_devices} (method: {access_method})')
+            try:
+                from .mikrotik import track_device_connection
+                
+                # Enhanced device tracking for access verification
+                device_tracking_result = track_device_connection(
+                    phone_number=phone_number,
+                    mac_address=mac_address,
+                    ip_address=ip_address,
+                    connection_type='wifi',
+                    access_method=access_method
+                )
+                
+                if device_tracking_result['success']:
+                    device = user.devices.get(mac_address=mac_address)
+                    logger.info(f'Enhanced device tracking successful during access verification for {phone_number}: {mac_address} (method: {access_method})')
                 else:
-                    logger.info(f'New device registered for {phone_number}: {mac_address} ({active_devices}/{user.max_devices}, method: {access_method})')
+                    # Check if device limit was exceeded
+                    if device_tracking_result.get('device_limit_exceeded'):
+                        has_access = False
+                        denial_reason = device_tracking_result['message']
+                        logger.warning(f'Device limit exceeded during access verification for {phone_number}: {device_tracking_result.get("active_devices", 0)}/{device_tracking_result.get("max_devices", user.max_devices)} (method: {access_method})')
+                    else:
+                        logger.warning(f'Device tracking failed during access verification for {phone_number}: {device_tracking_result["message"]} (method: {access_method})')
+            
+            except Exception as tracking_error:
+                logger.error(f'Enhanced device tracking error during access verification for {phone_number}: {str(tracking_error)} (method: {access_method})')
+                # Fallback to original device tracking method
+                device, created = Device.objects.get_or_create(
+                    user=user,
+                    mac_address=mac_address,
+                    defaults={'ip_address': ip_address, 'is_active': True}
+                )
+                
+                if not created:
+                    # Update existing device
+                    device.ip_address = ip_address
+                    device.is_active = True
+                    device.save()
+                    logger.info(f'Updated existing device for {phone_number}: {mac_address} (method: {access_method})')
+                else:
+                    # New device - check if limit reached
+                    active_devices = user.get_active_devices().count()
+                    if active_devices > user.max_devices:
+                        has_access = False
+                        denial_reason = f'Device limit reached ({user.max_devices} devices max)'
+                        device.is_active = False
+                        device.save()
+                        logger.warning(f'Device limit exceeded for {phone_number}: {active_devices}/{user.max_devices} (method: {access_method})')
+                    else:
+                        logger.info(f'New device registered for {phone_number}: {mac_address} ({active_devices}/{user.max_devices}, method: {access_method})')
         
         # Log access attempt with enhanced information
         AccessLog.objects.create(
@@ -1833,21 +1860,32 @@ def initiate_payment(request):
     
     # Register device if MAC address provided
     device = None
+    device_tracking_result = None
     if mac_address:
-        device, device_created = Device.objects.get_or_create(
-            user=user,
-            mac_address=mac_address,
-            defaults={'ip_address': ip_address or '127.0.0.1', 'is_active': True}
-        )
-        
-        if device_created:
-            logger.info(f'New device registered during payment initiation for {phone_number}: {mac_address}')
-        else:
-            # Update existing device
-            device.ip_address = ip_address or '127.0.0.1'
-            device.is_active = True
-            device.save()
-            logger.info(f'Device updated during payment initiation for {phone_number}: {mac_address}')
+        try:
+            from .mikrotik import enhance_device_tracking_for_payment
+            
+            # Enhanced device tracking for payment initiation
+            device_tracking_result = enhance_device_tracking_for_payment(
+                payment_user=user,
+                mac_address=mac_address,
+                ip_address=ip_address or '127.0.0.1'
+            )
+            
+            if device_tracking_result['success']:
+                # Get the device object for further processing
+                device = user.devices.get(mac_address=mac_address)
+                logger.info(f'Device registered during payment initiation for {phone_number}: {mac_address}')
+            else:
+                logger.warning(f'Device tracking failed during payment initiation for {phone_number}: {device_tracking_result["message"]}')
+                
+        except Exception as device_error:
+            logger.error(f'Device registration error during payment initiation for {phone_number}: {str(device_error)}')
+            device_tracking_result = {
+                'success': False,
+                'message': f'Device registration error: {str(device_error)}',
+                'device_tracked': False
+            }
     
     # Get bundle or use default
     if bundle_id:
@@ -2001,19 +2039,28 @@ def clickpesa_webhook(request):
                 # Try to authenticate user with MikroTik immediately after payment
                 mikrotik_auth_result = None
                 try:
-                    from .mikrotik import authenticate_user_with_mikrotik
+                    from .mikrotik import authenticate_user_with_mikrotik, enhance_device_tracking_for_payment
                     
                     # Try to find device information from recent access logs or request
                     user = payment.user
                     device = user.devices.filter(is_active=True).first()
                     
                     if device:
+                        # Enhanced device tracking for payment users
+                        device_tracking_result = enhance_device_tracking_for_payment(
+                            payment_user=user,
+                            mac_address=device.mac_address,
+                            ip_address=device.ip_address
+                        )
+                        
+                        # Attempt MikroTik authentication
                         mikrotik_auth_result = authenticate_user_with_mikrotik(
                             phone_number=payment.phone_number,
                             mac_address=device.mac_address,
                             ip_address=device.ip_address
                         )
                         logger.info(f'MikroTik authentication after payment for {payment.phone_number}: {mikrotik_auth_result}')
+                        logger.info(f'Device tracking after payment for {payment.phone_number}: {device_tracking_result}')
                     else:
                         logger.info(f'No active device found for {payment.phone_number} - user will authenticate on next WiFi connection')
                         
@@ -2307,11 +2354,53 @@ def redeem_voucher(request):
             mikrotik_integration_info = {}
             
             if mac_address:
-                device, device_created = Device.objects.get_or_create(
-                    user=user,
-                    mac_address=mac_address,
-                    defaults={'ip_address': ip_address or '127.0.0.1', 'is_active': True}
-                )
+                try:
+                    from .mikrotik import enhance_device_tracking_for_voucher
+                    
+                    # Enhanced device tracking for voucher redemption
+                    device_tracking_result = enhance_device_tracking_for_voucher(
+                        voucher_user=user,
+                        mac_address=mac_address,
+                        ip_address=ip_address or '127.0.0.1'
+                    )
+                    
+                    if device_tracking_result['success']:
+                        device = user.devices.get(mac_address=mac_address)
+                        device_info = {
+                            'device_registered': True,
+                            'device_id': device.id,
+                            'mac_address': mac_address,
+                            'device_count': user.get_active_devices().count(),
+                            'max_devices': user.max_devices,
+                            'device_tracking_enhanced': True
+                        }
+                        logger.info(f'Enhanced device tracking successful for voucher user {phone_number}: {mac_address}')
+                    else:
+                        # Handle device tracking failure
+                        if device_tracking_result.get('device_limit_exceeded'):
+                            device_info = {
+                                'device_registered': False,
+                                'device_limit_exceeded': True,
+                                'device_count': device_tracking_result.get('active_devices', 0),
+                                'max_devices': device_tracking_result.get('max_devices', user.max_devices),
+                                'warning': device_tracking_result['message']
+                            }
+                        else:
+                            device_info = {
+                                'device_registered': False,
+                                'error': device_tracking_result['message'],
+                                'device_tracking_enhanced': False
+                            }
+                        logger.warning(f'Enhanced device tracking failed for voucher user {phone_number}: {device_tracking_result["message"]}')
+                
+                except Exception as device_error:
+                    logger.error(f'Device tracking error during voucher redemption for {phone_number}: {str(device_error)}')
+                    # Fallback to original device registration method
+                    device, device_created = Device.objects.get_or_create(
+                        user=user,
+                        mac_address=mac_address,
+                        defaults={'ip_address': ip_address or '127.0.0.1', 'is_active': True}
+                    )
                 
                 if device_created:
                     active_devices = user.get_active_devices().count()
@@ -2948,36 +3037,63 @@ def mikrotik_auth(request):
         else:
             # User has access - handle device registration if MAC address provided
             if mac_address:
-                # User has access, now check device limit and track device activity
-                device, created = Device.objects.get_or_create(
-                    user=user,
-                    mac_address=mac_address,
-                    defaults={
-                        'ip_address': ip_address, 
-                        'is_active': True,
-                        'device_name': f'Device-{mac_address[-8:]}',  # Use last 8 chars of MAC
-                        'first_seen': timezone.now()
-                    }
-                )
-                
-                if created:
-                    # New device - check if limit exceeded
-                    active_devices = user.get_active_devices().count()
-                    if active_devices > user.max_devices:
-                        has_access = False
-                        denial_reason = f'Device limit reached ({user.max_devices} devices max)'
-                        device.is_active = False
-                        device.save()
-                        logger.warning(f'Device limit exceeded for {username}: {active_devices}/{user.max_devices} (method: {access_method})')
+                # Enhanced device connection tracking for WiFi access
+                try:
+                    from .mikrotik import track_device_connection
+                    
+                    # Track device connection with access method detection
+                    device_tracking_result = track_device_connection(
+                        phone_number=username,
+                        mac_address=mac_address,
+                        ip_address=ip_address,
+                        connection_type='wifi',
+                        access_method=access_method
+                    )
+                    
+                    if device_tracking_result['success']:
+                        device = user.devices.get(mac_address=mac_address)
+                        logger.info(f'Enhanced device tracking successful for {username}: {mac_address} -> {ip_address} (method: {access_method})')
                     else:
-                        logger.info(f'New device registered for {username}: {mac_address} -> {ip_address} ({active_devices}/{user.max_devices}, method: {access_method})')
-                else:
-                    # Update existing device with current session info
-                    device.ip_address = ip_address
-                    device.is_active = True
-                    device.last_seen = timezone.now()
-                    device.save()
-                    logger.info(f'Device activity tracked for {username}: {mac_address} -> {ip_address} (method: {access_method})')
+                        # Check if device limit was exceeded
+                        if device_tracking_result.get('device_limit_exceeded'):
+                            has_access = False
+                            denial_reason = device_tracking_result['message']
+                            logger.warning(f'Device limit exceeded for {username}: {device_tracking_result.get("active_devices", 0)}/{device_tracking_result.get("max_devices", user.max_devices)} (method: {access_method})')
+                        else:
+                            logger.warning(f'Device tracking failed for {username}: {device_tracking_result["message"]} (method: {access_method})')
+                
+                except Exception as tracking_error:
+                    logger.error(f'Enhanced device tracking error for {username}: {str(tracking_error)} (method: {access_method})')
+                    # Fallback to original device tracking method
+                    device, created = Device.objects.get_or_create(
+                        user=user,
+                        mac_address=mac_address,
+                        defaults={
+                            'ip_address': ip_address, 
+                            'is_active': True,
+                            'device_name': f'Device-{mac_address[-8:]}',  # Use last 8 chars of MAC
+                            'first_seen': timezone.now()
+                        }
+                    )
+                    
+                    if created:
+                        # New device - check if limit exceeded
+                        active_devices = user.get_active_devices().count()
+                        if active_devices > user.max_devices:
+                            has_access = False
+                            denial_reason = f'Device limit reached ({user.max_devices} devices max)'
+                            device.is_active = False
+                            device.save()
+                            logger.warning(f'Device limit exceeded for {username}: {active_devices}/{user.max_devices} (method: {access_method})')
+                        else:
+                            logger.info(f'New device registered for {username}: {mac_address} -> {ip_address} ({active_devices}/{user.max_devices}, method: {access_method})')
+                    else:
+                        # Update existing device with current session info
+                        device.ip_address = ip_address
+                        device.is_active = True
+                        device.last_seen = timezone.now()
+                        device.save()
+                        logger.info(f'Device activity tracked for {username}: {mac_address} -> {ip_address} (method: {access_method})')
             else:
                 # No MAC address provided - still allow access but log it
                 logger.warning(f'Authentication request for {username} without MAC address - allowing access (method: {access_method})')
