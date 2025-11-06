@@ -1,302 +1,441 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <title>KITONGA WiFi - Connect to Internet</title>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kitonga WiFi - Connecting...</title>
-
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
     <style>
-        body {
+        * {
             margin: 0;
             padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            justify-content: center;
-            align-items: center;
             min-height: 100vh;
-            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
         }
-        .container {
+
+        .login-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+            max-width: 400px;
+            width: 100%;
+            position: relative;
+            animation: slideUp 0.5s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2196F3, #21CBF3);
+            color: white;
+            padding: 30px 20px;
             text-align: center;
-            background: rgba(255, 255, 255, 0.06);
-            padding: 36px;
-            border-radius: 12px;
-            backdrop-filter: blur(6px);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
-            max-width: 520px;
-            width: 92%;
+            position: relative;
         }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="20" cy="20" r="2" fill="rgba(255,255,255,0.1)"/><circle cx="80" cy="40" r="1.5" fill="rgba(255,255,255,0.1)"/><circle cx="40" cy="70" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="70" cy="15" r="1.2" fill="rgba(255,255,255,0.1)"/></svg>');
+        }
+
+        .wifi-icon {
+            font-size: 40px;
+            margin-bottom: 15px;
+            display: block;
+            position: relative;
+            z-index: 1;
+        }
+
         .logo {
-            font-size: 2.1em;
-            font-weight: 700;
-            margin-bottom: 12px;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.4);
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            position: relative;
+            z-index: 1;
         }
-        .loading { margin: 18px 0; }
-        .spinner {
-            border: 4px solid rgba(255, 255, 255, 0.22);
-            border-radius: 50%;
-            border-top: 4px solid #fff;
-            width: 46px;
-            height: 46px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto;
+
+        .subtitle {
+            font-size: 14px;
+            opacity: 0.9;
+            position: relative;
+            z-index: 1;
         }
-        @keyframes spin { 0% { transform: rotate(0deg);} 100% { transform: rotate(360deg);} }
-        .message { margin: 14px 0; font-size: 1.05em; }
-        .info { font-size: 0.9em; opacity: 0.85; margin-top: 10px; }
-        .manual-link {
-            display: inline-block;
-            background: rgba(255, 255, 255, 0.12);
-            color: white;
-            text-decoration: none;
-            padding: 10px 20px;
-            border-radius: 22px;
-            margin-top: 18px;
-            transition: background 0.25s ease;
-            border: 1px solid rgba(255,255,255,0.14);
+
+        .form-content {
+            padding: 30px;
         }
-        .manual-link:hover { background: rgba(255,255,255,0.18); }
-        .small { font-size: 0.85em; opacity: 0.8; }
-        .debug-panel {
-            margin-top: 14px;
-            background: rgba(0,0,0,0.25);
-            padding: 12px;
-            border-radius: 8px;
-            text-align: left;
-            display: none;
-            max-height: 320px;
-            overflow: auto;
-            font-family: monospace;
-            font-size: 12px;
+
+        .info-box {
+            background: #e3f2fd;
+            border: 1px solid #bbdefb;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 25px;
+            text-align: center;
+        }
+
+        .info-title {
+            font-weight: bold;
+            color: #1976d2;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+
+        .info-text {
+            color: #555;
+            font-size: 14px;
             line-height: 1.4;
         }
-        .debug-toggle { margin-top:12px; cursor: pointer; font-size:0.85em; color: #fff; opacity:0.85; }
-        .countdown { font-weight: 700; }
+
+        .error-box {
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #c62828;
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .input-container {
+            position: relative;
+        }
+
+        .phone-prefix {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #666;
+            font-size: 16px;
+            pointer-events: none;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 15px 20px 15px 50px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            background: #fafafa;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #2196F3;
+            background: white;
+            box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
+        }
+
+        .connect-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #2196F3, #21CBF3);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .connect-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(33, 150, 243, 0.3);
+        }
+
+        .connect-btn:active {
+            transform: translateY(0);
+        }
+
+        .connect-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .loading {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            background: #f5f5f5;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .footer-links {
+            font-size: 12px;
+            color: #666;
+            line-height: 1.5;
+        }
+
+        .footer-links a {
+            color: #2196F3;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .footer-links a:hover {
+            text-decoration: underline;
+        }
+
+        .features {
+            margin-top: 15px;
+            font-size: 12px;
+            color: #888;
+        }
+
+        .feature {
+            display: inline-block;
+            margin: 0 10px;
+        }
+
+        .feature::before {
+            content: '✓';
+            color: #4caf50;
+            font-weight: bold;
+            margin-right: 5px;
+        }
+
+        /* Responsive */
+        @media (max-width: 480px) {
+            .login-container {
+                margin: 10px;
+                border-radius: 15px;
+            }
+            
+            .header {
+                padding: 25px 15px;
+            }
+            
+            .form-content {
+                padding: 20px;
+            }
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="logo">📶 Kitonga WiFi</div>
-
-        <div class="loading">
-            <div class="spinner" aria-hidden="true"></div>
+    <div class="login-container">
+        <!-- Header Section -->
+        <div class="header">
+            <div class="wifi-icon">📶</div>
+            <div class="logo">KITONGA WiFi</div>
+            <div class="subtitle">High-Speed Internet Access</div>
         </div>
 
-        <div class="message">
-            Connecting you to the WiFi portal... <span class="countdown" id="countdown">2</span>
+        <!-- Form Content -->
+        <div class="form-content">
+            <!-- Info Box -->
+            <div class="info-box">
+                <div class="info-title">Enter Your Phone Number</div>
+                <div class="info-text">
+                    Make sure you have an active payment or voucher.<br>
+                    Your device will be automatically tracked and registered.
+                </div>
+            </div>
+
+            <!-- Error Display -->
+            $(if error)
+            <div class="error-box">
+                <strong>Authentication Failed:</strong> $(error)<br>
+                <small>Please check your phone number and ensure you have active access.</small>
+            </div>
+            $(endif)
+
+            <!-- Login Form -->
+            <form name="login" action="$(link-login-only)" method="post" onsubmit="return handleSubmit()">
+                <!-- Hidden Fields for MikroTik -->
+                <input type="hidden" name="dst" value="$(dst)" />
+                <input type="hidden" name="popup" value="true" />
+                
+                <!-- Phone Number Input -->
+                <div class="form-group">
+                    <label for="username">Phone Number:</label>
+                    <div class="input-container">
+                        <span class="phone-prefix">+</span>
+                        <input 
+                            type="text" 
+                            id="username"
+                            name="username" 
+                            placeholder="255xxxxxxxxx" 
+                            value="$(username)" 
+                            pattern="[0-9]{12}"
+                            title="Please enter a valid 12-digit phone number starting with 255"
+                            required 
+                            autocomplete="tel"
+                            inputmode="numeric"
+                        />
+                    </div>
+                </div>
+
+                <!-- Submit Button -->
+                <button type="submit" class="connect-btn" id="connectBtn">
+                    <span class="btn-text">Connect to Internet</span>
+                    <div class="loading">
+                        <div class="spinner"></div>
+                    </div>
+                </button>
+            </form>
         </div>
 
-        <div class="info small" id="status">Preparing connection, please wait.</div>
-
-        <!-- Manual fallback link (will be updated dynamically) -->
-        <a id="manualLink" class="manual-link" href="#">Continue to Portal</a>
-
-        <div class="debug-toggle" id="debugToggle">Show debug info</div>
-        <div class="debug-panel" id="debugPanel" aria-hidden="true"></div>
-
-        <!-- Keep original MikroTik placeholders as data attributes so router substitutions are preserved if present -->
-        <div id="mkPlaceholders" style="display:none"
-             data-mac="$(mac)"
-             data-ip="$(ip)"
-             data-username="$(username)"
-             data-link-login="$(link-login)"
-             data-link-orig="$(link-orig)"
-             data-ssid="$(ssid)"
-             data-ap-mac="$(ap-mac)"
-             data-uamip="$(uamip)"
-             data-uamport="$(uamport)"
-        ></div>
+        <!-- Footer -->
+        <div class="footer">
+            <div class="footer-links">
+                Need access? Visit <a href="https://kitonga.klikcell.com" target="_blank">kitonga.klikcell.com</a><br>
+                Support: <a href="tel:+255123456789">+255 123 456 789</a>
+            </div>
+            
+            <div class="features">
+                <span class="feature">Secure Connection</span>
+                <span class="feature">Device Tracking</span>
+                <span class="feature">24/7 Support</span>
+            </div>
+        </div>
     </div>
 
     <script>
-        (function(){
-            'use strict';
-
-            // Utility: parse query string into object
-            function parseQuery(qs) {
-                var s = qs || window.location.search || '';
-                if (!s) return {};
-                if (s.charAt(0) === '?') s = s.substring(1);
-                var parts = s.split('&');
-                var out = {};
-                for (var i=0;i<parts.length;i++){
-                    var p = parts[i];
-                    if (!p) continue;
-                    var kv = p.split('=');
-                    try{
-                        var k = decodeURIComponent(kv[0]);
-                        var v = kv.length>1?decodeURIComponent(kv.slice(1).join('=')):'':'';
-                        out[k]=v;
-                    }catch(e){ /* ignore bad encoding */ }
-                }
-                return out;
-            }
-
-            // Get value from MikroTik placeholders or querystring
-            function getVar(name, qs, placeholders) {
-                // Check query string first
-                if (qs[name]) return qs[name];
-
-                // Placeholder key mapping to dataset attr
-                var ph = placeholders['data-' + name.replace(/_/g,'-')];
-                if (ph && ph.indexOf('$(') === -1) {
-                    // If router already substituted it won't contain $(...) pattern
-                    return ph;
-                }
-
-                // try common alternative keys
-                var alt = {
-                    'link_login': 'link-login',
-                    'link_orig': 'link-orig',
-                    'ap_mac': 'ap-mac'
-                };
-                if (alt[name] && placeholders['data-' + alt[name]]){
-                    var v = placeholders['data-' + alt[name]];
-                    if (v && v.indexOf('$(') === -1) return v;
-                }
-
-                return '';
-            }
-
-            function buildPortalUrl(params) {
-                var base = 'https://kitonga.klikcell.com/';
-                var entries = [];
-                Object.keys(params).forEach(function(k){
-                    if (params[k] === undefined || params[k] === null || params[k] === '') return;
-                    entries.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k]));
-                });
-                if (entries.length) return base + '?' + entries.join('&');
-                return base;
-            }
-
-            var qs = parseQuery();
-            var phEl = document.getElementById('mkPlaceholders');
-            var placeholders = phEl ? phEl.dataset : {};
-
-            // Collect variables from query string and placeholders
-            var mac = getVar('mac', qs, placeholders) || getVar('ap_mac', qs, placeholders) || '';
-            var ip = getVar('ip', qs, placeholders) || getVar('uamip', qs, placeholders) || '';
-            var username = getVar('username', qs, placeholders) || '';
-            var link_login = getVar('link_login', qs, placeholders) || '';
-            var link_orig = getVar('link_orig', qs, placeholders) || '';
-            var ssid = getVar('ssid', qs, placeholders) || '';
-            var ap_mac = getVar('ap_mac', qs, placeholders) || '';
-            var uamip = getVar('uamip', qs, placeholders) || '';
-            var uamport = getVar('uamport', qs, placeholders) || '';
-
-            // Add telemetry
-            var ua = navigator.userAgent || '';
-            var ts = new Date().toISOString();
-
-            // Build params object; keep both original keys and friendly keys
-            var params = {
-                mac: mac || undefined,
-                ip: ip || undefined,
-                username: username || undefined,
-                link_login: link_login || undefined,
-                link_orig: link_orig || undefined,
-                ssid: ssid || undefined,
-                ap_mac: ap_mac || undefined,
-                uamip: uamip || undefined,
-                uamport: uamport || undefined,
-                source: 'mikrotik',
-                ua: ua,
-                ts: ts,
-                // Add device info for payment integration
-                device_mac: mac || ap_mac || undefined,
-                device_ip: ip || uamip || undefined
-            };
-
-            // Build final URL
-            var finalUrl = buildPortalUrl(params);
-
-            // Update manual link
-            var manual = document.getElementById('manualLink');
-            manual.setAttribute('href', finalUrl);
-
-            // Prepare debug panel content
-            var dbg = {
-                finalUrl: finalUrl,
-                parsedQuery: qs,
-                placeholders: placeholders,
-                collected: params
-            };
-            var debugPanel = document.getElementById('debugPanel');
-            debugPanel.textContent = JSON.stringify(dbg, null, 2);
-
-            // Toggle debug
-            var toggle = document.getElementById('debugToggle');
-            toggle.addEventListener('click', function(){
-                if (debugPanel.style.display === 'block'){
-                    debugPanel.style.display = 'none';
-                    debugPanel.setAttribute('aria-hidden','true');
-                    toggle.textContent = 'Show debug info';
-                } else {
-                    debugPanel.style.display = 'block';
-                    debugPanel.setAttribute('aria-hidden','false');
-                    toggle.textContent = 'Hide debug info';
-                }
-            });
-
-            // Simplified redirect logic - just redirect after a short countdown
-            var countdownEl = document.getElementById('countdown');
-            var statusEl = document.getElementById('status');
-            var waitSeconds = 2; // Reduced wait time
-
-            function doRedirect(){
-                statusEl.textContent = 'Redirecting to portal...';
-                // Direct redirect without connectivity testing
-                window.location.replace(finalUrl);
-            }
-
-            // Show countdown and then redirect immediately
-            var counter = waitSeconds;
-            countdownEl.textContent = counter;
+        // Enhanced form handling with loading state
+        function handleSubmit() {
+            const btn = document.getElementById('connectBtn');
+            const btnText = btn.querySelector('.btn-text');
+            const loading = btn.querySelector('.loading');
+            const phoneInput = document.getElementById('username');
             
-            // Update countdown display
-            var counterTimer = setInterval(function(){
-                counter -= 1;
-                countdownEl.textContent = counter;
-                if (counter <= 0){ 
-                    clearInterval(counterTimer); 
-                    doRedirect(); 
+            // Validate phone number format
+            const phoneValue = phoneInput.value.trim();
+            if (!phoneValue.match(/^255[0-9]{9}$/)) {
+                alert('Please enter a valid Tanzanian phone number (255xxxxxxxxx)');
+                phoneInput.focus();
+                return false;
+            }
+            
+            // Show loading state
+            btn.disabled = true;
+            btnText.style.opacity = '0';
+            loading.style.display = 'block';
+            
+            // Store phone number for potential retry
+            try {
+                localStorage.setItem('kitonga_phone', phoneValue);
+            } catch(e) {
+                // Ignore storage errors
+            }
+            
+            return true;
+        }
+
+        // Auto-fill from localStorage if available
+        window.addEventListener('load', function() {
+            try {
+                const storedPhone = localStorage.getItem('kitonga_phone');
+                const phoneInput = document.getElementById('username');
+                
+                if (storedPhone && !phoneInput.value) {
+                    phoneInput.value = storedPhone;
                 }
-            }, 1000);
-
-            // Also provide immediate redirect option
-            setTimeout(function(){
-                manual.style.display = 'inline-block';
-                manual.style.opacity = '0.8';
-            }, 500);
-
-            // If user clicks manual link, open in same tab
-            manual.addEventListener('click', function(e){
-                e.preventDefault();
-                window.location.href = finalUrl;
-            });
-
-            // If debug parameter present, show debug automatically
-            if (qs['debug'] === '1' || qs['debug'] === 'true'){
-                debugPanel.style.display = 'block';
-                debugPanel.setAttribute('aria-hidden','false');
-                toggle.textContent = 'Hide debug info';
+                
+                // Focus on phone input if empty
+                if (!phoneInput.value) {
+                    phoneInput.focus();
+                }
+            } catch(e) {
+                // Ignore storage errors
             }
+            
+            // Clear loading state if page loads with error
+            const btn = document.getElementById('connectBtn');
+            const btnText = btn.querySelector('.btn-text');
+            const loading = btn.querySelector('.loading');
+            
+            btn.disabled = false;
+            btnText.style.opacity = '1';
+            loading.style.display = 'none';
+        });
 
-            // Accessibility: allow long-press (5s) on logo to toggle debug (useful in kiosks)
-            var logoEl = document.querySelector('.logo');
-            if (logoEl){
-                var pressTimer = null;
-                logoEl.addEventListener('mousedown', function(){ pressTimer = setTimeout(function(){ toggle.click(); }, 5000); });
-                logoEl.addEventListener('mouseup', function(){ if (pressTimer) clearTimeout(pressTimer); });
-                logoEl.addEventListener('touchstart', function(){ pressTimer = setTimeout(function(){ toggle.click(); }, 5000); });
-                logoEl.addEventListener('touchend', function(){ if (pressTimer) clearTimeout(pressTimer); });
+        // Format phone number as user types
+        document.getElementById('username').addEventListener('input', function(e) {
+            let value = e.target.value.replace(/\D/g, ''); // Remove non-digits
+            
+            // Limit to 12 digits
+            if (value.length > 12) {
+                value = value.substring(0, 12);
             }
+            
+            // Auto-add 255 prefix if user starts typing without it
+            if (value.length > 0 && !value.startsWith('255')) {
+                if (value.length <= 9) {
+                    value = '255' + value;
+                }
+            }
+            
+            e.target.value = value;
+        });
 
-        })();
+        // Add enter key support
+        document.getElementById('username').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                document.querySelector('.connect-btn').click();
+            }
+        });
     </script>
-
-    <!-- End -->
 </body>
 </html>

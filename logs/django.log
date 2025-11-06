@@ -1275,3 +1275,27 @@ INFO 2025-11-06 14:22:26,312 views 21624 8650318144 Enhanced device tracking suc
 INFO 2025-11-06 14:22:26,313 views 21624 8650318144 MikroTik auth SUCCESS for 255684106419: Access granted (method: voucher)
 INFO 2025-11-06 14:22:26,313 views 21624 8650318144 Mikrotik logout request: method=POST, username=255684106419, ip=192.168.1.100, frontend=True
 INFO 2025-11-06 14:22:26,314 views 21624 8650318144 Mikrotik logout successful for 255684106419
+INFO 2025-11-06 15:08:20,335 autoreload 20329 8650318144 /Users/macbookair/Desktop/kitonga/billing/views.py changed, reloading.
+INFO 2025-11-06 15:08:21,024 autoreload 23674 8650318144 Watching for file changes with StatReloader
+INFO 2025-11-06 15:08:33,439 autoreload 23674 8650318144 /Users/macbookair/Desktop/kitonga/billing/views.py changed, reloading.
+INFO 2025-11-06 15:08:33,913 autoreload 23693 8650318144 Watching for file changes with StatReloader
+INFO 2025-11-06 15:11:01,456 views 23963 8650318144 Mikrotik auth request: method=POST, username=None, mac=, ip=, frontend=True
+WARNING 2025-11-06 15:11:01,456 views 23963 8650318144 Mikrotik auth failed: No username provided
+INFO 2025-11-06 15:11:50,832 views 24117 8650318144 Mikrotik auth request: method=POST, username=None, mac=, ip=, frontend=True
+WARNING 2025-11-06 15:11:50,832 views 24117 8650318144 Mikrotik auth failed: No username provided
+INFO 2025-11-06 15:12:08,397 views 24229 8650318144 Mikrotik auth request: method=POST, username=None, mac=, ip=, frontend=True
+WARNING 2025-11-06 15:12:08,397 views 24229 8650318144 Mikrotik auth failed: No username provided
+INFO 2025-11-06 15:13:49,542 autoreload 23693 8650318144 /Users/macbookair/Desktop/kitonga/billing/views.py changed, reloading.
+INFO 2025-11-06 15:13:50,094 autoreload 24423 8650318144 Watching for file changes with StatReloader
+INFO 2025-11-06 15:14:04,200 views 24482 8650318144 Mikrotik auth request: method=POST, username=255684106419, mac=AA:BB:CC:DD:EE:FF, ip=192.168.88.100, frontend=False
+INFO 2025-11-06 15:14:04,202 mikrotik 24482 8650318144 Device connection tracked for 255684106419: AA:BB:CC:DD:EE:FF -> 192.168.88.100 (connection: wifi, method: voucher)
+INFO 2025-11-06 15:14:04,202 views 24482 8650318144 Enhanced device tracking successful for 255684106419: AA:BB:CC:DD:EE:FF -> 192.168.88.100 (method: voucher)
+INFO 2025-11-06 15:14:04,204 views 24482 8650318144 MikroTik auth SUCCESS for 255684106419: Access granted (method: voucher, devices: 2/1)
+INFO 2025-11-06 15:14:04,204 views 24482 8650318144 Mikrotik auth request: method=POST, username=255684106419, mac=AA:BB:CC:DD:EE:FF, ip=192.168.88.100, frontend=True
+INFO 2025-11-06 15:14:04,205 mikrotik 24482 8650318144 Device connection tracked for 255684106419: AA:BB:CC:DD:EE:FF -> 192.168.88.100 (connection: wifi, method: voucher)
+INFO 2025-11-06 15:14:04,206 views 24482 8650318144 Enhanced device tracking successful for 255684106419: AA:BB:CC:DD:EE:FF -> 192.168.88.100 (method: voucher)
+INFO 2025-11-06 15:14:04,207 views 24482 8650318144 MikroTik auth SUCCESS for 255684106419: Access granted (method: voucher, devices: 2/1)
+INFO 2025-11-06 15:15:38,392 views 26193 8650318144 Mikrotik auth request: method=POST, username=255684106419, mac=CC:DD:EE:FF:AA:BB, ip=192.168.88.102, frontend=True
+INFO 2025-11-06 15:15:38,397 mikrotik 26193 8650318144 New device registered for 255684106419: CC:DD:EE:FF:AA:BB -> 192.168.88.102 (connection: wifi, method: voucher, devices: 3/3)
+INFO 2025-11-06 15:15:38,398 views 26193 8650318144 Enhanced device tracking successful for 255684106419: CC:DD:EE:FF:AA:BB -> 192.168.88.102 (method: voucher)
+INFO 2025-11-06 15:15:38,399 views 26193 8650318144 MikroTik auth SUCCESS for 255684106419: Access granted (method: voucher, devices: 3/3)

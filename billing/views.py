@@ -3189,11 +3189,20 @@ def mikrotik_auth(request):
             logger.info(f'User {username} deactivated due to expired access (method was: {access_method})')
         
         # Return appropriate response based on caller type
-        device_count = user.devices.filter(is_active=True).count() if hasattr(user, 'devices') else 0
+        # Fix device count calculation - ensure we get the actual count
+        try:
+            device_count = user.get_active_devices().count()
+            # If no devices yet, try to count all devices for this user
+            if device_count == 0:
+                device_count = user.devices.filter(is_active=True).count()
+        except Exception as device_count_error:
+            logger.warning(f'Error getting device count for {username}: {str(device_count_error)}')
+            device_count = 0
+        
         max_devices = getattr(user, 'max_devices', 3) or 3
         
         if has_access:
-            logger.info(f'MikroTik auth SUCCESS for {username}: Access granted (method: {access_method})')
+            logger.info(f'MikroTik auth SUCCESS for {username}: Access granted (method: {access_method}, devices: {device_count}/{max_devices})')
             
             if is_frontend_call:
                 return JsonResponse({
@@ -3203,12 +3212,19 @@ def mikrotik_auth(request):
                     'user': username,
                     'device_count': device_count,
                     'max_devices': max_devices,
-                    'access_type': access_method
+                    'access_type': access_method,
+                    'device_info': {
+                        'current_device': {
+                            'mac': mac_address,
+                            'ip': ip_address,
+                            'registered': device is not None
+                        } if mac_address else None
+                    }
                 })
             else:
                 return HttpResponse('OK', status=200)
         else:
-            logger.warning(f'Mikrotik auth DENIED for {username}: {denial_reason} (method: {access_method})')
+            logger.warning(f'Mikrotik auth DENIED for {username}: {denial_reason} (method: {access_method}, devices: {device_count}/{max_devices})')
             
             if is_frontend_call:
                 return JsonResponse({
@@ -3217,7 +3233,8 @@ def mikrotik_auth(request):
                     'success': False,
                     'message': denial_reason,
                     'device_count': device_count,
-                    'max_devices': max_devices
+                    'max_devices': max_devices,
+                    'access_type': access_method
                 }, status=403)
             else:
                 return HttpResponse(denial_reason, status=403)
