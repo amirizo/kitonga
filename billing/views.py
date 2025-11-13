@@ -1183,13 +1183,12 @@ def mikrotik_configuration(request):
             from django.conf import settings as django_settings
             
             config_data = {
-                'router_ip': getattr(django_settings, 'MIKROTIK_ROUTER_IP', ''),
-                'username': getattr(django_settings, 'MIKROTIK_USERNAME', ''),
+                'router_ip': getattr(django_settings, 'MIKROTIK_HOST', ''),
+                'username': getattr(django_settings, 'MIKROTIK_USER', ''),
                 'password_configured': bool(getattr(django_settings, 'MIKROTIK_PASSWORD', '')),
-                'api_port': getattr(django_settings, 'MIKROTIK_API_PORT', 8728),
-                'hotspot_name': getattr(django_settings, 'MIKROTIK_HOTSPOT_NAME', ''),
-                'connection_timeout': getattr(django_settings, 'MIKROTIK_CONNECTION_TIMEOUT', 10),
-                'max_login_attempts': getattr(django_settings, 'MIKROTIK_MAX_LOGIN_ATTEMPTS', 3)
+                'api_port': getattr(django_settings, 'MIKROTIK_PORT', 8728),
+                'use_ssl': getattr(django_settings, 'MIKROTIK_USE_SSL', False),
+                'default_profile': getattr(django_settings, 'MIKROTIK_DEFAULT_PROFILE', 'default')
             }
             
             return Response({
@@ -1268,11 +1267,11 @@ def test_mikrotik_connection(request):
     try:
         from .mikrotik import test_mikrotik_connection as test_connection
         
-        # Use provided credentials or default from settings
-        router_ip = request.data.get('router_ip') or getattr(settings, 'MIKROTIK_ROUTER_IP', '')
-        username = request.data.get('username') or getattr(settings, 'MIKROTIK_USERNAME', '')
+        # Use provided credentials or default from settings (using correct setting names)
+        router_ip = request.data.get('router_ip') or getattr(settings, 'MIKROTIK_HOST', '')
+        username = request.data.get('username') or getattr(settings, 'MIKROTIK_USER', '')
         password = request.data.get('password') or getattr(settings, 'MIKROTIK_PASSWORD', '')
-        api_port = request.data.get('api_port') or getattr(settings, 'MIKROTIK_API_PORT', 8728)
+        api_port = request.data.get('api_port') or getattr(settings, 'MIKROTIK_PORT', 8728)
         
         if not all([router_ip, username, password]):
             return Response({
@@ -1664,9 +1663,9 @@ def mikrotik_system_resources(request):
     Get MikroTik router system resources and performance metrics (Admin only)
     """
     try:
-        from .mikrotik import get_system_resources
+        from .mikrotik import get_router_info
         
-        result = get_system_resources()
+        result = get_router_info()
         
         if result['success']:
             return Response({
@@ -3496,14 +3495,12 @@ def mikrotik_status_check(request):
     Check MikroTik router status (Admin only)
     """
     try:
-        from .mikrotik import get_mikrotik_client
+        from .mikrotik import test_mikrotik_connection
         
-        # Get router configuration from settings
-        router_ip = settings.MIKROTIK_ROUTER_IP
-        hotspot_name = settings.MIKROTIK_HOTSPOT_NAME
-        
-        # Try to get MikroTik client
-        mikrotik_client = get_mikrotik_client()
+        # Get router configuration from settings (using correct variable names)
+        router_ip = settings.MIKROTIK_HOST
+        router_port = settings.MIKROTIK_PORT
+        router_user = settings.MIKROTIK_USER
         
         # Get active users count
         active_users_count = User.objects.filter(
@@ -3511,25 +3508,18 @@ def mikrotik_status_check(request):
             is_active=True
         ).count()
         
-        # Check if we can connect to router (basic connectivity test)
-        import socket
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5)
-            result = sock.connect_ex((router_ip, 80))  # Test HTTP port
-            sock.close()
-            connection_status = "connected" if result == 0 else "disconnected"
-        except Exception:
-            connection_status = "unknown"
+        # Test connection to router using the mikrotik module function
+        connection_test = test_mikrotik_connection()
+        connection_status = "connected" if connection_test.get('success') else "disconnected"
         
         return Response({
             'success': True,
             'router_ip': router_ip,
-            'hotspot_name': hotspot_name,
+            'router_port': router_port,
             'connection_status': connection_status,
+            'connection_details': connection_test,
             'active_users': active_users_count,
-            'api_port': settings.MIKROTIK_API_PORT,
-            'admin_user': settings.MIKROTIK_ADMIN_USER,
+            'admin_user': router_user,
             'timestamp': timezone.now().isoformat()
         })
         
@@ -3538,7 +3528,7 @@ def mikrotik_status_check(request):
         return Response({
             'success': False,
             'message': f'Failed to check router status: {str(e)}',
-            'router_ip': getattr(settings, 'MIKROTIK_ROUTER_IP', 'Not configured'),
+            'router_ip': getattr(settings, 'MIKROTIK_HOST', 'Not configured'),
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

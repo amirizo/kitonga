@@ -1,0 +1,392 @@
+#!/usr/bin/env python
+"""
+Test script for MikroTik Admin Endpoints
+Tests all 10 admin-only MikroTik management endpoints according to mikrotik.py configuration
+"""
+
+import os
+import sys
+import django
+
+# Setup Django
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'kitonga.settings')
+django.setup()
+
+from django.test import Client
+from django.contrib.auth import get_user_model
+from billing.models import User, Bundle, Payment
+from django.utils import timezone
+from datetime import timedelta
+import json
+
+# Test configuration
+client = Client()
+TEST_PHONE = "+255743852695"
+
+# Get admin token from environment or use the actual token from .env
+ADMIN_TOKEN = os.environ.get('ADMIN_TOKEN', 'kitonga_admin_2025')
+
+def print_header(title):
+    """Print formatted test header"""
+    print("\n" + "="*70)
+    print(f"  {title}")
+    print("="*70)
+
+def print_result(endpoint, method, status_code, response_data, passed):
+    """Print formatted test result"""
+    status = "✅ PASS" if passed else "❌ FAIL"
+    print(f"\n{status} - {method} {endpoint}")
+    print(f"Status Code: {status_code}")
+    if isinstance(response_data, dict):
+        print(f"Response: {json.dumps(response_data, indent=2)}")
+    else:
+        print(f"Response: {response_data[:500]}")  # Truncate long responses
+
+def setup_test_user():
+    """Create or get test user with active access"""
+    print_header("Setting up test user")
+    
+    user, created = User.objects.get_or_create(
+        phone_number=TEST_PHONE,
+        defaults={
+            'is_active': True,
+            'paid_until': timezone.now() + timedelta(hours=24),
+            'max_devices': 3
+        }
+    )
+    
+    if not created:
+        user.is_active = True
+        user.paid_until = timezone.now() + timedelta(hours=24)
+        user.save()
+    
+    bundle, _ = Bundle.objects.get_or_create(
+        name='Test Bundle',
+        defaults={
+            'price': 1000,
+            'duration_hours': 24,
+            'is_active': True
+        }
+    )
+    
+    if not user.payments.filter(status='completed').exists():
+        import uuid
+        Payment.objects.create(
+            user=user,
+            bundle=bundle,
+            amount=bundle.price,
+            status='completed',
+            phone_number=TEST_PHONE,
+            transaction_id=f'TEST-{uuid.uuid4().hex[:12]}',
+            order_reference=f'ORD-{uuid.uuid4().hex[:12]}'
+        )
+    
+    print(f"✅ Test user ready: {TEST_PHONE}")
+    return user
+
+def test_mikrotik_configuration():
+    """Test 1: GET MikroTik Configuration"""
+    print_header("Test 1: MikroTik Config - GET /api/admin/mikrotik/config/")
+    
+    response = client.get('/api/admin/mikrotik/config/', 
+                         HTTP_X_ADMIN_ACCESS=ADMIN_TOKEN)
+    
+    try:
+        data = response.json()
+        passed = response.status_code == 200 and data.get('success') == True
+        print_result('/api/admin/mikrotik/config/', 'GET', response.status_code, data, passed)
+        return passed
+    except:
+        passed = False
+        print_result('/api/admin/mikrotik/config/', 'GET', response.status_code, 
+                     response.content.decode(), passed)
+        return passed
+
+def test_test_connection():
+    """Test 2: Test MikroTik Connection"""
+    print_header("Test 2: Test Connection - GET /api/admin/mikrotik/test-connection/")
+    
+    response = client.get('/api/admin/mikrotik/test-connection/', 
+                         HTTP_X_ADMIN_TOKEN=ADMIN_TOKEN)
+    
+    try:
+        data = response.json()
+        passed = response.status_code == 200 and data.get('success') == True
+        print_result('/api/admin/mikrotik/test-connection/', 'GET', response.status_code, data, passed)
+        return passed
+    except:
+        passed = False
+        print_result('/api/admin/mikrotik/test-connection/', 'GET', response.status_code, 
+                     response.content.decode(), passed)
+        return passed
+
+def test_router_info():
+    """Test 3: Get Router Info"""
+    print_header("Test 3: Router Info - GET /api/admin/mikrotik/router-info/")
+    
+    response = client.get('/api/admin/mikrotik/router-info/', 
+                         HTTP_X_ADMIN_TOKEN=ADMIN_TOKEN)
+    
+    try:
+        data = response.json()
+        passed = response.status_code == 200 and data.get('success') == True
+        print_result('/api/admin/mikrotik/router-info/', 'GET', response.status_code, data, passed)
+        return passed
+    except:
+        passed = False
+        print_result('/api/admin/mikrotik/router-info/', 'GET', response.status_code, 
+                     response.content.decode(), passed)
+        return passed
+
+def test_active_users():
+    """Test 4: Get Active Hotspot Users"""
+    print_header("Test 4: Active Users - GET /api/admin/mikrotik/active-users/")
+    
+    response = client.get('/api/admin/mikrotik/active-users/', 
+                         HTTP_X_ADMIN_TOKEN=ADMIN_TOKEN)
+    
+    try:
+        data = response.json()
+        passed = response.status_code == 200 and data.get('success') == True
+        print_result('/api/admin/mikrotik/active-users/', 'GET', response.status_code, data, passed)
+        return passed
+    except:
+        passed = False
+        print_result('/api/admin/mikrotik/active-users/', 'GET', response.status_code, 
+                     response.content.decode(), passed)
+        return passed
+
+def test_disconnect_user():
+    """Test 5: Disconnect Specific User"""
+    print_header("Test 5: Disconnect User - POST /api/admin/mikrotik/disconnect-user/")
+    
+    response = client.post('/api/admin/mikrotik/disconnect-user/',
+        json.dumps({'phone_number': TEST_PHONE}),
+        content_type='application/json',
+        HTTP_X_ADMIN_TOKEN=ADMIN_TOKEN
+    )
+    
+    try:
+        data = response.json()
+        # This might return success even if user not connected - that's OK
+        passed = response.status_code in [200, 404] and data.get('success') in [True, False]
+        print_result('/api/admin/mikrotik/disconnect-user/', 'POST', response.status_code, data, passed)
+        return passed
+    except:
+        passed = False
+        print_result('/api/admin/mikrotik/disconnect-user/', 'POST', response.status_code, 
+                     response.content.decode(), passed)
+        return passed
+
+def test_disconnect_all():
+    """Test 6: Disconnect All Users"""
+    print_header("Test 6: Disconnect All - POST /api/admin/mikrotik/disconnect-all/")
+    
+    response = client.post('/api/admin/mikrotik/disconnect-all/',
+        content_type='application/json',
+        HTTP_X_ADMIN_TOKEN=ADMIN_TOKEN
+    )
+    
+    try:
+        data = response.json()
+        passed = response.status_code == 200 and data.get('success') == True
+        print_result('/api/admin/mikrotik/disconnect-all/', 'POST', response.status_code, data, passed)
+        return passed
+    except:
+        passed = False
+        print_result('/api/admin/mikrotik/disconnect-all/', 'POST', response.status_code, 
+                     response.content.decode(), passed)
+        return passed
+
+def test_reboot_router():
+    """Test 7: Reboot Router (Dry Run - Won't Actually Reboot)"""
+    print_header("Test 7: Reboot Router - POST /api/admin/mikrotik/reboot/")
+    
+    print("⚠️  Note: This test will NOT actually reboot the router")
+    print("    It will only test if the endpoint responds correctly")
+    
+    # We'll test the endpoint exists and requires auth, but won't actually reboot
+    response = client.post('/api/admin/mikrotik/reboot/',
+        json.dumps({'confirm': False}),  # Don't actually reboot
+        content_type='application/json',
+        HTTP_X_ADMIN_TOKEN=ADMIN_TOKEN
+    )
+    
+    try:
+        data = response.json()
+        # Accept success or confirmation required response
+        passed = response.status_code in [200, 400] and 'success' in data
+        print_result('/api/admin/mikrotik/reboot/', 'POST', response.status_code, data, passed)
+        return passed
+    except:
+        passed = False
+        print_result('/api/admin/mikrotik/reboot/', 'POST', response.status_code, 
+                     response.content.decode(), passed)
+        return passed
+
+def test_hotspot_profiles():
+    """Test 8: Get Hotspot Profiles"""
+    print_header("Test 8: Hotspot Profiles - GET /api/admin/mikrotik/profiles/")
+    
+    response = client.get('/api/admin/mikrotik/profiles/', 
+                         HTTP_X_ADMIN_TOKEN=ADMIN_TOKEN)
+    
+    try:
+        data = response.json()
+        passed = response.status_code == 200 and data.get('success') == True
+        print_result('/api/admin/mikrotik/profiles/', 'GET', response.status_code, data, passed)
+        return passed
+    except:
+        passed = False
+        print_result('/api/admin/mikrotik/profiles/', 'GET', response.status_code, 
+                     response.content.decode(), passed)
+        return passed
+
+def test_create_profile():
+    """Test 9: Create Hotspot Profile"""
+    print_header("Test 9: Create Profile - POST /api/admin/mikrotik/profiles/create/")
+    
+    response = client.post('/api/admin/mikrotik/profiles/create/',
+        json.dumps({
+            'name': 'test-profile',
+            'rate_limit': '1M/1M',
+            'session_timeout': '1d',
+            'idle_timeout': '5m'
+        }),
+        content_type='application/json',
+        HTTP_X_ADMIN_TOKEN=ADMIN_TOKEN
+    )
+    
+    try:
+        data = response.json()
+        # May fail if profile exists - that's OK
+        passed = response.status_code in [200, 201, 400] and 'success' in data
+        print_result('/api/admin/mikrotik/profiles/create/', 'POST', response.status_code, data, passed)
+        return passed
+    except:
+        passed = False
+        print_result('/api/admin/mikrotik/profiles/create/', 'POST', response.status_code, 
+                     response.content.decode(), passed)
+        return passed
+
+def test_system_resources():
+    """Test 10: Get System Resources"""
+    print_header("Test 10: System Resources - GET /api/admin/mikrotik/resources/")
+    
+    response = client.get('/api/admin/mikrotik/resources/', 
+                         HTTP_X_ADMIN_TOKEN=ADMIN_TOKEN)
+    
+    try:
+        data = response.json()
+        passed = response.status_code == 200 and data.get('success') == True
+        print_result('/api/admin/mikrotik/resources/', 'GET', response.status_code, data, passed)
+        return passed
+    except:
+        passed = False
+        print_result('/api/admin/mikrotik/resources/', 'GET', response.status_code, 
+                     response.content.decode(), passed)
+        return passed
+
+def test_auth_required():
+    """Bonus Test: Verify Admin Auth is Required"""
+    print_header("Bonus Test: Admin Authentication Required")
+    
+    print("\n--- Testing without admin token ---")
+    response = client.get('/api/admin/mikrotik/config/')
+    
+    passed = response.status_code in [401, 403]
+    try:
+        data = response.json()
+        print_result('/api/admin/mikrotik/config/', 'GET (no auth)', response.status_code, data, passed)
+    except:
+        print_result('/api/admin/mikrotik/config/', 'GET (no auth)', response.status_code, 
+                     response.content.decode(), passed)
+    
+    return passed
+
+def main():
+    """Run all tests"""
+    print("\n" + "🔧 " * 35)
+    print("  MIKROTIK ADMIN ENDPOINTS TEST SUITE")
+    print("  Testing 10 Admin-Only MikroTik Management Endpoints")
+    print("🔧 " * 35)
+    
+    try:
+        # Setup
+        user = setup_test_user()
+        
+        # Run tests
+        tests = [
+            ("MikroTik Configuration", test_mikrotik_configuration),
+            ("Test Connection", test_test_connection),
+            ("Router Info", test_router_info),
+            ("Active Users", test_active_users),
+            ("Disconnect User", test_disconnect_user),
+            ("Disconnect All Users", test_disconnect_all),
+            ("Reboot Router", test_reboot_router),
+            ("Hotspot Profiles", test_hotspot_profiles),
+            ("Create Profile", test_create_profile),
+            ("System Resources", test_system_resources),
+            ("Admin Auth Required", test_auth_required),
+        ]
+        
+        results = []
+        for test_name, test_func in tests:
+            try:
+                success = test_func()
+                results.append((test_name, success))
+            except Exception as e:
+                print(f"\n❌ ERROR in {test_name}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                results.append((test_name, False))
+        
+        # Print summary
+        print_header("TEST SUMMARY")
+        passed = sum(1 for _, success in results if success)
+        total = len(results)
+        
+        for test_name, success in results:
+            status = "✅ PASS" if success else "❌ FAIL"
+            print(f"{status} - {test_name}")
+        
+        print(f"\n{'='*70}")
+        print(f"Total: {passed}/{total} tests passed ({passed*100//total}%)")
+        print(f"{'='*70}")
+        
+        if passed == total:
+            print("\n🎉 ALL MIKROTIK ADMIN ENDPOINTS ARE WORKING!")
+            print("\nEndpoint Summary:")
+            print("1. ✅ GET /api/admin/mikrotik/config/ - Get MikroTik configuration")
+            print("2. ✅ GET /api/admin/mikrotik/test-connection/ - Test router connection")
+            print("3. ✅ GET /api/admin/mikrotik/router-info/ - Get router information")
+            print("4. ✅ GET /api/admin/mikrotik/active-users/ - Get active hotspot users")
+            print("5. ✅ POST /api/admin/mikrotik/disconnect-user/ - Disconnect specific user")
+            print("6. ✅ POST /api/admin/mikrotik/disconnect-all/ - Disconnect all users")
+            print("7. ✅ POST /api/admin/mikrotik/reboot/ - Reboot router")
+            print("8. ✅ GET /api/admin/mikrotik/profiles/ - Get hotspot profiles")
+            print("9. ✅ POST /api/admin/mikrotik/profiles/create/ - Create hotspot profile")
+            print("10. ✅ GET /api/admin/mikrotik/resources/ - Get system resources")
+            print("\n✅ Admin authentication properly enforced (X-Admin-Token required)")
+            print("\nAll endpoints aligned with mikrotik.py functions:")
+            print("- test_mikrotik_connection()")
+            print("- get_router_info()")
+            print("- get_active_hotspot_users()")
+            print("- disconnect_all_hotspot_users()")
+            print("- reboot_router()")
+            print("- get_hotspot_profiles()")
+            print("- create_hotspot_profile()")
+        else:
+            print(f"\n⚠️  {total - passed} test(s) failed. Please review the errors above.")
+        
+        return passed == total
+        
+    except Exception as e:
+        print(f"\n❌ FATAL ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+if __name__ == '__main__':
+    success = main()
+    sys.exit(0 if success else 1)
