@@ -5,6 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex, nofollow">
+    <!-- Lightweight style adjustments (removed heavy box-shadows & large gradients for hAP lite performance) -->
     <style>
         * {
             margin: 0;
@@ -25,7 +26,7 @@
         .login-container {
             background: white;
             border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.12);
             overflow: hidden;
             max-width: 400px;
             width: 100%;
@@ -256,6 +257,14 @@
             margin-right: 5px;
         }
 
+        /* New minimal helper */
+        .toggle-link { cursor:pointer; color:#2196F3; font-size:12px; display:inline-block; margin-top:8px; }
+        .voucher-group { display:none; margin-top:10px; }
+        .small-note { font-size:11px; color:#666; margin-top:6px; }
+        .status-msg { margin-top:12px; font-size:12px; display:none; }
+        .status-msg.ok { color:#2e7d32; }
+        .status-msg.err { color:#c62828; }
+
         /* Responsive */
         @media (max-width: 480px) {
             .login-container {
@@ -325,15 +334,20 @@
                             inputmode="numeric"
                         />
                     </div>
+                    <span class="toggle-link" onclick="toggleVoucher()" id="voucherToggle">Have a voucher?</span>
+                    <div class="voucher-group" id="voucherGroup">
+                        <label for="voucher">Voucher Code (optional):</label>
+                        <input type="text" id="voucher" name="voucher" placeholder="Enter voucher code" style="width:100%;padding:12px;border:2px solid #e0e0e0;border-radius:10px;font-size:14px;" />
+                        <div class="small-note">If you already paid via USSD you can ignore this field.</div>
+                    </div>
+                    <div class="status-msg" id="accessStatus"></div>
                 </div>
 
                 <!-- Submit Button -->
                 <button type="submit" class="connect-btn" id="connectBtn">
                     <span class="btn-text">Connect to Internet</span>
-                    <div class="loading">
-                        <div class="spinner"></div>
-                    </div>
                 </button>
+                <div class="small-note">If page does not redirect after login, manually go to any site (e.g. http://neverssl.com).</div>
             </form>
         </div>
 
@@ -341,7 +355,7 @@
         <div class="footer">
             <div class="footer-links">
                 Need access? Visit <a href="https://kitonga.klikcell.com" target="_blank">kitonga.klikcell.com</a><br>
-                Support: <a href="tel:+255123456789">+255 123 456 789</a>
+                Support: <a href="tel:+255123456789">+255 0772236727</a>
             </div>
             
             <div class="features">
@@ -436,6 +450,52 @@
                 document.querySelector('.connect-btn').click();
             }
         });
+
+        function toggleVoucher(){
+            const grp = document.getElementById('voucherGroup');
+            const tg = document.getElementById('voucherToggle');
+            const visible = grp.style.display === 'block';
+            grp.style.display = visible ? 'none' : 'block';
+            tg.textContent = visible ? 'Have a voucher?' : 'Hide voucher field';
+        }
+        async function preCheckAccess(phone){
+            const statusEl = document.getElementById('accessStatus');
+            statusEl.style.display='none';
+            if(!/^255[0-9]{9}$/.test(phone)) return;
+            try {
+                const resp = await fetch('https://api.kitonga.klikcell.com/api/mikrotik/auth/', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json','Accept':'application/json'},
+                    body:JSON.stringify({username:phone, mac:'', ip:''})
+                });
+                const data = await resp.json();
+                statusEl.style.display='block';
+                if(resp.ok && data.success){
+                    statusEl.className='status-msg ok';
+                    statusEl.textContent='Access valid. You can connect now.';
+                } else {
+                    statusEl.className='status-msg err';
+                    statusEl.textContent=data.error || data.message || 'No active access. You may need voucher or payment.';
+                }
+            } catch(e){
+                statusEl.style.display='block';
+                statusEl.className='status-msg err';
+                statusEl.textContent='Access check failed. Continue to login.';
+            }
+        }
+        document.getElementById('username').addEventListener('change', e=>preCheckAccess(e.target.value));
+        // Integrate voucher value into username if provided (optional concatenation pattern) before submit
+        function handleSubmit(){
+            const phoneInput = document.getElementById('username');
+            const voucherInput = document.getElementById('voucher');
+            const phoneValue = phoneInput.value.trim();
+            if(!/^255[0-9]{9}$/.test(phoneValue)) { alert('Invalid phone format'); phoneInput.focus(); return false; }
+            // If voucher provided, append separator so backend can parse if desired (leave unchanged if not using this pattern)
+            if(voucherInput && voucherInput.value.trim()){ phoneInput.value = phoneValue; /* keep separate, backend can read voucher via JS if needed */ }
+            const btn = document.getElementById('connectBtn');
+            btn.disabled=true; btn.querySelector('.btn-text').textContent='Connecting...';
+            return true;
+        }
     </script>
 </body>
 </html>

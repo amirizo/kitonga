@@ -1299,3 +1299,4 @@ INFO 2025-11-06 15:15:38,392 views 26193 8650318144 Mikrotik auth request: metho
 INFO 2025-11-06 15:15:38,397 mikrotik 26193 8650318144 New device registered for 255684106419: CC:DD:EE:FF:AA:BB -> 192.168.88.102 (connection: wifi, method: voucher, devices: 3/3)
 INFO 2025-11-06 15:15:38,398 views 26193 8650318144 Enhanced device tracking successful for 255684106419: CC:DD:EE:FF:AA:BB -> 192.168.88.102 (method: voucher)
 INFO 2025-11-06 15:15:38,399 views 26193 8650318144 MikroTik auth SUCCESS for 255684106419: Access granted (method: voucher, devices: 3/3)
+INFO 2025-11-06 15:26:17,908 autoreload 27190 8650318144 Watching for file changes with StatReloader

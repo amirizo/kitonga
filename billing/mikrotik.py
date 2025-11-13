@@ -1,979 +1,593 @@
 """
 Mikrotik Router Integration for Kitonga Wi-Fi Billing System
 """
-import requests
 import socket
-import hashlib
-import binascii
 import logging
+from typing import Optional, List
 from django.conf import settings
 from django.utils import timezone
-from urllib.parse import quote
+
+# Try to import routeros-api for direct RouterOS operations
+try:
+    import routeros_api
+except Exception:  # library might not be installed yet
+    routeros_api = None
 
 logger = logging.getLogger(__name__)
 
 
-class MikrotikIntegration:
+def safe_close(api):
+    """Safely close routeros_api communicator if present."""
+    try:
+        if api:
+            api.get_communicator().close()
+    except Exception:
+        pass
+
+
+def get_mikrotik_api():
     """
-    Mikrotik router integration for hotspot authentication
+    Return an authenticated RouterOS API connection using env-driven settings.
+    Caller should close with api.get_communicator().close() in a finally block.
     """
-    
-    def __init__(self, router_ip="192.168.0.173", admin_user="admin", admin_pass="Kijangwani2003"):
-        self.router_ip = router_ip
-        self.admin_user = admin_user
-        self.admin_pass = admin_pass
-        self.login_url = f"http://{router_ip}/login"
-        self.api_port = 8728
-    
-    def login_user_to_hotspot(self, phone_number, mac_address="", ip_address=""):
-        """
-        Login user to Mikrotik hotspot using HTTP login
-        
-        Args:
-            phone_number: User's phone number (used as username)
-            mac_address: User's MAC address
-            ip_address: User's IP address
-        
-        Returns:
-            dict: Success status and message
-        """
-        try:
-            # Method 1: Try direct hotspot login if we have IP and MAC
-            if mac_address and ip_address:
-                success = self.perform_hotspot_login(phone_number, mac_address, ip_address)
-                if success:
-                    logger.info(f'Successfully logged {phone_number} into MikroTik hotspot - MAC: {mac_address}, IP: {ip_address}')
-                    return {
-                        'success': True,
-                        'message': 'User logged into MikroTik hotspot successfully',
-                        'mikrotik_response': 'Hotspot login successful',
-                        'method': 'hotspot_login'
-                    }
-                else:
-                    logger.warning(f'Direct hotspot login failed for {phone_number}, trying API method')
-            
-            # Method 2: Try to add user to active hotspot users via API
-            if mac_address and ip_address:
-                success = self.add_hotspot_active_user(
-                    username=phone_number,
-                    address=ip_address,
-                    mac_address=mac_address
-                )
-                
-                if success:
-                    logger.info(f'Successfully added {phone_number} to MikroTik active users - MAC: {mac_address}, IP: {ip_address}')
-                    return {
-                        'success': True,
-                        'message': 'User added to MikroTik active hotspot users',
-                        'mikrotik_response': 'User authenticated and activated',
-                        'method': 'active_user_add'
-                    }
-                else:
-                    logger.warning(f'Failed to add {phone_number} to MikroTik active users')
-            
-            # Method 3: External authentication validation (user will auto-login on next connection)
-            logger.info(f'MikroTik external authentication validated for user {phone_number} - user will get access on next WiFi connection')
-            return {
-                'success': True,
-                'message': 'User authentication validated by Django (will auto-login on WiFi connection)',
-                'mikrotik_response': 'External authentication successful',
-                'method': 'external_auth'
-            }
-            
-        except Exception as e:
-            logger.error(f'Error in MikroTik authentication for user {phone_number}: {str(e)}')
-            return {
-                'success': False,
-                'message': f'Authentication error: {str(e)}',
-                'method': 'error'
-            }
-    
-    def perform_hotspot_login(self, username, mac_address, ip_address):
-        """
-        Perform actual hotspot login via HTTP request to MikroTik
-        
-        Args:
-            username: User's phone number
-            mac_address: User's MAC address  
-            ip_address: User's IP address
-        
-        Returns:
-            bool: Success status
-        """
-        try:
-            # Multiple MikroTik hotspot login methods
-            
-            # Method 1: Try direct login to hotspot
-            login_url = f"http://{self.router_ip}/login"
-            login_data = {
-                'username': username,
-                'password': '',  # Empty password for external auth
-                'dst': '',
-                'popup': 'true'
-            }
-            
-            try:
-                response = requests.post(login_url, data=login_data, timeout=10, allow_redirects=False)
-                if response.status_code in [200, 302]:
-                    logger.info(f'Direct hotspot login successful for {username} from {ip_address}')
-                    return True
-            except Exception as e:
-                logger.warning(f'Direct login failed for {username}: {str(e)}')
-            
-            # Method 2: Try login with phone as password
-            login_data['password'] = username
-            try:
-                response = requests.post(login_url, data=login_data, timeout=10, allow_redirects=False)
-                if response.status_code in [200, 302]:
-                    logger.info(f'Hotspot login with phone password successful for {username}')
-                    return True
-            except Exception as e:
-                logger.warning(f'Phone password login failed for {username}: {str(e)}')
-            
-            # Method 3: Try admin interface bypass (if available)
-            try:
-                admin_url = f"http://{self.router_ip}/webfig"
-                admin_data = {
-                    'username': self.admin_user,
-                    'password': self.admin_pass
-                }
-                
-                # This would require implementing full admin authentication
-                # For now, log the attempt
-                logger.info(f'Would attempt admin bypass for user {username}')
-                return True  # Assume success for external auth setup
-                
-            except Exception as e:
-                logger.warning(f'Admin bypass failed for {username}: {str(e)}')
-            
-            # If all methods fail, still return True because external auth is configured
-            logger.info(f'Hotspot authentication configured for {username} - will work on next connection attempt')
+    if routeros_api is None:
+        raise ImportError('routeros-api is not installed. Add it to requirements.txt')
+
+    host = getattr(settings, 'MIKROTIK_HOST', getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.88.1'))
+    port = int(getattr(settings, 'MIKROTIK_PORT', getattr(settings, 'MIKROTIK_API_PORT', 8728)))
+    user = getattr(settings, 'MIKROTIK_USER', getattr(settings, 'MIKROTIK_ADMIN_USER', 'admin'))
+    password = getattr(settings, 'MIKROTIK_PASSWORD', getattr(settings, 'MIKROTIK_ADMIN_PASS', ''))
+    use_ssl = bool(getattr(settings, 'MIKROTIK_USE_SSL', False))
+
+    pool = routeros_api.RouterOsApiPool(
+        host,
+        username=user,
+        password=password,
+        port=port,
+        use_ssl=use_ssl,
+        plaintext_login=True,
+        use_keepalive=True,
+        ssl_verify=False,
+    )
+    return pool.get_api()
+
+
+def allow_mac(mac_address: str, comment: str = 'Paid user') -> bool:
+    """Create/ensure bypass binding for a MAC in /ip/hotspot/ip-binding."""
+    if not mac_address:
+        logger.warning('allow_mac called with empty mac_address')
+        return False
+    api = get_mikrotik_api()
+    try:
+        bindings = api.get_resource('/ip/hotspot/ip-binding')
+        existing = bindings.get(mac_address=mac_address)
+        if existing:
+            for item in existing:
+                # use set (routeros_api) not update
+                bindings.set(id=item['.id'], type='bypassed', comment=comment, mac_address=mac_address)
+            logger.info(f'Updated bypass binding for {mac_address}')
             return True
-                
-        except Exception as e:
-            logger.error(f'Error performing hotspot login for {username}: {str(e)}')
-            return False
-    
-    def logout_user_from_hotspot(self, phone_number, ip_address=""):
-        """
-        Logout user from Mikrotik hotspot
-        
-        Args:
-            phone_number: User's phone number
-            ip_address: User's IP address
-        
-        Returns:
-            dict: Success status and message
-        """
-        try:
-            logout_url = f"http://{self.router_ip}/logout"
-            logout_data = {
-                'username': phone_number,
-                'erase-cookie': 'true'
-            }
-            
-            response = requests.post(logout_url, data=logout_data, timeout=10)
-            
-            if response.status_code == 200:
-                logger.info(f'User {phone_number} logged out from Mikrotik successfully')
-                return {
-                    'success': True,
-                    'message': 'User logged out successfully'
-                }
-            else:
-                logger.error(f'Mikrotik logout failed for {phone_number}')
-                return {
-                    'success': False,
-                    'message': 'Logout failed'
-                }
-                
-        except Exception as e:
-            logger.error(f'Error logging out user {phone_number} from Mikrotik: {str(e)}')
-            return {
-                'success': False,
-                'message': f'Logout error: {str(e)}'
-            }
-    
-    def check_user_status(self, phone_number):
-        """
-        Check if user is currently logged in to hotspot
-        Note: This requires Mikrotik API access, simplified version here
-        
-        Args:
-            phone_number: User's phone number
-        
-        Returns:
-            dict: User status information
-        """
-        try:
-            # This is a simplified check - in production you'd use Mikrotik API
-            # For now, we'll just return basic status
-            return {
-                'success': True,
-                'is_online': False,  # Would need API to check actual status
-                'message': 'Status check requires API access'
-            }
-        except Exception as e:
-            logger.error(f'Error checking user status for {phone_number}: {str(e)}')
-            return {
-                'success': False,
-                'message': f'Status check error: {str(e)}'
-            }
+        bindings.add(type='bypassed', mac_address=mac_address, comment=comment)
+        logger.info(f'Created bypass binding for {mac_address}')
+        return True
+    except Exception as e:
+        logger.error(f'allow_mac failed for {mac_address}: {e}')
+        return False
+    finally:
+        safe_close(api)
 
 
-class SimpleMikrotikAPI:
-    """
-    Simplified Mikrotik API client for basic operations
-    Note: For production use, consider using a full-featured library like librouteros
-    """
-    
-    def __init__(self, host, username, password, port=8728):
-        self.host = host
-        self.username = username
-        self.password = password
-        self.port = port
-        self.socket = None
-        self.current_tag = 0
-    
-    def connect(self):
-        """Connect to Mikrotik API"""
-        try:
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.settimeout(10)
-            self.socket.connect((self.host, self.port))
+def revoke_mac(mac_address: str) -> bool:
+    """Remove any /ip/hotspot/ip-binding entries for a MAC."""
+    if not mac_address:
+        return False
+    api = get_mikrotik_api()
+    try:
+        bindings = api.get_resource('/ip/hotspot/ip-binding')
+        items = bindings.get(mac_address=mac_address)
+        count = 0
+        for item in items:
+            bindings.remove(id=item['.id'])
+            count += 1
+        logger.info(f'Revoked {count} binding(s) for {mac_address}')
+        return True
+    except Exception as e:
+        logger.error(f'revoke_mac failed for {mac_address}: {e}')
+        return False
+    finally:
+        safe_close(api)
+
+
+def create_hotspot_user(username: str, password: str, profile: Optional[str] = None) -> bool:
+    """Create or update /ip/hotspot/user entry (no usage limits applied)."""
+    if not username:
+        return False
+    api = get_mikrotik_api()
+    try:
+        profile = profile or getattr(settings, 'MIKROTIK_DEFAULT_PROFILE', 'default')
+        users = api.get_resource('/ip/hotspot/user')
+        exist = users.get(name=username)
+        if exist:
+            for item in exist:
+                users.set(id=item['.id'], password=password, profile=profile, disabled='no')
+            logger.info(f'Updated hotspot user {username}')
             return True
-        except Exception as e:
-            logger.error(f'Failed to connect to Mikrotik API: {str(e)}')
-            return False
-    
-    def disconnect(self):
-        """Disconnect from Mikrotik API"""
-        if self.socket:
-            try:
-                self.socket.close()
-            except:
-                pass
-            self.socket = None
-    
-    def login(self):
-        """Login to Mikrotik API"""
-        # Simplified login - in production, implement full API authentication
-        try:
-            # This is a placeholder - implement actual API login
-            return True
-        except Exception as e:
-            logger.error(f'Mikrotik API login failed: {str(e)}')
-            return False
-    
-    def add_hotspot_active_user(self, username, address="", mac_address=""):
-        """
-        Add user to hotspot active list via API or HTTP
-        
-        Args:
-            username: Username (phone number)
-            address: IP address
-            mac_address: MAC address
-        
-        Returns:
-            bool: Success status
-        """
-        try:
-            # Method 1: Try via MikroTik API if available
-            api_success = self.add_user_via_api(username, address, mac_address)
-            if api_success:
-                return True
-            
-            # Method 2: Try via HTTP login simulation
-            if address and mac_address:
-                login_success = self.perform_hotspot_login(username, mac_address, address)
-                if login_success:
-                    return True
-            
-            # Method 3: Create hotspot user entry (will auto-login on connection)
-            user_creation_success = self.create_hotspot_user(username)
-            if user_creation_success:
-                logger.info(f'Created hotspot user {username} - will authenticate on next connection')
-                return True
-            
-            logger.warning(f'All methods failed for adding hotspot user {username}')
-            return False
-            
-        except Exception as e:
-            logger.error(f'Error adding hotspot user via API: {str(e)}')
-            return False
-    
-    def add_user_via_api(self, username, address, mac_address):
-        """
-        Add user to active hotspot list via MikroTik API
-        
-        Returns:
-            bool: Success status
-        """
-        try:
-            # This would use the actual MikroTik API protocol
-            # For now, simulate success if we have proper connection details
-            if address and mac_address and self.test_connection():
-                logger.info(f'Would add hotspot user {username} via API (simulated success)')
-                return True
-            return False
-        except Exception as e:
-            logger.error(f'API method failed for {username}: {str(e)}')
-            return False
-    
-    def create_hotspot_user(self, username):
-        """
-        Create a hotspot user entry so they can authenticate
-        
-        Args:
-            username: Username to create
-        
-        Returns:
-            bool: Success status
-        """
-        try:
-            # Try to create user via HTTP interface
-            create_url = f"http://{self.host}/admin"  # Use self.host instead of self.router_ip
-            
-            # In a real implementation, you'd use the admin interface or API
-            # For now, we'll return True to indicate the user will be able to authenticate
-            logger.info(f'Hotspot user {username} prepared for authentication')
-            return True
-            
-        except Exception as e:
-            logger.error(f'Error creating hotspot user {username}: {str(e)}')
-            return False
-    
-    def test_connection(self):
-        """
-        Test if we can connect to the router
-        
-        Returns:
-            bool: Connection status
-        """
-        try:
-            response = requests.get(f"http://{self.host}", timeout=5)  # Use self.host instead of self.router_ip
-            return response.status_code in [200, 302, 401]  # Any response means router is reachable
-        except:
-            return False
-    
-    def remove_hotspot_active_user(self, username):
-        """
-        Remove user from hotspot active list
-        
-        Args:
-            username: Username to remove
-        
-        Returns:
-            bool: Success status
-        """
-        try:
-            # This would use the actual Mikrotik API protocol
-            logger.info(f'Would remove hotspot user {username} via API')
-            return True
-        except Exception as e:
-            logger.error(f'Error removing hotspot user via API: {str(e)}')
-            return False
-    
-    def perform_hotspot_login(self, username, mac_address, address):
-        """
-        Perform hotspot login via HTTP request
-        
-        Args:
-            username: Username (phone number)
-            mac_address: MAC address
-            address: IP address
-        
-        Returns:
-            bool: Success status
-        """
-        try:
-            # Use the main MikroTik integration class for login
-            mikrotik = MikrotikIntegration(self.host, self.username, self.password)
-            return mikrotik.perform_hotspot_login(username, mac_address, address)
-        except Exception as e:
-            logger.error(f'SimpleMikrotikAPI hotspot login failed for {username}: {str(e)}')
-            return False
+        users.add(name=username, password=password, profile=profile, disabled='no')
+        logger.info(f'Created hotspot user {username}')
+        return True
+    except Exception as e:
+        logger.error(f'create_hotspot_user failed for {username}: {e}')
+        return False
+    finally:
+        safe_close(api)
 
 
-def get_mikrotik_client():
-    """
-    Get configured Mikrotik client from settings
-    
-    Returns:
-        MikrotikIntegration: Configured client
-    """
-    router_ip = getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.0.173')
-    admin_user = getattr(settings, 'MIKROTIK_ADMIN_USER', 'admin')
-    admin_pass = getattr(settings, 'MIKROTIK_ADMIN_PASS', 'Kijangwani2003')
-    
-    return MikrotikIntegration(router_ip, admin_user, admin_pass)
+# Consolidated helpers
+
+def grant_user_access(username: str, mac_address: Optional[str] = None, password: Optional[str] = None, profile: Optional[str] = None, comment: str = 'Paid user') -> dict:
+    """Create/update hotspot user, optionally bypass MAC, and return status dict."""
+    result = {'user_created': False, 'mac_bypassed': False, 'errors': []}
+    if password is None:
+        password = username  # simple fallback
+    try:
+        user_ok = create_hotspot_user(username, password, profile)
+        result['user_created'] = user_ok
+    except Exception as e:
+        logger.error(f'grant_user_access: create_hotspot_user failed for {username}: {e}')
+        result['errors'].append(f'user:{e}')
+    if mac_address:
+        try:
+            mac_ok = allow_mac(mac_address, comment=comment)
+            result['mac_bypassed'] = mac_ok
+            if not mac_ok:
+                result['errors'].append('mac:bypass_failed')
+        except Exception as e:
+            logger.error(f'grant_user_access: allow_mac failed for {mac_address}: {e}')
+            result['errors'].append(f'mac:{e}')
+    result['success'] = result['user_created'] or result['mac_bypassed']
+    return result
 
 
-def authenticate_user_with_mikrotik(phone_number, mac_address="", ip_address=""):
-    """
-    Authenticate user with Mikrotik router
-    
-    Args:
-        phone_number: User's phone number
-        mac_address: User's MAC address
-        ip_address: User's IP address
-    
-    Returns:
-        dict: Authentication result
-    """
-    mikrotik = get_mikrotik_client()
-    return mikrotik.login_user_to_hotspot(phone_number, mac_address, ip_address)
+def revoke_user_access(mac_address: Optional[str] = None, username: Optional[str] = None) -> dict:
+    """Revoke MAC bypass and optionally disable hotspot user."""
+    result = {'mac_revoked': False, 'user_revoked': False, 'errors': []}
+    if mac_address:
+        try:
+            result['mac_revoked'] = revoke_mac(mac_address)
+            if not result['mac_revoked']:
+                result['errors'].append('mac:revoke_failed')
+        except Exception as e:
+            logger.error(f'revoke_user_access: revoke_mac failed for {mac_address}: {e}')
+            result['errors'].append(f'mac:{e}')
+    if username and routeros_api is not None:
+        try:
+            api = get_mikrotik_api()
+            users = api.get_resource('/ip/hotspot/user')
+            existing = users.get(name=username)
+            for item in existing:
+                users.set(id=item['.id'], disabled='yes')
+                result['user_revoked'] = True
+            safe_close(api)
+        except Exception as e:
+            logger.error(f'revoke_user_access: disable user failed for {username}: {e}')
+            result['errors'].append(f'user:{e}')
+    result['success'] = result['mac_revoked'] or result['user_revoked']
+    return result
 
 
-def logout_user_from_mikrotik(phone_number, ip_address=""):
-    """
-    Logout user from Mikrotik router
-    
-    Args:
-        phone_number: User's phone number
-        ip_address: User's IP address
-    
-    Returns:
-        dict: Logout result
-    """
-    mikrotik = get_mikrotik_client()
-    return mikrotik.logout_user_from_hotspot(phone_number, ip_address)
+def authenticate_user_with_mikrotik(phone_number: str, mac_address: str = '', ip_address: str = '') -> dict:
+    """Authenticate (provision) user on MikroTik using routeros-api."""
+    try:
+        access = grant_user_access(phone_number, mac_address=mac_address, password=phone_number, comment='auth')
+        return {
+            'success': access.get('success', False),
+            'message': 'User provisioned on router' if access.get('success') else 'Provisioning failed',
+            'details': access
+        }
+    except Exception as e:
+        logger.error(f'authenticate_user_with_mikrotik failed for {phone_number}: {e}')
+        return {'success': False, 'message': str(e)}
+
+
+def logout_user_from_mikrotik(phone_number: str, mac_address: str = '') -> dict:
+    """Disable user / revoke MAC."""
+    try:
+        result = revoke_user_access(mac_address=mac_address or None, username=phone_number)
+        return {
+            'success': result.get('success', False),
+            'message': 'User revoked' if result.get('success') else 'Revocation failed',
+            'details': result
+        }
+    except Exception as e:
+        logger.error(f'logout_user_from_mikrotik failed for {phone_number}: {e}')
+        return {'success': False, 'message': str(e)}
 
 
 def test_mikrotik_connection(host=None, username=None, password=None, port=8728):
-    """
-    Test connection to MikroTik router
-    
-    Args:
-        host: Router IP address
-        username: Admin username
-        password: Admin password
-        port: API port (default 8728)
-    
-    Returns:
-        dict: Connection test result
-    """
+    """Test low-level TCP connectivity to MikroTik API port."""
     try:
-        # Use provided credentials or get from settings
-        host = host or getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.0.173')
-        username = username or getattr(settings, 'MIKROTIK_USERNAME', 'admin')
-        password = password or getattr(settings, 'MIKROTIK_PASSWORD', 'Kijangwani2003')
-        
-        # Test basic socket connection
+        host = host or getattr(settings, 'MIKROTIK_HOST', getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.88.1'))
+        username = username or getattr(settings, 'MIKROTIK_USER', getattr(settings, 'MIKROTIK_ADMIN_USER', 'admin'))
+        password = password or getattr(settings, 'MIKROTIK_PASSWORD', getattr(settings, 'MIKROTIK_ADMIN_PASS', ''))
+
+        # Socket connectivity
         test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         test_socket.settimeout(5)
-        
         result = test_socket.connect_ex((host, port))
         test_socket.close()
-        
-        if result == 0:
-            return {
-                'success': True,
-                'message': 'Connection successful',
-                'router_info': {
-                    'ip': host,
-                    'port': port,
-                    'status': 'reachable'
-                }
-            }
-        else:
-            return {
-                'success': False,
-                'error': f'Cannot connect to {host}:{port}',
-                'router_info': {
-                    'ip': host,
-                    'port': port,
-                    'status': 'unreachable'
-                }
-            }
-            
-    except Exception as e:
-        logger.error(f'Error testing MikroTik connection: {str(e)}')
+
+        api_status = 'unverified'
+        if result == 0 and routeros_api is not None:
+            try:
+                api = get_mikrotik_api()
+                # simple call to list users (non-fatal)
+                api.get_resource('/ip/hotspot/user').get()  # may be empty
+                api_status = 'api_ok'
+            except Exception as e:
+                api_status = f'api_error:{e}'
+            finally:
+                try:
+                    safe_close(api)
+                except Exception:
+                    pass
+
         return {
-            'success': False,
-            'error': str(e)
+            'success': result == 0,
+            'message': 'Connection successful' if result == 0 else f'Cannot connect to {host}:{port}',
+            'router_info': {
+                'ip': host,
+                'port': port,
+                'status': 'reachable' if result == 0 else 'unreachable',
+                'api_status': api_status
+            }
         }
+    except Exception as e:
+        logger.error(f'Error testing MikroTik connection: {e}')
+        return {'success': False, 'error': str(e)}
 
 
 def get_router_info():
-    """
-    Get detailed router information
-    
-    Returns:
-        dict: Router information
-    """
+    """Get basic router info via /system/resource/print."""
     try:
-        router_ip = getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.0.173')
-        
-        # Basic router info (in production, use API to get actual info)
-        router_info = {
-            'ip_address': router_ip,
-            'api_port': getattr(settings, 'MIKROTIK_API_PORT', 8728),
-            'hotspot_name': getattr(settings, 'MIKROTIK_HOTSPOT_NAME', 'kitonga-hotspot'),
-            'admin_user': getattr(settings, 'MIKROTIK_USERNAME', 'admin'),
-            'connection_status': 'unknown',
-            'uptime': 'unknown',
-            'version': 'unknown',
-            'board_name': 'unknown',
-            'cpu_load': 0,
-            'memory_usage': 0,
-            'active_users': 0
-        }
-        
-        # Test connection
+        api = None
+        info = {}
+        if routeros_api is not None:
+            try:
+                api = get_mikrotik_api()
+                resource = api.get_resource('/system/resource')
+                data = resource.get()
+                if data:
+                    d = data[0]
+                    info = {
+                        'uptime': d.get('uptime'),
+                        'version': d.get('version'),
+                        'board_name': d.get('board-name'),
+                        'platform': d.get('platform'),
+                        'cpu_load': d.get('cpu-load'),
+                        'free_memory': d.get('free-memory'),
+                        'total_memory': d.get('total-memory')
+                    }
+            except Exception as e:
+                logger.warning(f'get_router_info API error: {e}')
+            finally:
+                safe_close(api)
         connection_test = test_mikrotik_connection()
-        router_info['connection_status'] = 'connected' if connection_test['success'] else 'disconnected'
-        
-        return {
-            'success': True,
-            'data': router_info
-        }
-        
+        info['connection_status'] = 'connected' if connection_test['success'] else 'disconnected'
+        return {'success': True, 'data': info}
     except Exception as e:
-        logger.error(f'Error getting router info: {str(e)}')
-        return {
-            'success': False,
-            'error': str(e)
-        }
+        logger.error(f'Error getting router info: {e}')
+        return {'success': False, 'error': str(e)}
 
 
 def get_active_hotspot_users():
-    """
-    Get list of currently active users on hotspot
-    
-    Returns:
-        dict: List of active users
-    """
+    """List active hotspot users using /ip/hotspot/active."""
     try:
-        # In production, this would query the actual MikroTik API
-        # For now, return mock data
-        active_users = [
-            {
-                'user': '255700000001',
-                'address': '10.5.50.100',
-                'mac_address': 'AA:BB:CC:DD:EE:01',
-                'uptime': '00:15:30',
-                'session_time_left': '23:44:30',
-                'bytes_in': 1024000,
-                'bytes_out': 512000,
-                'packets_in': 1500,
-                'packets_out': 1200
-            },
-            {
-                'user': '255700000002',
-                'address': '10.5.50.101',
-                'mac_address': 'AA:BB:CC:DD:EE:02',
-                'uptime': '01:05:15',
-                'session_time_left': '22:54:45',
-                'bytes_in': 2048000,
-                'bytes_out': 1024000,
-                'packets_in': 3000,
-                'packets_out': 2400
-            }
-        ]
-        
-        return {
-            'success': True,
-            'data': active_users
-        }
-        
+        api = get_mikrotik_api()
+        active = api.get_resource('/ip/hotspot/active').get()
+        users = []
+        for u in active:
+            users.append({
+                'user': u.get('user'),
+                'address': u.get('address'),
+                'mac_address': u.get('mac-address'),
+                'uptime': u.get('uptime'),
+                'session_time_left': u.get('session-time-left'),
+                'bytes_in': u.get('bytes-in'),
+                'bytes_out': u.get('bytes-out')
+            })
+        return {'success': True, 'data': users}
     except Exception as e:
-        logger.error(f'Error getting active users: {str(e)}')
-        return {
-            'success': False,
-            'error': str(e)
-        }
+        logger.error(f'Error getting active users: {e}')
+        return {'success': False, 'error': str(e)}
+    finally:
+        try:
+            safe_close(api)
+        except Exception:
+            pass
 
 
 def disconnect_all_hotspot_users():
-    """
-    Disconnect all active users from hotspot
-    
-    Returns:
-        dict: Disconnection result
-    """
+    """Disconnect all active users via /ip/hotspot/active remove."""
     try:
-        # In production, this would use the MikroTik API to disconnect all users
-        # For now, simulate the action
-        active_users = get_active_hotspot_users()
-        
-        if active_users['success']:
-            user_count = len(active_users['data'])
-            
-            # Simulate disconnecting each user
-            for user in active_users['data']:
-                logger.info(f"Would disconnect user: {user['user']}")
-            
-            return {
-                'success': True,
-                'count': user_count,
-                'message': f'Successfully disconnected {user_count} users'
-            }
-        else:
-            return {
-                'success': False,
-                'error': 'Could not get active users list'
-            }
-        
+        api = get_mikrotik_api()
+        resource = api.get_resource('/ip/hotspot/active')
+        active = resource.get()
+        count = 0
+        for u in active:
+            try:
+                resource.remove(id=u['.id'])
+                count += 1
+            except Exception as rem_err:
+                logger.warning(f'Failed to remove user {u.get("user")}: {rem_err}')
+        return {'success': True, 'count': count, 'message': f'Disconnected {count} users'}
     except Exception as e:
-        logger.error(f'Error disconnecting all users: {str(e)}')
-        return {
-            'success': False,
-            'error': str(e)
-        }
+        logger.error(f'Error disconnecting users: {e}')
+        return {'success': False, 'error': str(e)}
+    finally:
+        safe_close(api)
 
 
 def reboot_router():
-    """
-    Reboot the MikroTik router
-    
-    Returns:
-        dict: Reboot result
-    """
+    """Reboot router (simulated unless explicit setting allows)."""
     try:
-        # In production, this would send a reboot command via API
-        # For safety, we'll just simulate this for now
-        router_ip = getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.0.173')
-        
-        logger.warning(f'Router reboot simulated for {router_ip}')
-        
-        return {
-            'success': True,
-            'message': 'Router reboot command sent (simulated)',
-            'warning': 'Router will be offline for 1-2 minutes'
-        }
-        
-    except Exception as e:
-        logger.error(f'Error rebooting router: {str(e)}')
-        return {
-            'success': False,
-            'error': str(e)
-        }
+        if not getattr(settings, 'ALLOW_ROUTER_REBOOT', False):
+            return {'success': False, 'message': 'Reboot disabled by settings'}
+        api = get_mikrotik_api()
+        try:
+            # RouterOS reboot command
+            api.get_resource('/system/reboot').call('')  # library-specific call, may vary
+            return {'success': True, 'message': 'Router reboot issued'}
+        except Exception as e:
+            logger.error(f'Reboot command failed: {e}')
+            return {'success': False, 'error': str(e)}
+        finally:
+            safe_close(api)
+    except Exception as outer:
+        return {'success': False, 'error': str(outer)}
 
 
 def get_hotspot_profiles():
-    """
-    Get list of hotspot user profiles
-    
-    Returns:
-        dict: List of profiles
-    """
+    """Get hotspot user profiles via /ip/hotspot/user/profile."""
     try:
-        # In production, this would query actual profiles from MikroTik
-        profiles = [
-            {
-                'name': 'default',
-                'rate_limit': '512k/512k',
-                'session_timeout': '1d',
-                'idle_timeout': '5m',
-                'keepalive_timeout': '2m',
-                'status_autorefresh': '1m'
-            },
-            {
-                'name': 'premium',
-                'rate_limit': '2M/2M',
-                'session_timeout': '1d',
-                'idle_timeout': '10m',
-                'keepalive_timeout': '2m',
-                'status_autorefresh': '1m'
-            }
-        ]
-        
-        return {
-            'success': True,
-            'data': profiles
-        }
-        
+        api = get_mikrotik_api()
+        profiles = api.get_resource('/ip/hotspot/user/profile').get()
+        data = []
+        for p in profiles:
+            data.append({
+                'name': p.get('name'),
+                'rate_limit': p.get('rate-limit'),
+                'shared_users': p.get('shared-users'),
+                'session_timeout': p.get('session-timeout'),
+                'idle_timeout': p.get('idle-timeout')
+            })
+        return {'success': True, 'data': data}
     except Exception as e:
-        logger.error(f'Error getting hotspot profiles: {str(e)}')
-        return {
-            'success': False,
-            'error': str(e)
-        }
+        logger.error(f'Error getting hotspot profiles: {e}')
+        return {'success': False, 'error': str(e)}
+    finally:
+        safe_close(api)
 
 
 def create_hotspot_profile(name, rate_limit='512k/512k', session_timeout='1d', idle_timeout='5m'):
-    """
-    Create a new hotspot user profile
-    
-    Args:
-        name: Profile name
-        rate_limit: Rate limit (e.g., '1M/1M')
-        session_timeout: Session timeout (e.g., '1d', '2h')
-        idle_timeout: Idle timeout (e.g., '5m')
-    
-    Returns:
-        dict: Creation result
-    """
+    """Create hotspot profile using routeros-api (fields mapped to RouterOS)."""
     try:
-        # In production, this would create the profile via API
-        logger.info(f'Would create hotspot profile: {name}')
-        
-        new_profile = {
-            'name': name,
-            'rate_limit': rate_limit,
-            'session_timeout': session_timeout,
-            'idle_timeout': idle_timeout,
-            'keepalive_timeout': '2m',
-            'status_autorefresh': '1m'
-        }
-        
-        return {
-            'success': True,
-            'data': new_profile,
-            'message': f'Profile "{name}" created successfully (simulated)'
-        }
-        
+        api = get_mikrotik_api()
+        res = api.get_resource('/ip/hotspot/user/profile')
+        res.add(name=name, **{
+            'rate-limit': rate_limit,
+            'session-timeout': session_timeout,
+            'idle-timeout': idle_timeout
+        })
+        return {'success': True, 'data': {'name': name, 'rate_limit': rate_limit}, 'message': 'Profile created'}
     except Exception as e:
-        logger.error(f'Error creating hotspot profile: {str(e)}')
-        return {
-            'success': False,
-            'error': str(e)
-        }
+        logger.error(f'Error creating hotspot profile {name}: {e}')
+        return {'success': False, 'error': str(e)}
+    finally:
+        safe_close(api)
 
 
-def get_system_resources():
-    """
-    Get router system resources and performance metrics
-    
-    Returns:
-        dict: System resources information
-    """
+# Advanced management helpers (no usage limiting)
+
+def list_bypass_bindings() -> dict:
+    """Return all bypass (and other) ip-bindings."""
     try:
-        # In production, this would query actual system resources
-        resources = {
-            'uptime': '2d5h30m',
-            'version': '6.49.7 (stable)',
-            'build_time': 'Oct/01/2023 10:26:21',
-            'factory_software': '6.49.7',
-            'free_memory': 67108864,  # bytes
-            'total_memory': 134217728,  # bytes
-            'free_hdd_space': 1073741824,  # bytes
-            'total_hdd_space': 2147483648,  # bytes
-            'cpu_count': 4,
-            'cpu_frequency': 716,  # MHz
-            'cpu_load': 15,  # percentage
-            'architecture_name': 'arm',
-            'board_name': 'RB4011iGS+',
-            'platform': 'MikroTik'
-        }
-        
-        # Calculate percentages
-        memory_usage = ((resources['total_memory'] - resources['free_memory']) / resources['total_memory']) * 100
-        disk_usage = ((resources['total_hdd_space'] - resources['free_hdd_space']) / resources['total_hdd_space']) * 100
-        
-        resources['memory_usage_percent'] = round(memory_usage, 2)
-        resources['disk_usage_percent'] = round(disk_usage, 2)
-        
-        return {
-            'success': True,
-            'data': resources
-        }
-        
+        api = get_mikrotik_api()
+        bindings = api.get_resource('/ip/hotspot/ip-binding').get()
+        data = []
+        for b in bindings:
+            data.append({
+                'id': b.get('.id'),
+                'mac_address': b.get('mac-address'),
+                'type': b.get('type'),
+                'comment': b.get('comment')
+            })
+        return {'success': True, 'data': data}
     except Exception as e:
-        logger.error(f'Error getting system resources: {str(e)}')
-        return {
-            'success': False,
-            'error': str(e)
-        }
+        logger.error(f'list_bypass_bindings error: {e}')
+        return {'success': False, 'error': str(e)}
+    finally:
+        try:
+            safe_close(api)
+        except Exception:
+            pass
+
+
+def sync_user_provisioning(usernames: List[str]) -> dict:
+    """Ensure all provided usernames exist as hotspot users (no limits)."""
+    summary = {'created': 0, 'updated': 0, 'errors': []}
+    for u in usernames:
+        try:
+            ok = create_hotspot_user(u, password=u)
+            if ok:
+                summary['created'] += 1  # treat as created/updated, we don't distinguish
+        except Exception as e:
+            summary['errors'].append(f'{u}:{e}')
+    summary['success'] = len(summary['errors']) == 0
+    return summary
+
+
+def cleanup_disabled_users() -> dict:
+    """Remove disabled hotspot users (housekeeping)."""
+    try:
+        api = get_mikrotik_api()
+        users = api.get_resource('/ip/hotspot/user')
+        existing = users.get()
+        removed = 0
+        for u in existing:
+            if u.get('disabled') == 'true' or u.get('disabled') == 'yes':
+                try:
+                    users.remove(id=u['.id'])
+                    removed += 1
+                except Exception as inner:
+                    logger.warning(f'Failed removing disabled user {u.get("name")}: {inner}')
+        return {'success': True, 'removed': removed}
+    except Exception as e:
+        logger.error(f'cleanup_disabled_users error: {e}')
+        return {'success': False, 'error': str(e)}
+    finally:
+        safe_close(api)
+
+
+def get_router_health() -> dict:
+    """Fetch health metrics if available (/system/health)."""
+    try:
+        api = get_mikrotik_api()
+        health_res = api.get_resource('/system/health')
+        data = health_res.get()
+        return {'success': True, 'data': data}
+    except Exception as e:
+        logger.error(f'get_router_health error: {e}')
+        return {'success': False, 'error': str(e)}
+    finally:
+        safe_close(api)
+
+
+def monitor_interface_traffic(interface: str, once: bool = True) -> dict:
+    """Monitor traffic for a given interface (single snapshot)."""
+    try:
+        api = get_mikrotik_api()
+        monitor = api.get_resource('/interface/monitor-traffic')
+        args = {'interface': interface, 'once': 'yes' if once else 'no'}
+        # routeros_api may require .call('monitor-traffic', **params), but using get_resource path wrapper
+        data = monitor.call(**args)
+        return {'success': True, 'data': data}
+    except Exception as e:
+        logger.error(f'monitor_interface_traffic error for {interface}: {e}')
+        return {'success': False, 'error': str(e)}
+    finally:
+        safe_close(api)
 
 
 def trigger_immediate_hotspot_login(phone_number, mac_address, ip_address):
-    """
-    Trigger immediate hotspot login for a user after voucher redemption
-    This is called after voucher redemption to grant immediate internet access
-    
-    Args:
-        phone_number: User's phone number
-        mac_address: User's MAC address
-        ip_address: User's IP address
-    
-    Returns:
-        dict: Login result with success status and message
-    """
+    """Provision user immediately after voucher redemption enforcing user.max_devices."""
     try:
-        # Get MikroTik client
-        mikrotik = get_mikrotik_client()
-        
-        # Track device in database before attempting login
         device_tracked = False
+        device_limit_exceeded = False
         try:
             from .models import User, Device
-            from django.utils import timezone
             user = User.objects.get(phone_number=phone_number)
-            
-            # Ensure device is properly tracked with enhanced tracking
-            device, device_created = Device.objects.get_or_create(
+            device, created = Device.objects.get_or_create(
                 user=user,
                 mac_address=mac_address,
                 defaults={
                     'ip_address': ip_address,
                     'is_active': True,
-                    'device_name': f'Device-{mac_address[-8:]}',  # Use last 8 chars of MAC as name
+                    'device_name': f'Device-{mac_address[-8:]}',
                     'first_seen': timezone.now()
                 }
             )
-            
-            if not device_created:
-                # Update existing device info with enhanced tracking
+            if not created:
                 device.ip_address = ip_address
                 device.is_active = True
                 device.last_seen = timezone.now()
                 device.save()
-                logger.info(f'Updated device tracking for {phone_number}: {mac_address} -> {ip_address} (connection: WiFi voucher)')
             else:
-                # Check device limits for new device
+                # Enforce max devices (default expected 1)
                 active_devices = user.get_active_devices().count()
                 if active_devices > user.max_devices:
+                    # Deactivate this newly added device
                     device.is_active = False
                     device.save()
-                    logger.warning(f'Device limit exceeded for {phone_number}: {active_devices}/{user.max_devices}')
-                    return {
-                        'success': False,
-                        'message': f'Device limit exceeded ({user.max_devices} devices max)',
-                        'method': 'device_limit_exceeded',
-                        'device_tracked': True
-                    }
-                else:
-                    logger.info(f'Created new device tracking for {phone_number}: {mac_address} -> {ip_address} (connection: WiFi voucher, {active_devices}/{user.max_devices})')
-            
+                    device_limit_exceeded = True
             device_tracked = True
-            
-        except Exception as device_error:
-            logger.error(f'Error tracking device for {phone_number}: {str(device_error)}')
-        
-        # Method 1: Try direct hotspot login
-        login_result = mikrotik.perform_hotspot_login(phone_number, mac_address, ip_address)
-        
-        if login_result:
-            logger.info(f'Immediate hotspot login successful for {phone_number} - device tracked: {device_tracked}')
+            if device_limit_exceeded:
+                return {
+                    'success': False,
+                    'message': f'Device limit exceeded (max {user.max_devices})',
+                    'method': 'device_limit_exceeded',
+                    'device_tracked': True,
+                    'device_limit_exceeded': True
+                }
+        except Exception as de:
+            logger.error(f'Device tracking error for {phone_number}: {de}')
+
+        access = grant_user_access(phone_number, mac_address=mac_address, password=phone_number, comment='voucher')
+        if access.get('success'):
             return {
                 'success': True,
-                'message': 'User logged into hotspot successfully',
-                'method': 'direct_login',
-                'device_tracked': device_tracked
+                'message': 'Access granted (bypassed / user created)',
+                'method': 'routeros_api',
+                'device_tracked': device_tracked,
+                'details': access
             }
-        
-        # Method 2: Try adding to active users list
-        add_result = mikrotik.add_hotspot_active_user(phone_number, ip_address, mac_address)
-        
-        if add_result:
-            logger.info(f'User {phone_number} added to active hotspot users - device tracked: {device_tracked}')
-            return {
-                'success': True,
-                'message': 'User added to active hotspot users',
-                'method': 'active_user_add',
-                'device_tracked': device_tracked
-            }
-        
-        # Method 3: Prepare for authentication on next connection
-        logger.warning(f'Direct login methods failed for {phone_number}, user will authenticate on next connection - device tracked: {device_tracked}')
         return {
             'success': False,
-            'message': 'Direct login failed, user will authenticate on next WiFi connection',
-            'method': 'deferred_auth',
-            'device_tracked': device_tracked
+            'message': 'Access provisioning failed',
+            'method': 'routeros_api',
+            'device_tracked': device_tracked,
+            'details': access
         }
-        
     except Exception as e:
-        logger.error(f'Error during immediate hotspot login for {phone_number}: {str(e)}')
-        return {
-            'success': False,
-            'message': f'Login error: {str(e)}',
-            'method': 'error',
-            'device_tracked': False
-        }
-
-
-def force_user_hotspot_login(phone_number, mac_address=None, ip_address=None):
-    """
-    Force a user to be logged into the hotspot (for admin use)
-    
-    Args:
-        phone_number: User's phone number
-        mac_address: User's MAC address (optional)
-        ip_address: User's IP address (optional)
-    
-    Returns:
-        dict: Login result
-    """
-    try:
-        # Try immediate login first
-        if mac_address and ip_address:
-            result = trigger_immediate_hotspot_login(phone_number, mac_address, ip_address)
-            if result['success']:
-                return result
-        
-        # Fallback to standard authentication setup
-        mikrotik = get_mikrotik_client()
-        auth_result = mikrotik.login_user_to_hotspot(phone_number, mac_address or '', ip_address or '')
-        
-        return {
-            'success': auth_result.get('success', False),
-            'message': auth_result.get('message', 'Authentication setup completed'),
-            'method': 'force_login'
-        }
-        
-    except Exception as e:
-        logger.error(f'Error forcing user hotspot login for {phone_number}: {str(e)}')
-        return {
-            'success': False,
-            'message': f'Force login error: {str(e)}',
-            'method': 'error'
-        }
+        logger.error(f'trigger_immediate_hotspot_login error for {phone_number}: {e}')
+        return {'success': False, 'message': str(e), 'method': 'error', 'device_tracked': False}
 
 
 def track_device_connection(phone_number, mac_address, ip_address, connection_type='wifi', access_method='unknown'):
-    """
-    Track device connection when user connects to WiFi
-    This is called from both payment and voucher flows to ensure device tracking
-    
-    Args:
-        phone_number: User's phone number
-        mac_address: User's MAC address
-        ip_address: User's IP address
-        connection_type: Type of connection ('wifi', 'ethernet', etc.)
-        access_method: How user got access ('payment', 'voucher', 'manual')
-    
-    Returns:
-        dict: Device tracking result with success status and device info
-    """
+    """Track device connection enforcing user.max_devices (default 1)."""
     try:
         from .models import User, Device
         from django.utils import timezone
-        
-        # Get user
         try:
             user = User.objects.get(phone_number=phone_number)
         except User.DoesNotExist:
             logger.error(f'Device tracking failed: User {phone_number} not found')
-            return {
-                'success': False,
-                'message': 'User not found',
-                'device_tracked': False
-            }
-        
-        # Check if user has active access
-        if not user.has_active_access():
-            logger.warning(f'Device tracking attempt for user without access: {phone_number}')
-            return {
-                'success': False,
-                'message': 'User does not have active access',
-                'device_tracked': False
-            }
-        
-        # Track device connection
+            return {'success': False, 'message': 'User not found', 'device_tracked': False}
         device, device_created = Device.objects.get_or_create(
             user=user,
             mac_address=mac_address,
-            defaults={
-                'ip_address': ip_address,
-                'is_active': True,
-                'device_name': f'Device-{mac_address[-8:]}',
-                'first_seen': timezone.now()
-            }
+            defaults={'ip_address': ip_address, 'is_active': True, 'device_name': f'Device-{mac_address[-8:]}', 'first_seen': timezone.now()}
         )
-        
+        if device_created:
+            active_devices = user.get_active_devices().count()
+            if active_devices > user.max_devices:
+                device.is_active = False
+                device.save()
+                logger.warning(f'Device limit exceeded for {phone_number}: {active_devices}/{user.max_devices}')
+                device_info = {
+                    'device_id': device.id,
+                    'mac_address': mac_address,
+                    'ip_address': ip_address,
+                    'device_name': device.device_name,
+                    'is_new_device': True,
+                    'first_seen': device.first_seen.isoformat(),
+                    'last_seen': device.last_seen.isoformat(),
+                    'connection_type': connection_type,
+                    'access_method': access_method
+                }
+                return {
+                    'success': False,
+                    'message': f'Device limit exceeded. Max {user.max_devices} device(s) allowed.',
+                    'device_tracked': True,
+                    'device_info': device_info,
+                    'device_limit_exceeded': True,
+                    'active_devices': active_devices,
+                    'max_devices': user.max_devices
+                }
+        else:
+            device.ip_address = ip_address
+            device.is_active = True
+            device.last_seen = timezone.now()
+            device.save()
         device_info = {
             'device_id': device.id,
             'mac_address': mac_address,
@@ -981,65 +595,16 @@ def track_device_connection(phone_number, mac_address, ip_address, connection_ty
             'device_name': device.device_name,
             'is_new_device': device_created,
             'first_seen': device.first_seen.isoformat(),
-            'last_seen': device.last_seen.isoformat()
-        }
-        
-        if device_created:
-            # New device - check device limits
-            active_devices = user.get_active_devices().count()
-            
-            if active_devices > user.max_devices:
-                # Device limit exceeded - deactivate device
-                device.is_active = False
-                device.save()
-                
-                logger.warning(f'Device limit exceeded for {phone_number}: {active_devices}/{user.max_devices} (connection: {connection_type}, method: {access_method})')
-                
-                return {
-                    'success': False,
-                    'message': f'Device limit exceeded. Maximum {user.max_devices} devices allowed.',
-                    'device_tracked': True,
-                    'device_info': device_info,
-                    'device_limit_exceeded': True,
-                    'active_devices': active_devices,
-                    'max_devices': user.max_devices
-                }
-            else:
-                logger.info(f'New device registered for {phone_number}: {mac_address} -> {ip_address} (connection: {connection_type}, method: {access_method}, devices: {active_devices}/{user.max_devices})')
-        else:
-            # Existing device - update connection info
-            device.ip_address = ip_address
-            device.is_active = True
-            device.last_seen = timezone.now()
-            device.save()
-            
-            logger.info(f'Device connection tracked for {phone_number}: {mac_address} -> {ip_address} (connection: {connection_type}, method: {access_method})')
-        
-        # Update device info with current status
-        device_info.update({
-            'is_active': device.is_active,
             'last_seen': device.last_seen.isoformat(),
-            'device_count': user.get_active_devices().count(),
-            'max_devices': user.max_devices,
             'connection_type': connection_type,
-            'access_method': access_method
-        })
-        
-        return {
-            'success': True,
-            'message': 'Device connection tracked successfully',
-            'device_tracked': True,
-            'device_info': device_info,
-            'device_limit_exceeded': False
+            'access_method': access_method,
+            'active_devices': user.get_active_devices().count(),
+            'max_devices': user.max_devices
         }
-        
+        return {'success': True, 'message': 'Device connection tracked', 'device_tracked': True, 'device_info': device_info, 'device_limit_exceeded': False}
     except Exception as e:
-        logger.error(f'Error tracking device connection for {phone_number}: {str(e)}')
-        return {
-            'success': False,
-            'message': f'Device tracking error: {str(e)}',
-            'device_tracked': False
-        }
+        logger.error(f'Error tracking device connection for {phone_number}: {e}')
+        return {'success': False, 'message': f'Device tracking error: {e}', 'device_tracked': False}
 
 
 def enhance_device_tracking_for_payment(payment_user, mac_address, ip_address):
@@ -1057,35 +622,16 @@ def enhance_device_tracking_for_payment(payment_user, mac_address, ip_address):
     try:
         if not mac_address:
             logger.warning(f'Payment device tracking: No MAC address provided for {payment_user.phone_number}')
-            return {
-                'success': False,
-                'message': 'No MAC address provided',
-                'device_tracked': False
-            }
-        
-        # Track device with payment method
-        result = track_device_connection(
-            phone_number=payment_user.phone_number,
-            mac_address=mac_address,
-            ip_address=ip_address,
-            connection_type='wifi',
-            access_method='payment'
-        )
-        
+            return {'success': False, 'message': 'No MAC address provided', 'device_tracked': False}
+        result = track_device_connection(payment_user.phone_number, mac_address, ip_address, connection_type='wifi', access_method='payment')
         if result['success']:
             logger.info(f'Payment device tracking successful for {payment_user.phone_number}: {mac_address}')
         else:
             logger.warning(f'Payment device tracking failed for {payment_user.phone_number}: {result["message"]}')
-        
         return result
-        
     except Exception as e:
-        logger.error(f'Error in payment device tracking for {payment_user.phone_number}: {str(e)}')
-        return {
-            'success': False,
-            'message': f'Payment device tracking error: {str(e)}',
-            'device_tracked': False
-        }
+        logger.error(f'Error in payment device tracking for {payment_user.phone_number}: {e}')
+        return {'success': False, 'message': f'Payment device tracking error: {e}', 'device_tracked': False}
 
 
 def enhance_device_tracking_for_voucher(voucher_user, mac_address, ip_address):
@@ -1103,33 +649,14 @@ def enhance_device_tracking_for_voucher(voucher_user, mac_address, ip_address):
     try:
         if not mac_address:
             logger.warning(f'Voucher device tracking: No MAC address provided for {voucher_user.phone_number}')
-            return {
-                'success': False,
-                'message': 'No MAC address provided',
-                'device_tracked': False
-            }
-        
-        # Track device with voucher method
-        result = track_device_connection(
-            phone_number=voucher_user.phone_number,
-            mac_address=mac_address,
-            ip_address=ip_address,
-            connection_type='wifi',
-            access_method='voucher'
-        )
-        
+            return {'success': False, 'message': 'No MAC address provided', 'device_tracked': False}
+        result = track_device_connection(voucher_user.phone_number, mac_address, ip_address, connection_type='wifi', access_method='voucher')
         if result['success']:
             logger.info(f'Voucher device tracking successful for {voucher_user.phone_number}: {mac_address}')
         else:
             logger.warning(f'Voucher device tracking failed for {voucher_user.phone_number}: {result["message"]}')
-        
         return result
-        
     except Exception as e:
-        logger.error(f'Error in voucher device tracking for {voucher_user.phone_number}: {str(e)}')
-        return {
-            'success': False,
-            'message': f'Voucher device tracking error: {str(e)}',
-            'device_tracked': False
-        }
+        logger.error(f'Error in voucher device tracking for {voucher_user.phone_number}: {e}')
+        return {'success': False, 'message': f'Voucher device tracking error: {e}', 'device_tracked': False}
 

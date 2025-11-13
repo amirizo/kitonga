@@ -1124,9 +1124,9 @@ def system_status(request):
         stats = {
             'database_status': db_status,
             'mikrotik_status': mikrotik_status,
-            'uptime': 'Unknown',  # You can calculate actual uptime
-            'memory_usage': 'Unknown',  # You can get actual memory usage
-            'disk_usage': 'Unknown',  # You can get actual disk usage
+            'uptime': 'Unknown'  # You can calculate actual uptime
+            'memory_usage': 'Unknown'  # You can get actual memory usage
+            'disk_usage': 'Unknown'  # You can get actual disk usage
             'active_users': User.objects.filter(
                 is_active=True,
                 paid_until__gt=now
@@ -1150,7 +1150,7 @@ def system_status(request):
             'total_users': User.objects.count(),
             'active_bundles': Bundle.objects.filter(is_active=True).count(),
             'pending_payments': Payment.objects.filter(status='pending').count()
-        }
+        };
         
         return Response({
             'success': True,

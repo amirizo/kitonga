@@ -265,12 +265,30 @@ MAX_DEVICES_PER_USER = config('MAX_DEVICES_PER_USER', default=1, cast=int)
 SIMPLE_ADMIN_TOKEN = config('SIMPLE_ADMIN_TOKEN', default='kitonga_admin_2025')
 ADMIN_TOKEN_SECRET = config('ADMIN_TOKEN_SECRET', default=SECRET_KEY)
 
-# Mikrotik Router Configuration
+# MikroTik Router Configuration
 MIKROTIK_ROUTER_IP = config('MIKROTIK_ROUTER_IP', default='192.168.0.173')
 MIKROTIK_ADMIN_USER = config('MIKROTIK_ADMIN_USER', default='admin')
 MIKROTIK_ADMIN_PASS = config('MIKROTIK_ADMIN_PASS', default='Kijangwani2003')
 MIKROTIK_API_PORT = config('MIKROTIK_API_PORT', default=8728, cast=int)
 MIKROTIK_HOTSPOT_NAME = config('MIKROTIK_HOTSPOT_NAME', default='kitonga-hotspot')
+
+# MikroTik API Configuration (env-driven)
+try:
+    from decouple import config as _cfg
+    MIKROTIK_HOST = _cfg('MIKROTIK_HOST', default=_cfg('MIKROTIK_ROUTER_IP', default='192.168.88.1'))
+    MIKROTIK_PORT = _cfg('MIKROTIK_PORT', default=_cfg('MIKROTIK_API_PORT', default=8728, cast=int), cast=int)
+    MIKROTIK_USER = _cfg('MIKROTIK_USER', default=_cfg('MIKROTIK_ADMIN_USER', default='admin'))
+    MIKROTIK_PASSWORD = _cfg('MIKROTIK_PASSWORD', default=_cfg('MIKROTIK_ADMIN_PASS', default=''))
+    MIKROTIK_USE_SSL = _cfg('MIKROTIK_USE_SSL', default=False, cast=bool)
+    MIKROTIK_DEFAULT_PROFILE = _cfg('MIKROTIK_DEFAULT_PROFILE', default='default')
+except Exception:
+    # Fallback defaults
+    MIKROTIK_HOST = '192.168.88.1'
+    MIKROTIK_PORT = 8728
+    MIKROTIK_USER = 'admin'
+    MIKROTIK_PASSWORD = ''
+    MIKROTIK_USE_SSL = False
+    MIKROTIK_DEFAULT_PROFILE = 'default'
 
 # Jazzmin Configuration
 JAZZMIN_SETTINGS = {
