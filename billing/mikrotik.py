@@ -1,6 +1,7 @@
 """
 Mikrotik Router Integration for Kitonga Wi-Fi Billing System
 """
+import os
 import socket
 import logging
 from typing import Optional, List
@@ -14,6 +15,9 @@ except Exception:  # library might not be installed yet
     routeros_api = None
 
 logger = logging.getLogger(__name__)
+
+# Check if MikroTik should be mocked (for production environments without router access)
+MIKROTIK_MOCK_MODE = os.getenv('MIKROTIK_MOCK_MODE', 'false').lower() == 'true'
 
 
 def safe_close(api):
@@ -30,6 +34,9 @@ def get_mikrotik_api():
     Return an authenticated RouterOS API connection using env-driven settings.
     Caller should close with api.get_communicator().close() in a finally block.
     """
+    if MIKROTIK_MOCK_MODE:
+        raise ConnectionRefusedError('MikroTik router not accessible in this environment. Configure VPN or set MIKROTIK_MOCK_MODE=false')
+    
     if routeros_api is None:
         raise ImportError('routeros-api is not installed. Add it to requirements.txt')
 
