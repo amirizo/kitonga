@@ -1810,6 +1810,71 @@ def verify_access(request):
                     else:
                         logger.info(f'New device registered for {phone_number}: {mac_address} ({active_devices}/{user.max_devices}, method: {access_method})')
         
+        # ============================================
+        # AUTOMATIC MIKROTIK CONNECTION/DISCONNECTION
+        # ============================================
+        mikrotik_action = 'none'
+        mikrotik_success = False
+        mikrotik_message = ''
+        
+        if has_access and mac_address:
+            # User has valid access - CONNECT to MikroTik
+            try:
+                logger.info(f'✓ User {phone_number} has valid access - connecting to MikroTik (MAC: {mac_address}, IP: {ip_address})')
+                
+                # Grant access on MikroTik router
+                grant_result = grant_user_access(
+                    username=phone_number,
+                    mac_address=mac_address,
+                    password=phone_number[-6:],  # Use last 6 digits as password
+                    comment=f'Auto-connected on access verification ({access_method})'
+                )
+                
+                if grant_result.get('success'):
+                    mikrotik_action = 'connected'
+                    mikrotik_success = True
+                    mikrotik_message = 'Successfully connected to internet'
+                    logger.info(f'✓ Automatically connected {phone_number} to internet via MikroTik')
+                else:
+                    mikrotik_action = 'connect_failed'
+                    mikrotik_success = False
+                    mikrotik_message = f'Connection failed: {", ".join(grant_result.get("errors", ["Unknown error"]))}'
+                    logger.error(f'✗ Failed to connect {phone_number} to MikroTik: {mikrotik_message}')
+                    
+            except Exception as e:
+                mikrotik_action = 'connect_error'
+                mikrotik_success = False
+                mikrotik_message = f'Connection error: {str(e)}'
+                logger.error(f'✗ Error connecting {phone_number} to MikroTik: {str(e)}')
+        
+        elif not has_access and mac_address:
+            # User does NOT have access - DISCONNECT from MikroTik
+            try:
+                logger.info(f'✗ User {phone_number} has no valid access - disconnecting from MikroTik (Reason: {denial_reason})')
+                
+                # Revoke access on MikroTik router
+                revoke_result = revoke_user_access(
+                    mac_address=mac_address,
+                    username=phone_number
+                )
+                
+                if revoke_result.get('success'):
+                    mikrotik_action = 'disconnected'
+                    mikrotik_success = True
+                    mikrotik_message = 'Disconnected from internet (no valid access)'
+                    logger.info(f'✓ Automatically disconnected {phone_number} from MikroTik')
+                else:
+                    mikrotik_action = 'disconnect_failed'
+                    mikrotik_success = False
+                    mikrotik_message = f'Disconnection failed: {", ".join(revoke_result.get("errors", ["Unknown error"]))}'
+                    logger.warning(f'⚠ Failed to disconnect {phone_number} from MikroTik: {mikrotik_message}')
+                    
+            except Exception as e:
+                mikrotik_action = 'disconnect_error'
+                mikrotik_success = False
+                mikrotik_message = f'Disconnection error: {str(e)}'
+                logger.error(f'✗ Error disconnecting {phone_number} from MikroTik: {str(e)}')
+        
         # Log access attempt with enhanced information
         AccessLog.objects.create(
             user=user,
@@ -1825,12 +1890,17 @@ def verify_access(request):
             user.deactivate_access()
             logger.info(f'User {phone_number} deactivated due to expired access (method was: {access_method})')
         
-        # Enhanced response with access method information
+        # Enhanced response with access method and MikroTik connection status
         response_data = {
             'access_granted': has_access,
             'denial_reason': denial_reason,
             'user': UserSerializer(user).data,
             'access_method': access_method,
+            'mikrotik_connection': {
+                'action': mikrotik_action,
+                'success': mikrotik_success,
+                'message': mikrotik_message
+            },
             'debug_info': {
                 'has_payments': user.payments.filter(status='completed').exists(),
                 'has_vouchers': user.vouchers_used.filter(is_used=True).exists(),
