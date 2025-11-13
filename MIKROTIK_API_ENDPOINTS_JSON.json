@@ -1,0 +1,596 @@
+{
+  "mikrotik_api_endpoints": {
+    "integration_endpoints": [
+      {
+        "id": 1,
+        "name": "MikroTik Authentication",
+        "endpoint": "/api/mikrotik/auth/",
+        "method": "POST",
+        "permission": "Public (AllowAny)",
+        "description": "Authenticate users for MikroTik hotspot access. Called by both MikroTik router and frontend.",
+        "request_formats": {
+          "form_data": {
+            "content_type": "application/x-www-form-urlencoded",
+            "parameters": {
+              "username": "+255743852695",
+              "password": "",
+              "mac": "AA:BB:CC:DD:EE:FF",
+              "ip": "192.168.0.100"
+            }
+          },
+          "json": {
+            "content_type": "application/json",
+            "body": {
+              "username": "+255743852695",
+              "mac": "AA:BB:CC:DD:EE:FF",
+              "ip": "192.168.0.100"
+            }
+          }
+        },
+        "responses": {
+          "success_mikrotik": {
+            "status": 200,
+            "body": "OK"
+          },
+          "success_json": {
+            "status": 200,
+            "body": {
+              "auth-state": 1,
+              "success": true,
+              "message": "Authentication successful",
+              "user": "+255743852695",
+              "device_count": 1,
+              "max_devices": 3,
+              "access_type": "payment",
+              "device_info": {
+                "current_device": {
+                  "mac": "AA:BB:CC:DD:EE:FF",
+                  "ip": "192.168.0.100",
+                  "registered": true
+                }
+              }
+            }
+          },
+          "error_mikrotik": {
+            "status": 403,
+            "body": "User not found - please make payment or redeem voucher"
+          },
+          "error_json": {
+            "status": 403,
+            "body": {
+              "error": "User not found - please make payment or redeem voucher",
+              "auth-state": 0,
+              "success": false,
+              "message": "User not found - please make payment or redeem voucher"
+            }
+          }
+        },
+        "curl_example": "curl -X POST http://localhost:8000/api/mikrotik/auth/ \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"username\":\"+255743852695\",\"mac\":\"AA:BB:CC:DD:EE:FF\",\"ip\":\"192.168.0.100\"}'"
+      },
+      {
+        "id": 2,
+        "name": "MikroTik Logout",
+        "endpoint": "/api/mikrotik/logout/",
+        "method": "POST",
+        "permission": "Public (AllowAny)",
+        "description": "Logout users from MikroTik hotspot. Called by both MikroTik router and frontend.",
+        "request_formats": {
+          "form_data": {
+            "content_type": "application/x-www-form-urlencoded",
+            "parameters": {
+              "username": "+255743852695",
+              "ip": "192.168.0.100"
+            }
+          },
+          "json": {
+            "content_type": "application/json",
+            "body": {
+              "username": "+255743852695",
+              "ip": "192.168.0.100"
+            }
+          }
+        },
+        "responses": {
+          "success_mikrotik": {
+            "status": 200,
+            "body": "OK"
+          },
+          "success_json": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "message": "Logout successful",
+              "user": "+255743852695"
+            }
+          }
+        },
+        "curl_example": "curl -X POST http://localhost:8000/api/mikrotik/logout/ \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"username\":\"+255743852695\",\"ip\":\"192.168.0.100\"}'"
+      },
+      {
+        "id": 3,
+        "name": "MikroTik Status Check",
+        "endpoint": "/api/mikrotik/status/",
+        "method": "GET",
+        "permission": "Admin (X-Admin-Access required)",
+        "description": "Check MikroTik router connection status. Admin only.",
+        "request_headers": {
+          "X-Admin-Access": "kitonga_admin_2025"
+        },
+        "responses": {
+          "success": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "router_ip": "192.168.0.173",
+              "router_port": 8728,
+              "connection_status": "connected",
+              "connection_details": {
+                "success": true,
+                "message": "Connection successful",
+                "router_info": {
+                  "identity": "hAP lite",
+                  "version": "7.16.2 (stable)",
+                  "uptime": "2w3d4h5m"
+                }
+              },
+              "active_users": 5,
+              "admin_user": "admin",
+              "timestamp": "2025-11-13T12:00:31+00:00"
+            }
+          },
+          "error_no_auth": {
+            "status": 403,
+            "body": {
+              "detail": "Authentication credentials were not provided."
+            }
+          }
+        },
+        "curl_example": "curl -X GET http://localhost:8000/api/mikrotik/status/ \\\n  -H \"X-Admin-Access: kitonga_admin_2025\""
+      },
+      {
+        "id": 4,
+        "name": "MikroTik User Status",
+        "endpoint": "/api/mikrotik/user-status/",
+        "method": "GET/POST",
+        "permission": "Public (AllowAny)",
+        "description": "Check specific user's access status and session details.",
+        "request_formats": {
+          "get": {
+            "query_params": {
+              "username": "+255743852695"
+            }
+          },
+          "post_form": {
+            "content_type": "application/x-www-form-urlencoded",
+            "parameters": {
+              "username": "+255743852695"
+            }
+          },
+          "post_json": {
+            "content_type": "application/json",
+            "body": {
+              "username": "+255743852695"
+            }
+          }
+        },
+        "responses": {
+          "success": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "user_type": "payment_user",
+              "username": "+255743852695",
+              "is_active": true,
+              "has_active_access": true,
+              "status": "active",
+              "user_info": {
+                "user_id": 20,
+                "phone_number": "+255743852695",
+                "is_active": true,
+                "paid_until": "2025-11-14T12:00:31+00:00",
+                "created_at": "2025-11-13T11:57:40+00:00",
+                "device_count": 1
+              },
+              "devices": [
+                {
+                  "mac_address": "AA:BB:CC:DD:EE:FF",
+                  "first_seen": "2025-11-13T12:00:31+00:00",
+                  "last_seen": "2025-11-13T12:00:31+00:00",
+                  "is_active": true
+                }
+              ],
+              "payment_info": {
+                "bundle_name": "Test Bundle",
+                "amount": "1000.00",
+                "paid_at": "2025-11-13T11:59:52+00:00",
+                "expires_at": "2025-11-14T12:00:31+00:00"
+              },
+              "mikrotik_session": null,
+              "timestamp": "2025-11-13T12:00:31+00:00"
+            }
+          },
+          "error_not_found": {
+            "status": 404,
+            "body": {
+              "success": false,
+              "message": "User not found",
+              "username": "+255999999999",
+              "user_type": "unknown"
+            }
+          }
+        },
+        "curl_example": "curl -X GET 'http://localhost:8000/api/mikrotik/user-status/?username=%2B255743852695'"
+      }
+    ],
+    "admin_endpoints": [
+      {
+        "id": 5,
+        "name": "MikroTik Configuration",
+        "endpoint": "/api/admin/mikrotik/config/",
+        "method": "GET",
+        "permission": "Admin (X-Admin-Access required)",
+        "description": "Get MikroTik router configuration settings.",
+        "request_headers": {
+          "X-Admin-Access": "kitonga_admin_2025"
+        },
+        "responses": {
+          "success": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "configuration": {
+                "router_ip": "192.168.0.173",
+                "username": "admin",
+                "password_configured": true,
+                "api_port": 8728,
+                "use_ssl": false,
+                "default_profile": "default"
+              }
+            }
+          }
+        },
+        "curl_example": "curl -X GET http://localhost:8000/api/admin/mikrotik/config/ \\\n  -H \"X-Admin-Access: kitonga_admin_2025\""
+      },
+      {
+        "id": 6,
+        "name": "Test MikroTik Connection",
+        "endpoint": "/api/admin/mikrotik/test-connection/",
+        "method": "POST",
+        "permission": "Admin (X-Admin-Access required)",
+        "description": "Test connection to MikroTik router with provided or default credentials.",
+        "request_headers": {
+          "X-Admin-Access": "kitonga_admin_2025",
+          "Content-Type": "application/json"
+        },
+        "request_body": {
+          "router_ip": "192.168.0.173",
+          "username": "admin",
+          "password": "Kijangwani2003",
+          "api_port": 8728
+        },
+        "note": "All parameters are optional. If not provided, uses settings from .env",
+        "responses": {
+          "success": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "message": "Connection successful",
+              "router_info": {
+                "uptime": "14m26s",
+                "version": "7.20.4 (stable)",
+                "board_name": "hAP lite",
+                "platform": "MikroTik",
+                "cpu_load": "5",
+                "free_memory": "7847936",
+                "total_memory": "33554432"
+              }
+            }
+          }
+        },
+        "curl_example": "curl -X POST http://localhost:8000/api/admin/mikrotik/test-connection/ \\\n  -H \"X-Admin-Access: kitonga_admin_2025\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{}'"
+      },
+      {
+        "id": 7,
+        "name": "Get Router Info",
+        "endpoint": "/api/admin/mikrotik/router-info/",
+        "method": "GET",
+        "permission": "Admin (X-Admin-Access required)",
+        "description": "Get detailed MikroTik router information.",
+        "request_headers": {
+          "X-Admin-Access": "kitonga_admin_2025"
+        },
+        "responses": {
+          "success": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "router_info": {
+                "uptime": "14m26s",
+                "version": "7.20.4 (stable)",
+                "board_name": "hAP lite",
+                "platform": "MikroTik",
+                "cpu_load": "5",
+                "free_memory": "7847936",
+                "total_memory": "33554432",
+                "connection_status": "connected"
+              }
+            }
+          }
+        },
+        "curl_example": "curl -X GET http://localhost:8000/api/admin/mikrotik/router-info/ \\\n  -H \"X-Admin-Access: kitonga_admin_2025\""
+      },
+      {
+        "id": 8,
+        "name": "Get Active Hotspot Users",
+        "endpoint": "/api/admin/mikrotik/active-users/",
+        "method": "GET",
+        "permission": "Admin (X-Admin-Access required)",
+        "description": "Get list of currently active hotspot users on MikroTik router.",
+        "request_headers": {
+          "X-Admin-Access": "kitonga_admin_2025"
+        },
+        "responses": {
+          "success": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "active_users": [
+                {
+                  "id": "*1",
+                  "user": "+255743852695",
+                  "address": "192.168.0.100",
+                  "mac-address": "AA:BB:CC:DD:EE:FF",
+                  "session-time": "1h5m30s",
+                  "bytes-in": "1024000",
+                  "bytes-out": "5120000",
+                  "packets-in": "1500",
+                  "packets-out": "2000"
+                }
+              ],
+              "total_count": 1
+            }
+          },
+          "success_no_users": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "active_users": [],
+              "total_count": 0
+            }
+          }
+        },
+        "curl_example": "curl -X GET http://localhost:8000/api/admin/mikrotik/active-users/ \\\n  -H \"X-Admin-Access: kitonga_admin_2025\""
+      },
+      {
+        "id": 9,
+        "name": "Disconnect User",
+        "endpoint": "/api/admin/mikrotik/disconnect-user/",
+        "method": "POST",
+        "permission": "Admin (X-Admin-Access required)",
+        "description": "Disconnect a specific user from MikroTik hotspot.",
+        "request_headers": {
+          "X-Admin-Access": "kitonga_admin_2025",
+          "Content-Type": "application/json"
+        },
+        "request_body": {
+          "username": "+255743852695"
+        },
+        "responses": {
+          "success": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "message": "User +255743852695 disconnected successfully"
+            }
+          },
+          "user_not_connected": {
+            "status": 404,
+            "body": {
+              "success": false,
+              "message": "User not currently connected"
+            }
+          }
+        },
+        "curl_example": "curl -X POST http://localhost:8000/api/admin/mikrotik/disconnect-user/ \\\n  -H \"X-Admin-Access: kitonga_admin_2025\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"username\":\"+255743852695\"}'"
+      },
+      {
+        "id": 10,
+        "name": "Disconnect All Users",
+        "endpoint": "/api/admin/mikrotik/disconnect-all/",
+        "method": "POST",
+        "permission": "Admin (X-Admin-Access required)",
+        "description": "Disconnect all users from MikroTik hotspot.",
+        "request_headers": {
+          "X-Admin-Access": "kitonga_admin_2025"
+        },
+        "responses": {
+          "success": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "message": "Successfully disconnected 5 users",
+              "disconnected_count": 5
+            }
+          },
+          "no_users": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "message": "Successfully disconnected 0 users",
+              "disconnected_count": 0
+            }
+          }
+        },
+        "curl_example": "curl -X POST http://localhost:8000/api/admin/mikrotik/disconnect-all/ \\\n  -H \"X-Admin-Access: kitonga_admin_2025\""
+      },
+      {
+        "id": 11,
+        "name": "Reboot Router",
+        "endpoint": "/api/admin/mikrotik/reboot/",
+        "method": "POST",
+        "permission": "Admin (X-Admin-Access required)",
+        "description": "Reboot the MikroTik router. Requires confirmation.",
+        "request_headers": {
+          "X-Admin-Access": "kitonga_admin_2025",
+          "Content-Type": "application/json"
+        },
+        "request_body": {
+          "confirm": "REBOOT_ROUTER"
+        },
+        "responses": {
+          "confirmation_required": {
+            "status": 400,
+            "body": {
+              "success": false,
+              "message": "Confirmation required. Send {\"confirm\": \"REBOOT_ROUTER\"} to proceed."
+            }
+          },
+          "success": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "message": "Router reboot initiated"
+            }
+          }
+        },
+        "curl_example": "curl -X POST http://localhost:8000/api/admin/mikrotik/reboot/ \\\n  -H \"X-Admin-Access: kitonga_admin_2025\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"confirm\":\"REBOOT_ROUTER\"}'"
+      },
+      {
+        "id": 12,
+        "name": "Get Hotspot Profiles",
+        "endpoint": "/api/admin/mikrotik/profiles/",
+        "method": "GET",
+        "permission": "Admin (X-Admin-Access required)",
+        "description": "Get list of all hotspot profiles on MikroTik router.",
+        "request_headers": {
+          "X-Admin-Access": "kitonga_admin_2025"
+        },
+        "responses": {
+          "success": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "profiles": [
+                {
+                  "name": "default",
+                  "rate_limit": null,
+                  "shared_users": "1",
+                  "session_timeout": null,
+                  "idle_timeout": "none"
+                },
+                {
+                  "name": "kitonga-default",
+                  "rate_limit": null,
+                  "shared_users": "10",
+                  "session_timeout": null,
+                  "idle_timeout": "none"
+                },
+                {
+                  "name": "kitonga-user",
+                  "rate_limit": "2M/2M",
+                  "shared_users": "10",
+                  "session_timeout": "24h",
+                  "idle_timeout": "5m"
+                }
+              ]
+            }
+          }
+        },
+        "curl_example": "curl -X GET http://localhost:8000/api/admin/mikrotik/profiles/ \\\n  -H \"X-Admin-Access: kitonga_admin_2025\""
+      },
+      {
+        "id": 13,
+        "name": "Create Hotspot Profile",
+        "endpoint": "/api/admin/mikrotik/profiles/create/",
+        "method": "POST",
+        "permission": "Admin (X-Admin-Access required)",
+        "description": "Create a new hotspot profile on MikroTik router.",
+        "request_headers": {
+          "X-Admin-Access": "kitonga_admin_2025",
+          "Content-Type": "application/json"
+        },
+        "request_body": {
+          "name": "premium-user",
+          "rate_limit": "5M/5M",
+          "session_timeout": "24h",
+          "idle_timeout": "10m"
+        },
+        "responses": {
+          "success": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "message": "Hotspot profile \"premium-user\" created successfully",
+              "profile": {
+                "name": "premium-user",
+                "rate_limit": "5M/5M"
+              }
+            }
+          },
+          "already_exists": {
+            "status": 500,
+            "body": {
+              "success": false,
+              "message": "Profile with such name already exists"
+            }
+          }
+        },
+        "curl_example": "curl -X POST http://localhost:8000/api/admin/mikrotik/profiles/create/ \\\n  -H \"X-Admin-Access: kitonga_admin_2025\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"name\":\"premium-user\",\"rate_limit\":\"5M/5M\",\"session_timeout\":\"24h\",\"idle_timeout\":\"10m\"}'"
+      },
+      {
+        "id": 14,
+        "name": "Get System Resources",
+        "endpoint": "/api/admin/mikrotik/resources/",
+        "method": "GET",
+        "permission": "Admin (X-Admin-Access required)",
+        "description": "Get MikroTik router system resources (CPU, memory, uptime).",
+        "request_headers": {
+          "X-Admin-Access": "kitonga_admin_2025"
+        },
+        "responses": {
+          "success": {
+            "status": 200,
+            "body": {
+              "success": true,
+              "system_resources": {
+                "uptime": "14m59s",
+                "version": "7.20.4 (stable)",
+                "board_name": "hAP lite",
+                "platform": "MikroTik",
+                "cpu_load": "5",
+                "free_memory": "7372800",
+                "total_memory": "33554432",
+                "connection_status": "connected"
+              }
+            }
+          }
+        },
+        "curl_example": "curl -X GET http://localhost:8000/api/admin/mikrotik/resources/ \\\n  -H \"X-Admin-Access: kitonga_admin_2025\""
+      }
+    ],
+    "configuration": {
+      "base_url": "http://localhost:8000",
+      "production_url": "https://api.kitonga.klikcell.com",
+      "admin_token_header": "X-Admin-Access",
+      "admin_token_value": "kitonga_admin_2025",
+      "mikrotik_settings": {
+        "MIKROTIK_HOST": "192.168.0.173",
+        "MIKROTIK_PORT": 8728,
+        "MIKROTIK_USER": "admin",
+        "MIKROTIK_PASSWORD": "Kijangwani2003",
+        "MIKROTIK_USE_SSL": false,
+        "MIKROTIK_DEFAULT_PROFILE": "default"
+      }
+    },
+    "test_results": {
+      "total_endpoints": 14,
+      "tested": 14,
+      "passed": 14,
+      "failed": 0,
+      "success_rate": "100%",
+      "test_date": "2025-11-13T15:07:02+00:00",
+      "router_model": "hAP lite",
+      "router_version": "7.20.4 (stable)"
+    }
+  }
+}
