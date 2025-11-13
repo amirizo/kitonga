@@ -270,12 +270,6 @@ MAX_DEVICES_PER_USER = config('MAX_DEVICES_PER_USER', default=1, cast=int)
 SIMPLE_ADMIN_TOKEN = config('SIMPLE_ADMIN_TOKEN', default='kitonga_admin_2025')
 ADMIN_TOKEN_SECRET = config('ADMIN_TOKEN_SECRET', default=SECRET_KEY)
 
-# MikroTik Router Configuration
-# MIKROTIK_ROUTER_IP = config('MIKROTIK_ROUTER_IP', default='192.168.0.173')
-# MIKROTIK_ADMIN_USER = config('MIKROTIK_ADMIN_USER', default='admin')
-# MIKROTIK_ADMIN_PASS = config('MIKROTIK_ADMIN_PASS', default='Kijangwani2003')
-# MIKROTIK_API_PORT = config('MIKROTIK_API_PORT', default=8728, cast=int)
-# MIKROTIK_HOTSPOT_NAME = config('MIKROTIK_HOTSPOT_NAME', default='kitonga-hotspot')
 
 # MikroTik API Configuration (env-driven)
 try:

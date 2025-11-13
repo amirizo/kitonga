@@ -33,10 +33,10 @@ def get_mikrotik_api():
     if routeros_api is None:
         raise ImportError('routeros-api is not installed. Add it to requirements.txt')
 
-    host = getattr(settings, 'MIKROTIK_HOST', getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.88.1'))
+    host = getattr(settings, 'MIKROTIK_HOST', getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.0.173'))
     port = int(getattr(settings, 'MIKROTIK_PORT', getattr(settings, 'MIKROTIK_API_PORT', 8728)))
     user = getattr(settings, 'MIKROTIK_USER', getattr(settings, 'MIKROTIK_ADMIN_USER', 'admin'))
-    password = getattr(settings, 'MIKROTIK_PASSWORD', getattr(settings, 'MIKROTIK_ADMIN_PASS', ''))
+    password = getattr(settings, 'MIKROTIK_PASSWORD', getattr(settings, 'MIKROTIK_ADMIN_PASS', 'Kijangwani2003'))
     use_ssl = bool(getattr(settings, 'MIKROTIK_USE_SSL', False))
 
     try:
