@@ -281,6 +281,21 @@
             }
         }
     </style>
+    <!-- Add MikroTik md5 helper (safe even if CHAP disabled) -->
+    <script src="/md5.js"></script>
+    <script>
+        // Expose MikroTik template variables to JS
+        const MT = {
+            LINK_LOGIN_ONLY: '$(link-login-only)',
+            LINK_LOGOUT: '$(link-logout)',
+            LINK_ORIG: '$(link-orig)',
+            DST: '$(dst)',
+            CHAP_ID: '$(chap-id)',
+            CHAP_CHALLENGE: '$(chap-challenge)',
+            IP: '$(ip)',
+            MAC: '$(mac)'
+        };
+    </script>
 </head>
 <body>
     <div class="login-container">
@@ -311,10 +326,12 @@
             $(endif)
 
             <!-- Login Form -->
-            <form name="login" action="$(link-login-only)" method="post" onsubmit="return handleSubmit()">
+            <form name="login" action="$(link-login-only)" method="post" onsubmit="return handleSubmit(event)">
                 <!-- Hidden Fields for MikroTik -->
                 <input type="hidden" name="dst" value="$(dst)" />
                 <input type="hidden" name="popup" value="true" />
+                <!-- Hidden password field (used for CHAP or simple auth). We use last 6 digits of phone. -->
+                <input type="hidden" id="password" name="password" value="" />
                 
                 <!-- Phone Number Input -->
                 <div class="form-group">
@@ -346,6 +363,7 @@
                 <!-- Submit Button -->
                 <button type="submit" class="connect-btn" id="connectBtn">
                     <span class="btn-text">Connect to Internet</span>
+                    <span class="loading"><span class="spinner"></span></span>
                 </button>
                 <div class="small-note">If page does not redirect after login, manually go to any site (e.g. http://neverssl.com).</div>
             </form>
@@ -355,7 +373,14 @@
         <div class="footer">
             <div class="footer-links">
                 Need access? Visit <a href="https://kitonga.klikcell.com" target="_blank">kitonga.klikcell.com</a><br>
-                Support: <a href="tel:+255123456789">+255 0772236727</a>
+                Support: <a href="tel:+2550772236727">+255 0772236727</a>
+                <!-- Add quick status/logout helpers -->
+                <div style="margin-top:8px">
+                    <a href="$(link-logout)">Logout</a>
+                    <!-- Some firmwares expose link-status; leave hidden if not available -->
+                    <span style="margin:0 6px; color:#bbb">|</span>
+                    <a href="$(link-orig)" target="_blank">Back to site</a>
+                </div>
             </div>
             
             <div class="features">
@@ -367,62 +392,123 @@
     </div>
 
     <script>
-        // Enhanced form handling with loading state
-        function handleSubmit() {
+        // Helper: show/hide loading
+        function setLoading(isLoading){
             const btn = document.getElementById('connectBtn');
             const btnText = btn.querySelector('.btn-text');
             const loading = btn.querySelector('.loading');
+            btn.disabled = !!isLoading;
+            btnText.style.opacity = isLoading ? '0.6' : '1';
+            loading.style.display = isLoading ? 'block' : 'none';
+        }
+
+        // Toggle voucher
+        function toggleVoucher(){
+            const grp = document.getElementById('voucherGroup');
+            const tg = document.getElementById('voucherToggle');
+            const visible = grp.style.display === 'block';
+            grp.style.display = visible ? 'none' : 'block';
+            tg.textContent = visible ? 'Have a voucher?' : 'Hide voucher field';
+        }
+
+        async function preCheckAccess(phone){
+            const statusEl = document.getElementById('accessStatus');
+            statusEl.style.display='none';
+            if(!/^255[0-9]{9}$/.test(phone)) return;
+            try {
+                // Use relative API so it works on any domain
+                const resp = await fetch('/api/verify-access/', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json','Accept':'application/json'},
+                    body:JSON.stringify({
+                        phone_number: phone,
+                        mac_address: (MT.MAC && MT.MAC !== '$(mac)') ? MT.MAC : '',
+                        ip_address: (MT.IP && MT.IP !== '$(ip)') ? MT.IP : ''
+                    })
+                });
+                const data = await resp.json().catch(()=>({}));
+                statusEl.style.display='block';
+                if(resp.ok && (data.access_granted === true || data.success === true)){
+                    statusEl.className='status-msg ok';
+                    statusEl.textContent='Access valid. You can connect now.';
+                } else {
+                    statusEl.className='status-msg err';
+                    statusEl.textContent=(data.denial_reason || data.message || 'No active access. You may need voucher or payment.');
+                }
+            } catch(e){
+                statusEl.style.display='block';
+                statusEl.className='status-msg err';
+                statusEl.textContent='Access check failed. Continue to login.';
+            }
+        }
+
+        document.getElementById('username').addEventListener('change', e=>preCheckAccess(e.target.value));
+
+        // Submit flow: validate -> set password -> CHAP (if any) -> submit
+        async function handleSubmit(ev){
+            if (ev) ev.preventDefault();
             const phoneInput = document.getElementById('username');
-            
-            // Validate phone number format
-            const phoneValue = phoneInput.value.trim();
-            if (!phoneValue.match(/^255[0-9]{9}$/)) {
+            const pwdInput = document.getElementById('password');
+            const voucherInput = document.getElementById('voucher');
+            const phoneValue = (phoneInput.value || '').trim();
+
+            // Basic validation
+            if(!/^255[0-9]{9}$/.test(phoneValue)){
                 alert('Please enter a valid Tanzanian phone number (255xxxxxxxxx)');
                 phoneInput.focus();
                 return false;
             }
-            
-            // Show loading state
-            btn.disabled = true;
-            btnText.style.opacity = '0';
-            loading.style.display = 'block';
-            
-            // Store phone number for potential retry
+
+            // Persist phone locally
+            try { localStorage.setItem('kitonga_phone', phoneValue); } catch {}
+
+            // Optional: fast pre-check; do not block if it fails
+            setLoading(true);
             try {
-                localStorage.setItem('kitonga_phone', phoneValue);
-            } catch(e) {
-                // Ignore storage errors
-            }
-            
-            return true;
+                const resp = await fetch('/api/verify-access/', {
+                    method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'},
+                    body:JSON.stringify({
+                        phone_number: phoneValue,
+                        mac_address: (MT.MAC && MT.MAC !== '$(mac)') ? MT.MAC : '',
+                        ip_address: (MT.IP && MT.IP !== '$(ip)') ? MT.IP : ''
+                    })
+                });
+                const data = await resp.json().catch(()=>({}));
+                // Even if access is not yet active, we still allow Mikrotik to proceed so backend can grant.
+                // But we surface message to user.
+                const statusEl = document.getElementById('accessStatus');
+                if(data && data.denial_reason && data.access_granted === false){
+                    statusEl.style.display='block';
+                    statusEl.className='status-msg err';
+                    statusEl.textContent=data.denial_reason;
+                }
+            } catch {}
+
+            // Prepare password: last 6 digits of phone
+            const last6 = phoneValue.slice(-6);
+            pwdInput.value = last6;
+
+            // CHAP support if router uses it
+            try {
+                const chapId = MT.CHAP_ID || '';
+                const chapChallenge = MT.CHAP_CHALLENGE || '';
+                if (chapId && chapId !== '$(chap-id)' && typeof hexMD5 === 'function') {
+                    // Compute MD5(chap-id + password + chap-challenge)
+                    const chapResponse = hexMD5(chapId + last6 + chapChallenge);
+                    pwdInput.value = chapResponse;
+                }
+            } catch {}
+
+            // Submit to Mikrotik
+            try { document.forms['login'].submit(); } finally { setLoading(false); }
+            return false;
         }
 
-        // Auto-fill from localStorage if available
-        window.addEventListener('load', function() {
-            try {
-                const storedPhone = localStorage.getItem('kitonga_phone');
-                const phoneInput = document.getElementById('username');
-                
-                if (storedPhone && !phoneInput.value) {
-                    phoneInput.value = storedPhone;
-                }
-                
-                // Focus on phone input if empty
-                if (!phoneInput.value) {
-                    phoneInput.focus();
-                }
-            } catch(e) {
-                // Ignore storage errors
-            }
-            
-            // Clear loading state if page loads with error
-            const btn = document.getElementById('connectBtn');
-            const btnText = btn.querySelector('.btn-text');
-            const loading = btn.querySelector('.loading');
-            
-            btn.disabled = false;
-            btnText.style.opacity = '1';
-            loading.style.display = 'none';
+        // On load: restore phone and reset loading
+        window.addEventListener('load', function(){
+            const phoneInput = document.getElementById('username');
+            try { const storedPhone = localStorage.getItem('kitonga_phone'); if(storedPhone && !phoneInput.value){ phoneInput.value = storedPhone; } } catch {}
+            setLoading(false);
         });
 
         // Format phone number as user types
@@ -450,52 +536,6 @@
                 document.querySelector('.connect-btn').click();
             }
         });
-
-        function toggleVoucher(){
-            const grp = document.getElementById('voucherGroup');
-            const tg = document.getElementById('voucherToggle');
-            const visible = grp.style.display === 'block';
-            grp.style.display = visible ? 'none' : 'block';
-            tg.textContent = visible ? 'Have a voucher?' : 'Hide voucher field';
-        }
-        async function preCheckAccess(phone){
-            const statusEl = document.getElementById('accessStatus');
-            statusEl.style.display='none';
-            if(!/^255[0-9]{9}$/.test(phone)) return;
-            try {
-                const resp = await fetch('https://api.kitonga.klikcell.com/api/mikrotik/auth/', {
-                    method:'POST',
-                    headers:{'Content-Type':'application/json','Accept':'application/json'},
-                    body:JSON.stringify({username:phone, mac:'', ip:''})
-                });
-                const data = await resp.json();
-                statusEl.style.display='block';
-                if(resp.ok && data.success){
-                    statusEl.className='status-msg ok';
-                    statusEl.textContent='Access valid. You can connect now.';
-                } else {
-                    statusEl.className='status-msg err';
-                    statusEl.textContent=data.error || data.message || 'No active access. You may need voucher or payment.';
-                }
-            } catch(e){
-                statusEl.style.display='block';
-                statusEl.className='status-msg err';
-                statusEl.textContent='Access check failed. Continue to login.';
-            }
-        }
-        document.getElementById('username').addEventListener('change', e=>preCheckAccess(e.target.value));
-        // Integrate voucher value into username if provided (optional concatenation pattern) before submit
-        function handleSubmit(){
-            const phoneInput = document.getElementById('username');
-            const voucherInput = document.getElementById('voucher');
-            const phoneValue = phoneInput.value.trim();
-            if(!/^255[0-9]{9}$/.test(phoneValue)) { alert('Invalid phone format'); phoneInput.focus(); return false; }
-            // If voucher provided, append separator so backend can parse if desired (leave unchanged if not using this pattern)
-            if(voucherInput && voucherInput.value.trim()){ phoneInput.value = phoneValue; /* keep separate, backend can read voucher via JS if needed */ }
-            const btn = document.getElementById('connectBtn');
-            btn.disabled=true; btn.querySelector('.btn-text').textContent='Connecting...';
-            return true;
-        }
     </script>
 </body>
 </html>
