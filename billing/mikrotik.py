@@ -39,16 +39,29 @@ def get_mikrotik_api():
     password = getattr(settings, 'MIKROTIK_PASSWORD', getattr(settings, 'MIKROTIK_ADMIN_PASS', ''))
     use_ssl = bool(getattr(settings, 'MIKROTIK_USE_SSL', False))
 
-    pool = routeros_api.RouterOsApiPool(
-        host,
-        username=user,
-        password=password,
-        port=port,
-        use_ssl=use_ssl,
-        plaintext_login=True,
-        use_keepalive=True,
-        ssl_verify=False,
-    )
+    try:
+        # Try with use_keepalive parameter (newer versions)
+        pool = routeros_api.RouterOsApiPool(
+            host,
+            username=user,
+            password=password,
+            port=port,
+            use_ssl=use_ssl,
+            plaintext_login=True,
+            use_keepalive=True,
+            ssl_verify=False,
+        )
+    except TypeError:
+        # Fallback for older versions that don't support use_keepalive
+        pool = routeros_api.RouterOsApiPool(
+            host,
+            username=user,
+            password=password,
+            port=port,
+            use_ssl=use_ssl,
+            plaintext_login=True,
+            ssl_verify=False,
+        )
     return pool.get_api()
 
 
@@ -61,12 +74,15 @@ def allow_mac(mac_address: str, comment: str = 'Paid user') -> bool:
     try:
         bindings = api.get_resource('/ip/hotspot/ip-binding')
         existing = bindings.get(mac_address=mac_address)
+        
         if existing:
             for item in existing:
-                # use set (routeros_api) not update
-                bindings.set(id=item['.id'], type='bypassed', comment=comment, mac_address=mac_address)
+                if '.id' in item:
+                    # use set (routeros_api) not update
+                    bindings.set(id=item['.id'], type='bypassed', comment=comment, mac_address=mac_address)
             logger.info(f'Updated bypass binding for {mac_address}')
             return True
+        
         bindings.add(type='bypassed', mac_address=mac_address, comment=comment)
         logger.info(f'Created bypass binding for {mac_address}')
         return True
@@ -85,10 +101,17 @@ def revoke_mac(mac_address: str) -> bool:
     try:
         bindings = api.get_resource('/ip/hotspot/ip-binding')
         items = bindings.get(mac_address=mac_address)
+        
+        if not items:
+            logger.info(f'No bindings found for {mac_address}')
+            return True  # Nothing to revoke, but not an error
+        
         count = 0
         for item in items:
-            bindings.remove(id=item['.id'])
-            count += 1
+            if '.id' in item:
+                bindings.remove(id=item['.id'])
+                count += 1
+        
         logger.info(f'Revoked {count} binding(s) for {mac_address}')
         return True
     except Exception as e:
@@ -107,11 +130,14 @@ def create_hotspot_user(username: str, password: str, profile: Optional[str] = N
         profile = profile or getattr(settings, 'MIKROTIK_DEFAULT_PROFILE', 'default')
         users = api.get_resource('/ip/hotspot/user')
         exist = users.get(name=username)
+        
         if exist:
             for item in exist:
-                users.set(id=item['.id'], password=password, profile=profile, disabled='no')
+                if '.id' in item:
+                    users.set(id=item['.id'], password=password, profile=profile, disabled='no')
             logger.info(f'Updated hotspot user {username}')
             return True
+        
         users.add(name=username, password=password, profile=profile, disabled='no')
         logger.info(f'Created hotspot user {username}')
         return True

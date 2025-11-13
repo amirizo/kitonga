@@ -1300,3 +1300,144 @@ INFO 2025-11-06 15:15:38,397 mikrotik 26193 8650318144 New device registered for
 INFO 2025-11-06 15:15:38,398 views 26193 8650318144 Enhanced device tracking successful for 255684106419: CC:DD:EE:FF:AA:BB -> 192.168.88.102 (method: voucher)
 INFO 2025-11-06 15:15:38,399 views 26193 8650318144 MikroTik auth SUCCESS for 255684106419: Access granted (method: voucher, devices: 3/3)
 INFO 2025-11-06 15:26:17,908 autoreload 27190 8650318144 Watching for file changes with StatReloader
+INFO 2025-11-13 12:06:23,919 tasks 26812 8430428480 Disconnecting expired user: +255700000099 (paid_until: 2025-11-13 08:06:23.916510+00:00)
+INFO 2025-11-13 12:06:23,922 tasks 26812 8430428480 User +255700000099 deactivated after expiration
+INFO 2025-11-13 12:06:23,922 tasks 26812 8430428480 Disconnecting expired user: 255999888777 (paid_until: 2025-11-06 08:07:44.575169+00:00)
+ERROR 2025-11-13 12:06:23,924 mikrotik 26812 8430428480 revoke_user_access: revoke_mac failed for AA:BB:CC:DD:EE:FF: RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'
+ERROR 2025-11-13 12:06:23,924 mikrotik 26812 8430428480 revoke_user_access: disable user failed for 255999888777: RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'
+WARNING 2025-11-13 12:06:23,924 tasks 26812 8430428480 Failed to revoke access for 255999888777 - AA:BB:CC:DD:EE:FF: {'mac_revoked': False, 'user_revoked': False, 'errors': ["mac:RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'", "user:RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'"], 'success': False}
+INFO 2025-11-13 12:06:23,925 tasks 26812 8430428480 User 255999888777 deactivated after expiration
+INFO 2025-11-13 12:06:23,925 tasks 26812 8430428480 Disconnecting expired user: 0772236727 (paid_until: 2025-10-30 07:54:58.433746+00:00)
+ERROR 2025-11-13 12:06:23,926 mikrotik 26812 8430428480 revoke_user_access: revoke_mac failed for AA:BB:CC:DD:EE:FF: RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'
+ERROR 2025-11-13 12:06:23,926 mikrotik 26812 8430428480 revoke_user_access: disable user failed for 0772236727: RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'
+WARNING 2025-11-13 12:06:23,926 tasks 26812 8430428480 Failed to revoke access for 0772236727 - AA:BB:CC:DD:EE:FF: {'mac_revoked': False, 'user_revoked': False, 'errors': ["mac:RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'", "user:RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'"], 'success': False}
+INFO 2025-11-13 12:06:23,927 tasks 26812 8430428480 User 0772236727 deactivated after expiration
+INFO 2025-11-13 12:06:23,927 tasks 26812 8430428480 Disconnecting expired user: 255712345888 (paid_until: 2025-10-29 17:19:38.263953+00:00)
+INFO 2025-11-13 12:06:23,930 tasks 26812 8430428480 User 255712345888 deactivated after expiration
+INFO 2025-11-13 12:06:23,930 tasks 26812 8430428480 Disconnecting expired user: 255712345678 (paid_until: 2025-10-13 10:59:36.363277+00:00)
+INFO 2025-11-13 12:06:23,932 tasks 26812 8430428480 User 255712345678 deactivated after expiration
+INFO 2025-11-13 12:06:23,932 tasks 26812 8430428480 Disconnecting expired user: 255714457175 (paid_until: 2025-10-15 10:27:17.347417+00:00)
+INFO 2025-11-13 12:06:23,934 tasks 26812 8430428480 User 255714457175 deactivated after expiration
+INFO 2025-11-13 12:06:23,934 tasks 26812 8430428480 Disconnecting expired user: 255772236727 (paid_until: 2025-11-06 19:13:47.013010+00:00)
+ERROR 2025-11-13 12:06:23,934 mikrotik 26812 8430428480 revoke_user_access: revoke_mac failed for AA:BB:CC:DD:EE:FF: RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'
+ERROR 2025-11-13 12:06:23,934 mikrotik 26812 8430428480 revoke_user_access: disable user failed for 255772236727: RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'
+WARNING 2025-11-13 12:06:23,934 tasks 26812 8430428480 Failed to revoke access for 255772236727 - AA:BB:CC:DD:EE:FF: {'mac_revoked': False, 'user_revoked': False, 'errors': ["mac:RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'", "user:RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'"], 'success': False}
+INFO 2025-11-13 12:06:23,936 tasks 26812 8430428480 User 255772236727 deactivated after expiration
+INFO 2025-11-13 12:06:23,936 tasks 26812 8430428480 Disconnecting expired user: 255684106419 (paid_until: 2025-11-07 10:59:43.240234+00:00)
+ERROR 2025-11-13 12:06:23,936 mikrotik 26812 8430428480 revoke_user_access: revoke_mac failed for CC:DD:EE:FF:AA:BB: RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'
+ERROR 2025-11-13 12:06:23,936 mikrotik 26812 8430428480 revoke_user_access: disable user failed for 255684106419: RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'
+WARNING 2025-11-13 12:06:23,936 tasks 26812 8430428480 Failed to revoke access for 255684106419 - CC:DD:EE:FF:AA:BB: {'mac_revoked': False, 'user_revoked': False, 'errors': ["mac:RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'", "user:RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'"], 'success': False}
+ERROR 2025-11-13 12:06:23,936 mikrotik 26812 8430428480 revoke_user_access: revoke_mac failed for AA:BB:CC:DD:EE:FF: RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'
+ERROR 2025-11-13 12:06:23,937 mikrotik 26812 8430428480 revoke_user_access: disable user failed for 255684106419: RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'
+WARNING 2025-11-13 12:06:23,937 tasks 26812 8430428480 Failed to revoke access for 255684106419 - AA:BB:CC:DD:EE:FF: {'mac_revoked': False, 'user_revoked': False, 'errors': ["mac:RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'", "user:RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'"], 'success': False}
+ERROR 2025-11-13 12:06:23,937 mikrotik 26812 8430428480 revoke_user_access: revoke_mac failed for AA:BB:CC:DD:EE:99: RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'
+ERROR 2025-11-13 12:06:23,937 mikrotik 26812 8430428480 revoke_user_access: disable user failed for 255684106419: RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'
+WARNING 2025-11-13 12:06:23,937 tasks 26812 8430428480 Failed to revoke access for 255684106419 - AA:BB:CC:DD:EE:99: {'mac_revoked': False, 'user_revoked': False, 'errors': ["mac:RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'", "user:RouterOsApiPool.__init__() got an unexpected keyword argument 'use_keepalive'"], 'success': False}
+INFO 2025-11-13 12:06:23,939 tasks 26812 8430428480 User 255684106419 deactivated after expiration
+INFO 2025-11-13 12:06:23,939 tasks 26812 8430428480 Expired user cleanup: 8 disconnected, 6 failed
+INFO 2025-11-13 12:06:23,940 tasks 26812 8430428480 Inactive device cleanup: 0 devices deactivated
+INFO 2025-11-13 12:13:40,849 autoreload 27167 8430428480 Watching for file changes with StatReloader
+INFO 2025-11-13 12:13:52,010 basehttp 27167 6161281024 "GET /admin/ HTTP/1.1" 301 0
+INFO 2025-11-13 12:13:52,828 basehttp 27167 6161281024 code 400, message Bad request version ('r¿ï¼\x19¶Oá\x90ÒÁþW\x1aÖ\x8a\\\x07ÇGG$·\x0eo\x03ý3\x84U')
+ERROR 2025-11-13 12:13:52,828 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:13:52,830 basehttp 27167 6161281024 code 400, message Bad request version ('Íè')
+ERROR 2025-11-13 12:13:52,830 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:13:56,636 basehttp 27167 6161281024 code 400, message Bad request version ('¢\x1ao(\x8d\x9cH°gãËP/\x9fBî;²\x01óL-¸8É%£y%\x8d\x12ç\x00')
+ERROR 2025-11-13 12:13:56,636 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:13:56,636 basehttp 27167 6178107392 code 400, message Bad request version ("pó|/\x98F¶6oY$M\x06!U#'ÌÁAeWÖ\x93·u]\x10")
+ERROR 2025-11-13 12:13:56,636 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:13:56,637 basehttp 27167 6161281024 code 400, message Bad request version ('\x96lBy\x94cñ')
+ERROR 2025-11-13 12:13:56,637 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:13:56,637 basehttp 27167 6178107392 code 400, message Bad request version ('»\x0e°\x8c§zÊñ³*')
+ERROR 2025-11-13 12:13:56,638 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:02,492 basehttp 27167 6161281024 "GET / HTTP/1.1" 301 0
+INFO 2025-11-13 12:14:02,494 basehttp 27167 6161281024 code 400, message Bad request version ('\x00\x12\x00\x10\x04\x03\x08\x04\x04\x01\x05\x03\x08\x05\x05\x01\x08\x06\x06\x01ÿ\x01\x00\x01\x00\x00')
+ERROR 2025-11-13 12:14:02,494 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:02,494 basehttp 27167 6161281024 code 400, message Bad request version ("Ü\\ý2_d§\x8e,s<ï\x06\x06£ñ\x87'UÀu\x8bÃGY£aè|\x1a\x96=ìI\x10\\ÚÂu0¦Õ")
+ERROR 2025-11-13 12:14:02,495 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:03,942 basehttp 27167 6161281024 code 400, message Bad request version ('zz\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x06\x93ªª\x00\x00DÍ\x00\x05\x00\x03\x02h2\x00#\x00\x00\x00')
+ERROR 2025-11-13 12:14:03,942 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:03,943 basehttp 27167 6161281024 code 400, message Bad request version ('Î¤È\x9dºèj\x00')
+ERROR 2025-11-13 12:14:03,943 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:03,945 basehttp 27167 6161281024 code 400, message Bad request version ('::\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x06S\x1a\x1a\x00\x00\x00')
+ERROR 2025-11-13 12:14:03,945 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:03,945 basehttp 27167 6178107392 code 400, message Bad request version ('\x02h2\x08http/1.1\x00')
+ERROR 2025-11-13 12:14:03,946 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:03,946 basehttp 27167 6161281024 code 400, message Bad request version ('\x7fFE¢\x08v\x8cý¢@q¹\x08Þï')
+ERROR 2025-11-13 12:14:03,947 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:03,947 basehttp 27167 6178107392 code 400, message Bad request version ('!lfT!UFÌ}z·nãJ8\x1bý:¾\x19\x9b\x94\x9dh\x08k\x03øÄ;\x00°`ü¿\x1bokkX&éY\x90©\x83aÓ÷¼ìP\x9eye')
+ERROR 2025-11-13 12:14:03,947 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:04,974 basehttp 27167 6161281024 code 400, message Bad request version ('Ë')
+ERROR 2025-11-13 12:14:04,975 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:04,976 basehttp 27167 6161281024 code 400, message Bad request version ('±/@É`ßG\x9eLV¨ÄÈ\x83é\x06¦ê®\x0f$iå_ª[±\xad_csVØ¯\x97\x9eS\x13·DÍ\x00\x05\x00\x03\x02h2\x003\x04ï\x04í')
+ERROR 2025-11-13 12:14:04,976 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:04,978 basehttp 27167 6161281024 code 400, message Bad HTTP/0.9 request type ('\x16\x03\x01\x06')
+ERROR 2025-11-13 12:14:04,978 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:04,978 basehttp 27167 6178107392 code 400, message Bad request version ('}è')
+ERROR 2025-11-13 12:14:04,979 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:04,979 basehttp 27167 6161281024 code 400, message Bad request version ("«\x15\x12'X¥d\x8a'ê×\x01Dcv\x10Kµ632k\x9cÍ°0À´\x18\x82!Ó&ð#4aq)")
+ERROR 2025-11-13 12:14:04,980 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:04,980 basehttp 27167 6178107392 code 400, message Bad request version ('y,ú\x08\x91\x9dì\x00')
+ERROR 2025-11-13 12:14:04,981 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:09,072 basehttp 27167 6161281024 code 400, message Bad request version ('\x16{\x9f¿¥Ý\x94èSG{B¾¥D«Ëë')
+ERROR 2025-11-13 12:14:09,073 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:09,074 basehttp 27167 6161281024 code 400, message Bad request syntax ('\x16\x03\x01\x06à\x01\x00\x06Ü\x03\x03\x86q\x02á*\x81¨\x17\x16ù\x01!')
+INFO 2025-11-13 12:14:09,074 basehttp 27167 6178107392 code 400, message Bad request version ('á©G©ë.\x01dõãu\x00')
+ERROR 2025-11-13 12:14:09,074 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+ERROR 2025-11-13 12:14:09,075 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:09,076 basehttp 27167 6161281024 code 400, message Bad request version ('îß9¥%[FÕ£\x95±ÿáó_q<')
+ERROR 2025-11-13 12:14:09,076 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:09,491 basehttp 27167 6161281024 code 400, message Bad request version ('ZZ\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x06\x93::\x00\x00\x00')
+ERROR 2025-11-13 12:14:09,491 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:09,491 basehttp 27167 6178107392 code 400, message Bad request version ('±$|°#CÉ¯')
+ERROR 2025-11-13 12:14:09,491 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:09,492 basehttp 27167 6161281024 code 400, message Bad request version ('°\x8c')
+ERROR 2025-11-13 12:14:09,492 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:09,492 basehttp 27167 6178107392 code 400, message Bad request version ('wÏmý^C.çM7\x11x\x03q\x01-\x00âÊÆ};÷N-Aû±¢ûyÚ\x8d\x00\x05\x00\x05\x01\x00\x00\x00\x00\x00-\x00\x02\x01\x01\x00\x1b\x00\x03\x02\x00\x02\x00+\x00\x07\x06::\x03\x04\x03\x03\x00')
+ERROR 2025-11-13 12:14:09,493 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:09,653 basehttp 27167 6161281024 code 400, message Bad request version ('ÊÊ\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x06\x93zz\x00\x00\x003\x04ï\x04íºº\x00\x01\x00\x11ì\x04ÀI+\x02Ák?F5\x80ÎÇL\x80öRêÈÈ\x9bG\x03»\x81NF\x90\x954¸³+')
+ERROR 2025-11-13 12:14:09,654 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:09,656 basehttp 27167 6178107392 code 400, message Bad request version ('\x9avÀè\x00')
+INFO 2025-11-13 12:14:09,656 basehttp 27167 6194933760 code 400, message Bad request version ('\x00\x02\x01\x00\x00\x05\x00\x05\x01\x00\x00\x00\x00\x00')
+ERROR 2025-11-13 12:14:09,657 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+ERROR 2025-11-13 12:14:09,657 basehttp 27167 6194933760 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:09,658 basehttp 27167 6161281024 code 400, message Bad request version ('jj\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x06\x93')
+ERROR 2025-11-13 12:14:09,658 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:09,874 basehttp 27167 6161281024 code 400, message Bad request version ('\x02h2\x08http/1.1\x00')
+ERROR 2025-11-13 12:14:09,874 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:09,875 basehttp 27167 6161281024 code 400, message Bad HTTP/0.9 request type ('\x16\x03\x01\x06À\x01\x00\x06¼\x03\x03C\x12±äØ72î¾`#6\x9av\x8bh¢\x18\x00\x9adÅiçÌ%óX\\\x07¸\x88')
+ERROR 2025-11-13 12:14:09,875 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:09,877 basehttp 27167 6161281024 code 400, message Bad request version ('`ôÄÒ+\x84\x17Ù»;\x00')
+INFO 2025-11-13 12:14:09,878 basehttp 27167 6178107392 code 400, message Bad request version ('\x00\x02\x01\x00\x00\x12\x00\x00\x00#\x00\x00\x00\x05\x00\x05\x01\x00\x00\x00\x00\x00\x1b\x00\x03\x02\x00\x02\x00')
+ERROR 2025-11-13 12:14:09,878 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+ERROR 2025-11-13 12:14:09,878 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:09,881 basehttp 27167 6178107392 code 400, message Bad request version ('ÚÚ\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x06s')
+INFO 2025-11-13 12:14:09,882 basehttp 27167 6161281024 code 400, message Bad request version ('v\x88c\x169x\x04f\x8b\x7f\x99L+\x13%q#')
+ERROR 2025-11-13 12:14:09,882 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+ERROR 2025-11-13 12:14:09,882 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:10,004 basehttp 27167 6161281024 code 400, message Bad request version ('Ã2¤7\x00ËAÉ#Ú\x07\x07\x83\x17êMô\x0e\x92ÕÃFîO°µ>\x02¤Gé{à\x003\x04ï\x04íªª\x00\x01\x00\x11ì\x04ÀB\x01H%\x84\x95\x0eÃj%ÊÏ-\x80&äS\x1b')
+ERROR 2025-11-13 12:14:10,004 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:10,005 basehttp 27167 6161281024 code 400, message Bad request version ('\x00\x02\x01\x00\x00')
+ERROR 2025-11-13 12:14:10,005 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:10,007 basehttp 27167 6161281024 code 400, message Bad request version ('\x00\x02\x01\x00\x00')
+ERROR 2025-11-13 12:14:10,007 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:10,007 basehttp 27167 6178107392 code 400, message Bad request version ('\x03\x07o¦\x01ðc\x91')
+ERROR 2025-11-13 12:14:10,007 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:10,007 basehttp 27167 6161281024 code 400, message Bad request version ('\x00\x12\x00\x10\x04\x03\x08\x04\x04\x01\x05\x03\x08\x05\x05\x01\x08\x06\x06\x01\x00+\x00\x07\x06')
+ERROR 2025-11-13 12:14:10,008 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:10,008 basehttp 27167 6178107392 code 400, message Bad request version ('\x129!\x84®ß\x8a\x81I¦\x07\x04H:')
+ERROR 2025-11-13 12:14:10,008 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:10,192 basehttp 27167 6161281024 code 400, message Bad request version ('k@')
+ERROR 2025-11-13 12:14:10,192 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:10,193 basehttp 27167 6161281024 code 400, message Bad request syntax ('\x16\x03\x01\x07\x00\x01\x00\x06ü\x03\x03\x9bma9¬S/')
+ERROR 2025-11-13 12:14:10,193 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:10,195 basehttp 27167 6161281024 code 400, message Bad request version ('\x89\x03¬´\x98\x91X½{\x8b')
+ERROR 2025-11-13 12:14:10,195 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:10,195 basehttp 27167 6178107392 code 400, message Bad request version ('\x9a\x9a\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x06Szz\x00\x00\x00')
+ERROR 2025-11-13 12:14:10,195 basehttp 27167 6178107392 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:10,196 basehttp 27167 6161281024 code 400, message Bad request version ('v\x89\x00\x16\x9b\x11')
+ERROR 2025-11-13 12:14:10,196 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:14:10,197 basehttp 27167 6161281024 code 400, message Bad request version ('7D')
+ERROR 2025-11-13 12:14:10,197 basehttp 27167 6161281024 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-11-13 12:16:15,435 autoreload 27167 8430428480 /Users/macbookair/Desktop/kitonga/kitonga/settings.py changed, reloading.
+INFO 2025-11-13 12:16:15,973 autoreload 27883 8430428480 Watching for file changes with StatReloader

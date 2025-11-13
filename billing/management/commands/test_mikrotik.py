@@ -3,8 +3,14 @@ Management command to test Mikrotik router connectivity and authentication
 """
 from django.core.management.base import BaseCommand
 from django.conf import settings
-from billing.mikrotik import MikrotikIntegration, get_mikrotik_client
+from billing.mikrotik import (
+    test_mikrotik_connection,
+    authenticate_user_with_mikrotik,
+    get_router_info,
+    get_active_hotspot_users
+)
 import requests
+import socket
 
 
 class Command(BaseCommand):
@@ -19,8 +25,8 @@ class Command(BaseCommand):
         parser.add_argument(
             '--test-user',
             type=str,
-            default='255700000000',
-            help='Test phone number for authentication (default: 255700000000)',
+            default='255772236727',
+            help='Test phone number for authentication (default: 255772236727)',
         )
 
     def handle(self, *args, **options):
@@ -64,34 +70,43 @@ class Command(BaseCommand):
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'✗ Error accessing login page: {str(e)}'))
         
-        # Test 3: Test Mikrotik integration class
-        self.stdout.write('\n3. Testing Mikrotik integration class...')
+        # Test 3: Test Mikrotik API connection
+        self.stdout.write('\n3. Testing Mikrotik API connection...')
         try:
-            mikrotik = get_mikrotik_client()
-            self.stdout.write(f'✓ Mikrotik client created successfully')
-            self.stdout.write(f'  - Router IP: {mikrotik.router_ip}')
-            self.stdout.write(f'  - Admin User: {mikrotik.admin_user}')
-            self.stdout.write(f'  - Login URL: {mikrotik.login_url}')
+            result = test_mikrotik_connection(
+                host=router_ip,
+                username=getattr(settings, 'MIKROTIK_USER', 'admin'),
+                password=getattr(settings, 'MIKROTIK_PASSWORD', ''),
+                port=getattr(settings, 'MIKROTIK_PORT', 8728)
+            )
+            if result.get('success'):
+                self.stdout.write(self.style.SUCCESS(f'✓ Mikrotik API connection successful'))
+                self.stdout.write(f'  - Router IP: {router_ip}')
+                self.stdout.write(f'  - Admin User: {getattr(settings, "MIKROTIK_USER", "admin")}')
+                self.stdout.write(f'  - Identity: {result.get("identity", "N/A")}')
+                self.stdout.write(f'  - Version: {result.get("version", "N/A")}')
+            else:
+                self.stdout.write(self.style.ERROR(f'✗ Mikrotik API connection failed: {result.get("message", "Unknown error")}'))
+                self.stdout.write(self.style.WARNING('⚠ Make sure API is enabled on the router'))
         except Exception as e:
-            self.stdout.write(self.style.ERROR(f'✗ Error creating Mikrotik client: {str(e)}'))
-            return
+            self.stdout.write(self.style.ERROR(f'✗ Error connecting to Mikrotik API: {str(e)}'))
+            self.stdout.write(self.style.WARNING('⚠ This is normal if API is disabled on the router'))
         
         # Test 4: Test authentication (this will fail if user doesn't exist in Django)
         self.stdout.write('\n4. Testing authentication flow...')
         try:
-            result = mikrotik.login_user_to_hotspot(test_user, 'aa:bb:cc:dd:ee:ff', '192.168.88.100')
-            if result['success']:
-                self.stdout.write(self.style.SUCCESS(f'✓ Authentication test: {result["message"]}'))
+            result = authenticate_user_with_mikrotik(test_user, 'aa:bb:cc:dd:ee:ff', '192.168.88.100')
+            if result.get('success'):
+                self.stdout.write(self.style.SUCCESS(f'✓ Authentication test: {result.get("message", "Success")}'))
             else:
-                self.stdout.write(self.style.WARNING(f'⚠ Authentication test: {result["message"]}'))
+                self.stdout.write(self.style.WARNING(f'⚠ Authentication test: {result.get("message", "Failed")}'))
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'✗ Error in authentication test: {str(e)}'))
         
         # Test 5: Check API port accessibility
         self.stdout.write('\n5. Testing API port accessibility...')
         try:
-            import socket
-            api_port = getattr(settings, 'MIKROTIK_API_PORT', 8728)
+            api_port = getattr(settings, 'MIKROTIK_PORT', 8728)
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(3)
             result = sock.connect_ex((router_ip, api_port))

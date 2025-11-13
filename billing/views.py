@@ -36,8 +36,12 @@ from .mikrotik import (
     logout_user_from_mikrotik, 
     track_device_connection,
     enhance_device_tracking_for_payment,
-    enhance_device_tracking_for_voucher
+    enhance_device_tracking_for_voucher,
+    grant_user_access,
+    revoke_user_access,
+    trigger_immediate_hotspot_login
 )
+import ipaddress
 
 logger = logging.getLogger(__name__)
 
@@ -1124,9 +1128,9 @@ def system_status(request):
         stats = {
             'database_status': db_status,
             'mikrotik_status': mikrotik_status,
-            'uptime': 'Unknown'  # You can calculate actual uptime
-            'memory_usage': 'Unknown'  # You can get actual memory usage
-            'disk_usage': 'Unknown'  # You can get actual disk usage
+            'uptime': 'Unknown',  # You can calculate actual uptime
+            'memory_usage': 'Unknown',  # You can get actual memory usage
+            'disk_usage': 'Unknown',  # You can get actual disk usage
             'active_users': User.objects.filter(
                 is_active=True,
                 paid_until__gt=now
@@ -1150,7 +1154,7 @@ def system_status(request):
             'total_users': User.objects.count(),
             'active_bundles': Bundle.objects.filter(is_active=True).count(),
             'pending_payments': Payment.objects.filter(status='pending').count()
-        };
+        }
         
         return Response({
             'success': True,
@@ -1214,7 +1218,6 @@ def mikrotik_configuration(request):
                     }, status=status.HTTP_400_BAD_REQUEST)
             
             # Validate IP address format
-            import ipaddress
             try:
                 ipaddress.ip_address(request.data['router_ip'])
             except ValueError:
@@ -1225,8 +1228,8 @@ def mikrotik_configuration(request):
             
             # Test connection with new configuration
             try:
-                from .mikrotik import test_mikrotik_connection
-                test_result = test_mikrotik_connection(
+                from .mikrotik import test_mikrotik_connection as test_mt_connection
+                test_result = test_mt_connection(
                     host=request.data['router_ip'],
                     username=request.data['username'],
                     password=request.data['password'],
@@ -1236,7 +1239,7 @@ def mikrotik_configuration(request):
                 if not test_result['success']:
                     return Response({
                         'success': False,
-                        'message': f'Connection test failed: {test_result["error"]}'
+                        'message': f'Connection test failed: {test_result.get("error", "Unknown error")}'
                     }, status=status.HTTP_400_BAD_REQUEST)
                 
             except ImportError:
@@ -1263,7 +1266,7 @@ def test_mikrotik_connection(request):
     Test MikroTik router connection (Admin only)
     """
     try:
-        from .mikrotik import test_mikrotik_connection
+        from .mikrotik import test_mikrotik_connection as test_connection
         
         # Use provided credentials or default from settings
         router_ip = request.data.get('router_ip') or getattr(settings, 'MIKROTIK_ROUTER_IP', '')
@@ -1278,7 +1281,7 @@ def test_mikrotik_connection(request):
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Test connection
-        result = test_mikrotik_connection(
+        result = test_connection(
             host=router_ip,
             username=username,
             password=password,
@@ -2046,36 +2049,57 @@ def clickpesa_webhook(request):
                 )
                 logger.info(f'Payment completed: {order_reference} - {transaction_id}')
                 
-                # Try to authenticate user with MikroTik immediately after payment
+                # AUTOMATIC CONNECTION: Immediately grant internet access after successful payment
                 mikrotik_auth_result = None
+                connection_success = False
                 try:
-                    from .mikrotik import authenticate_user_with_mikrotik, enhance_device_tracking_for_payment
+                    from .mikrotik import grant_user_access, enhance_device_tracking_for_payment
                     
-                    # Try to find device information from recent access logs or request
+                    # Get user and their devices
                     user = payment.user
-                    device = user.devices.filter(is_active=True).first()
+                    devices = user.devices.filter(is_active=True)
                     
-                    if device:
-                        # Enhanced device tracking for payment users
-                        device_tracking_result = enhance_device_tracking_for_payment(
-                            payment_user=user,
-                            mac_address=device.mac_address,
-                            ip_address=device.ip_address
-                        )
+                    if devices.exists():
+                        # Grant access for all active user devices
+                        for device in devices:
+                            try:
+                                # Enhanced device tracking for payment users
+                                device_tracking_result = enhance_device_tracking_for_payment(
+                                    payment_user=user,
+                                    mac_address=device.mac_address,
+                                    ip_address=device.ip_address
+                                )
+                                
+                                # Grant immediate access via MikroTik (creates/updates hotspot user + bypasses MAC)
+                                mikrotik_result = grant_user_access(
+                                    username=payment.phone_number,
+                                    mac_address=device.mac_address,
+                                    password=payment.phone_number,
+                                    comment=f'Payment {payment.order_reference}'
+                                )
+                                
+                                if mikrotik_result.get('success'):
+                                    connection_success = True
+                                    logger.info(f'✓ Automatically connected {payment.phone_number} to internet via device {device.mac_address}')
+                                else:
+                                    logger.warning(f'Failed to auto-connect device {device.mac_address} for {payment.phone_number}: {mikrotik_result}')
+                                    
+                            except Exception as device_error:
+                                logger.error(f'Error auto-connecting device {device.mac_address} for {payment.phone_number}: {str(device_error)}')
                         
-                        # Attempt MikroTik authentication
-                        mikrotik_auth_result = authenticate_user_with_mikrotik(
-                            phone_number=payment.phone_number,
-                            mac_address=device.mac_address,
-                            ip_address=device.ip_address
-                        )
-                        logger.info(f'MikroTik authentication after payment for {payment.phone_number}: {mikrotik_auth_result}')
-                        logger.info(f'Device tracking after payment for {payment.phone_number}: {device_tracking_result}')
+                        mikrotik_auth_result = {'success': connection_success}
                     else:
-                        logger.info(f'No active device found for {payment.phone_number} - user will authenticate on next WiFi connection')
+                        # No devices yet, create hotspot user so they can connect
+                        mikrotik_result = grant_user_access(
+                            username=payment.phone_number,
+                            password=payment.phone_number,
+                            comment=f'Payment {payment.order_reference}'
+                        )
+                        mikrotik_auth_result = mikrotik_result
+                        logger.info(f'No active devices for {payment.phone_number} - created hotspot user for future connection')
                         
                 except Exception as e:
-                    logger.error(f'MikroTik authentication failed after payment for {payment.phone_number}: {str(e)}')
+                    logger.error(f'MikroTik auto-connection failed after payment for {payment.phone_number}: {str(e)}')
                     mikrotik_auth_result = {'success': False, 'error': str(e)}
                 
                 from .nextsms import NextSMSAPI
@@ -2490,34 +2514,51 @@ def redeem_voucher(request):
                     }
                     logger.info(f'Updated existing device {mac_address} for voucher user {phone_number}')
                 
-                # Try to authenticate with MikroTik immediately after successful voucher redemption
+                # AUTOMATIC CONNECTION: Try to authenticate with MikroTik immediately after successful voucher redemption
                 try:
-                    from .mikrotik import authenticate_user_with_mikrotik
+                    from .mikrotik import grant_user_access, trigger_immediate_hotspot_login
                     
-                    # Call MikroTik authentication to grant immediate internet access
-                    mikrotik_auth_result = authenticate_user_with_mikrotik(phone_number, mac_address, ip_address)
-                    
-                    # Also try to trigger immediate login if we have device info
+                    # Grant immediate internet access using the new unified method
                     if mac_address and ip_address:
                         try:
-                            # Make a direct call to MikroTik login endpoint to grant immediate access
-                            from .mikrotik import trigger_immediate_hotspot_login
-                            login_result = trigger_immediate_hotspot_login(phone_number, mac_address, ip_address)
-                            immediate_login_success = login_result.get('success', False)
+                            # Directly grant access (creates/updates hotspot user + bypasses MAC)
+                            access_result = grant_user_access(
+                                username=phone_number,
+                                mac_address=mac_address,
+                                password=phone_number,
+                                comment=f'Voucher {voucher_code}'
+                            )
+                            
+                            mikrotik_auth_result = access_result.get('success', False)
+                            immediate_login_success = mikrotik_auth_result
+                            
                             if immediate_login_success:
-                                logger.info(f'Immediate MikroTik login successful for voucher user {phone_number}')
+                                logger.info(f'✓ Automatically connected {phone_number} to internet via voucher redemption - device: {mac_address}')
                             else:
-                                logger.warning(f'Immediate MikroTik login failed for voucher user {phone_number}: {login_result.get("message", "Unknown error")}')
+                                logger.warning(f'Failed to auto-connect {phone_number} after voucher redemption: {access_result}')
+                                
                         except Exception as login_error:
-                            logger.error(f'Error during immediate MikroTik login for {phone_number}: {str(login_error)}')
+                            logger.error(f'Error during immediate connection for {phone_number}: {str(login_error)}')
+                            mikrotik_auth_result = False
+                            immediate_login_success = False
+                    else:
+                        # No MAC/IP provided, just create hotspot user for future connection
+                        access_result = grant_user_access(
+                            username=phone_number,
+                            password=phone_number,
+                            comment=f'Voucher {voucher_code}'
+                        )
+                        mikrotik_auth_result = access_result.get('success', False)
+                        immediate_login_success = False
+                        logger.info(f'Created hotspot user for {phone_number} - will connect when they join WiFi')
                     
                     mikrotik_integration_info = {
                         'mikrotik_auth_attempted': True,
                         'mikrotik_auth_success': mikrotik_auth_result,
                         'immediate_login_attempted': bool(mac_address and ip_address),
                         'immediate_login_success': immediate_login_success,
-                        'ready_for_internet': (mikrotik_auth_result and user.has_active_access()) or immediate_login_success,
-                        'auto_connect_status': 'success' if immediate_login_success else 'will_authenticate_on_next_connection',
+                        'ready_for_internet': immediate_login_success or (mikrotik_auth_result and user.has_active_access()),
+                        'auto_connect_status': 'connected' if immediate_login_success else 'ready_to_connect',
                         'device_tracking': {
                             'device_registered': bool(device),
                             'device_id': device.id if device else None,
@@ -2531,7 +2572,7 @@ def redeem_voucher(request):
                     }
                     
                     if mikrotik_auth_result or immediate_login_success:
-                        logger.info(f'MikroTik integration successful for voucher user {phone_number} (auth: {mikrotik_auth_result}, login: {immediate_login_success})')
+                        logger.info(f'MikroTik integration successful for voucher user {phone_number}')
                     else:
                         logger.warning(f'MikroTik integration incomplete for voucher user {phone_number} - user will authenticate on next WiFi connection')
                         
