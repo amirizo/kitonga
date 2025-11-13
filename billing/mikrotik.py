@@ -334,6 +334,7 @@ def get_active_hotspot_users():
 
 def disconnect_all_hotspot_users():
     """Disconnect all active users via /ip/hotspot/active remove."""
+    api = None
     try:
         api = get_mikrotik_api()
         resource = api.get_resource('/ip/hotspot/active')
@@ -350,11 +351,13 @@ def disconnect_all_hotspot_users():
         logger.error(f'Error disconnecting users: {e}')
         return {'success': False, 'error': str(e)}
     finally:
-        safe_close(api)
+        if api is not None:
+            safe_close(api)
 
 
 def reboot_router():
     """Reboot router (simulated unless explicit setting allows)."""
+    api = None
     try:
         if not getattr(settings, 'ALLOW_ROUTER_REBOOT', False):
             return {'success': False, 'message': 'Reboot disabled by settings'}
@@ -367,13 +370,15 @@ def reboot_router():
             logger.error(f'Reboot command failed: {e}')
             return {'success': False, 'error': str(e)}
         finally:
-            safe_close(api)
+            if api is not None:
+                safe_close(api)
     except Exception as outer:
         return {'success': False, 'error': str(outer)}
 
 
 def get_hotspot_profiles():
     """Get hotspot user profiles via /ip/hotspot/user/profile."""
+    api = None
     try:
         api = get_mikrotik_api()
         profiles = api.get_resource('/ip/hotspot/user/profile').get()
@@ -391,11 +396,13 @@ def get_hotspot_profiles():
         logger.error(f'Error getting hotspot profiles: {e}')
         return {'success': False, 'error': str(e)}
     finally:
-        safe_close(api)
+        if api is not None:
+            safe_close(api)
 
 
 def create_hotspot_profile(name, rate_limit='512k/512k', session_timeout='1d', idle_timeout='5m'):
     """Create hotspot profile using routeros-api (fields mapped to RouterOS)."""
+    api = None
     try:
         api = get_mikrotik_api()
         res = api.get_resource('/ip/hotspot/user/profile')
@@ -409,7 +416,8 @@ def create_hotspot_profile(name, rate_limit='512k/512k', session_timeout='1d', i
         logger.error(f'Error creating hotspot profile {name}: {e}')
         return {'success': False, 'error': str(e)}
     finally:
-        safe_close(api)
+        if api is not None:
+            safe_close(api)
 
 
 # Advanced management helpers (no usage limiting)
@@ -454,6 +462,7 @@ def sync_user_provisioning(usernames: List[str]) -> dict:
 
 def cleanup_disabled_users() -> dict:
     """Remove disabled hotspot users (housekeeping)."""
+    api = None
     try:
         api = get_mikrotik_api()
         users = api.get_resource('/ip/hotspot/user')
@@ -471,11 +480,13 @@ def cleanup_disabled_users() -> dict:
         logger.error(f'cleanup_disabled_users error: {e}')
         return {'success': False, 'error': str(e)}
     finally:
-        safe_close(api)
+        if api is not None:
+            safe_close(api)
 
 
 def get_router_health() -> dict:
     """Fetch health metrics if available (/system/health)."""
+    api = None
     try:
         api = get_mikrotik_api()
         health_res = api.get_resource('/system/health')
@@ -485,11 +496,13 @@ def get_router_health() -> dict:
         logger.error(f'get_router_health error: {e}')
         return {'success': False, 'error': str(e)}
     finally:
-        safe_close(api)
+        if api is not None:
+            safe_close(api)
 
 
 def monitor_interface_traffic(interface: str, once: bool = True) -> dict:
     """Monitor traffic for a given interface (single snapshot)."""
+    api = None
     try:
         api = get_mikrotik_api()
         monitor = api.get_resource('/interface/monitor-traffic')
@@ -501,7 +514,8 @@ def monitor_interface_traffic(interface: str, once: bool = True) -> dict:
         logger.error(f'monitor_interface_traffic error for {interface}: {e}')
         return {'success': False, 'error': str(e)}
     finally:
-        safe_close(api)
+        if api is not None:
+            safe_close(api)
 
 
 def trigger_immediate_hotspot_login(phone_number, mac_address, ip_address):
