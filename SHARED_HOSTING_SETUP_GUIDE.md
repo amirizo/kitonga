@@ -478,3 +478,45 @@ That's it! Your system will work without router features. ✅
 ✅ **Your choice based on budget and needs**
 
 For now, enable Mock Mode and your API will work without router features! 🚀
+
+---
+
+## 🎉 Upgrading to VPS
+
+**Congratulations on upgrading to VPS!** You now have full control over your system.
+
+### Quick Migration Steps:
+
+1. **Run the transition script:**
+   ```bash
+   cd /path/to/your/project
+   ./transition_to_vps.sh
+   ```
+
+2. **Setup VPS with automated script:**
+   ```bash
+   ./setup_vps_mikrotik.sh
+   ```
+
+3. **Configure VPN connection** (see VPS_MIKROTIK_SETUP_GUIDE.md)
+
+4. **Test everything works:**
+   ```bash
+   python test_vps_integration.py
+   ```
+
+### New Files Available:
+- 📖 **VPS_MIKROTIK_SETUP_GUIDE.md** - Complete VPS setup guide
+- 🔧 **setup_vps_mikrotik.sh** - Automated VPS configuration
+- 🔄 **transition_to_vps.sh** - Quick transition from shared hosting
+- 🧪 **test_vps_integration.py** - Verify everything works
+
+### What You Gain with VPS:
+✅ **Real-time user monitoring** - See who's online instantly  
+✅ **Remote user management** - Disconnect users from anywhere  
+✅ **Full router control** - All management features unlocked  
+✅ **No mock mode needed** - Direct router communication  
+✅ **Better performance** - Faster response times  
+✅ **Professional setup** - Complete control over your system  
+
+**Welcome to the full power of Kitonga Wi-Fi System!** 🚀
