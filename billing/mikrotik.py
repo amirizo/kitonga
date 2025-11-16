@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 # Check if MikroTik should be mocked (for production environments without router access)
 MIKROTIK_MOCK_MODE = os.getenv('MIKROTIK_MOCK_MODE', 'false').lower() == 'true'
 
+# Resolve SSL verify preference from Django settings (default False for self-signed)
+SSL_VERIFY = bool(getattr(settings, 'MIKROTIK_SSL_VERIFY', False))
+
 
 def safe_close(api):
     """Safely close routeros_api communicator if present."""
@@ -40,7 +43,7 @@ def get_mikrotik_api():
     if routeros_api is None:
         raise ImportError('routeros-api is not installed. Add it to requirements.txt')
 
-    host = getattr(settings, 'MIKROTIK_HOST', getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.0.173'))
+    host = getattr(settings, 'MIKROTIK_HOST', getattr(settings, 'MIKROTIK_ROUTER_IP', '10.10.0.1'))
     port = int(getattr(settings, 'MIKROTIK_PORT', getattr(settings, 'MIKROTIK_API_PORT', 8728)))
     user = getattr(settings, 'MIKROTIK_USER', getattr(settings, 'MIKROTIK_ADMIN_USER', 'admin'))
     password = getattr(settings, 'MIKROTIK_PASSWORD', getattr(settings, 'MIKROTIK_ADMIN_PASS', 'Kijangwani2003'))
@@ -56,7 +59,7 @@ def get_mikrotik_api():
             use_ssl=use_ssl,
             plaintext_login=True,
             use_keepalive=True,
-            ssl_verify=False,
+            ssl_verify=SSL_VERIFY,
         )
     except TypeError:
         # Fallback for older versions that don't support use_keepalive
@@ -67,7 +70,7 @@ def get_mikrotik_api():
             port=port,
             use_ssl=use_ssl,
             plaintext_login=True,
-            ssl_verify=False,
+            ssl_verify=SSL_VERIFY,
         )
     return pool.get_api()
 
@@ -239,7 +242,7 @@ def logout_user_from_mikrotik(phone_number: str, mac_address: str = '') -> dict:
 def test_mikrotik_connection(host=None, username=None, password=None, port=8728):
     """Test low-level TCP connectivity to MikroTik API port."""
     try:
-        host = host or getattr(settings, 'MIKROTIK_HOST', getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.88.1'))
+        host = host or getattr(settings, 'MIKROTIK_HOST', getattr(settings, 'MIKROTIK_ROUTER_IP', '10.10.0.1'))
         username = username or getattr(settings, 'MIKROTIK_USER', getattr(settings, 'MIKROTIK_ADMIN_USER', 'admin'))
         password = password or getattr(settings, 'MIKROTIK_PASSWORD', getattr(settings, 'MIKROTIK_ADMIN_PASS', ''))
 
@@ -706,4 +709,40 @@ def enhance_device_tracking_for_voucher(voucher_user, mac_address, ip_address):
     except Exception as e:
         logger.error(f'Error in voucher device tracking for {voucher_user.phone_number}: {e}')
         return {'success': False, 'message': f'Voucher device tracking error: {e}', 'device_tracked': False}
+
+
+def list_interfaces() -> dict:
+    """List MikroTik interfaces and return details suitable for printing."""
+    api = None
+    try:
+        api = get_mikrotik_api()
+        res = api.get_resource('/interface')
+        items = res.get()
+        data = []
+        for it in items:
+            data.append({
+                'name': it.get('name'),
+                'type': it.get('type'),
+                'mac_address': it.get('mac-address'),
+                'mtu': it.get('mtu'),
+                'running': it.get('running'),
+                'disabled': it.get('disabled'),
+            })
+        return {'success': True, 'data': data}
+    except Exception as e:
+        logger.error(f'list_interfaces error: {e}')
+        return {'success': False, 'error': str(e)}
+    finally:
+        safe_close(api)
+
+
+# Example usage function for quick manual testing
+def print_interfaces():
+    """Fetch and print interface details to stdout (for ad-hoc testing)."""
+    result = list_interfaces()
+    if result.get('success'):
+        for i, it in enumerate(result['data'], 1):
+            print(f"{i}. {it['name']}\tType: {it.get('type')}\tMAC: {it.get('mac_address')}\tRunning: {it.get('running')}\tDisabled: {it.get('disabled')}")
+    else:
+        print('Failed to list interfaces:', result.get('error'))
 

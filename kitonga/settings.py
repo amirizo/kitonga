@@ -274,19 +274,23 @@ ADMIN_TOKEN_SECRET = config('ADMIN_TOKEN_SECRET', default=SECRET_KEY)
 # MikroTik API Configuration (env-driven)
 try:
     from decouple import config as _cfg
-    MIKROTIK_HOST = _cfg('MIKROTIK_HOST', default=_cfg('MIKROTIK_ROUTER_IP', default='192.168.0.173'))
+    # Prefer WireGuard tunnel IP by default when not provided via .env
+    MIKROTIK_HOST = _cfg('MIKROTIK_HOST', default=_cfg('MIKROTIK_ROUTER_IP', default='10.10.0.1'))
     MIKROTIK_PORT = _cfg('MIKROTIK_PORT', default=_cfg('MIKROTIK_API_PORT', default=8728, cast=int), cast=int)
     MIKROTIK_USER = _cfg('MIKROTIK_USER', default=_cfg('MIKROTIK_ADMIN_USER', default='admin'))
     MIKROTIK_PASSWORD = _cfg('MIKROTIK_PASSWORD', default=_cfg('MIKROTIK_ADMIN_PASS', default='Kijangwani2003'))
     MIKROTIK_USE_SSL = _cfg('MIKROTIK_USE_SSL', default=False, cast=bool)
+    # Control SSL certificate verification for self-signed certs (default: disabled)
+    MIKROTIK_SSL_VERIFY = _cfg('MIKROTIK_SSL_VERIFY', default=False, cast=bool)
     MIKROTIK_DEFAULT_PROFILE = _cfg('MIKROTIK_DEFAULT_PROFILE', default='default')
 except Exception:
     # Fallback defaults
-    MIKROTIK_HOST = '192.168.0.173'
+    MIKROTIK_HOST = '10.10.0.1'
     MIKROTIK_PORT = 8728
     MIKROTIK_USER = 'admin'
     MIKROTIK_PASSWORD = 'Kijangwani2003'
     MIKROTIK_USE_SSL = False
+    MIKROTIK_SSL_VERIFY = False
     MIKROTIK_DEFAULT_PROFILE = 'default'
 
 # Jazzmin Configuration

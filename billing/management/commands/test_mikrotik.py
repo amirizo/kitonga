@@ -7,7 +7,8 @@ from billing.mikrotik import (
     test_mikrotik_connection,
     authenticate_user_with_mikrotik,
     get_router_info,
-    get_active_hotspot_users
+    get_active_hotspot_users,
+    list_interfaces,
 )
 import requests
 import socket
@@ -33,7 +34,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS('Testing Mikrotik Router Connectivity\n'))
         
         # Get router IP
-        router_ip = options.get('router_ip') or getattr(settings, 'MIKROTIK_ROUTER_IP', '192.168.88.1')
+        router_ip = options.get('router_ip') or getattr(settings, 'MIKROTIK_HOST', getattr(settings, 'MIKROTIK_ROUTER_IP', '10.10.0.1'))
         test_user = options['test_user']
         
         self.stdout.write(f'Router IP: {router_ip}')
@@ -83,15 +84,30 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS(f'✓ Mikrotik API connection successful'))
                 self.stdout.write(f'  - Router IP: {router_ip}')
                 self.stdout.write(f'  - Admin User: {getattr(settings, "MIKROTIK_USER", "admin")}')
-                self.stdout.write(f'  - Identity: {result.get("identity", "N/A")}')
-                self.stdout.write(f'  - Version: {result.get("version", "N/A")}')
+                self.stdout.write(f'  - SSL: {getattr(settings, "MIKROTIK_USE_SSL", False)} (verify={getattr(settings, "MIKROTIK_SSL_VERIFY", False)})')
             else:
                 self.stdout.write(self.style.ERROR(f'✗ Mikrotik API connection failed: {result.get("message", "Unknown error")}'))
                 self.stdout.write(self.style.WARNING('⚠ Make sure API is enabled on the router'))
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'✗ Error connecting to Mikrotik API: {str(e)}'))
             self.stdout.write(self.style.WARNING('⚠ This is normal if API is disabled on the router'))
-        
+
+        # 3b. Example usage: List interfaces
+        self.stdout.write('\n3b. Listing MikroTik interfaces...')
+        try:
+            iface_result = list_interfaces()
+            if iface_result.get('success'):
+                data = iface_result.get('data', [])
+                if not data:
+                    self.stdout.write(self.style.WARNING('⚠ No interfaces returned'))
+                for i, it in enumerate(data, 1):
+                    self.stdout.write(f"  {i}. {it.get('name')}\tType: {it.get('type')}\tMAC: {it.get('mac_address')}\tRunning: {it.get('running')}\tDisabled: {it.get('disabled')}")
+                self.stdout.write(self.style.SUCCESS('✓ Interfaces listed'))
+            else:
+                self.stdout.write(self.style.ERROR(f"✗ Failed to list interfaces: {iface_result.get('error')}"))
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'✗ Error listing interfaces: {str(e)}'))
+
         # Test 4: Test authentication (this will fail if user doesn't exist in Django)
         self.stdout.write('\n4. Testing authentication flow...')
         try:
@@ -122,10 +138,11 @@ class Command(BaseCommand):
         # Test configuration summary
         self.stdout.write('\n' + '='*50)
         self.stdout.write(self.style.SUCCESS('Configuration Summary:'))
-        self.stdout.write(f'Router IP: {router_ip}')
-        self.stdout.write(f'Admin User: {getattr(settings, "MIKROTIK_ADMIN_USER", "admin")}')
-        self.stdout.write(f'Admin Pass: {"Set" if getattr(settings, "MIKROTIK_ADMIN_PASS", "") else "Not Set"}')
-        self.stdout.write(f'API Port: {getattr(settings, "MIKROTIK_API_PORT", 8728)}')
+        self.stdout.write(f'Router Host: {getattr(settings, "MIKROTIK_HOST", "N/A")}')
+        self.stdout.write(f'API Port: {getattr(settings, "MIKROTIK_PORT", 8728)}')
+        self.stdout.write(f'Use SSL: {getattr(settings, "MIKROTIK_USE_SSL", False)} (verify={getattr(settings, "MIKROTIK_SSL_VERIFY", False)})')
+        self.stdout.write(f'Admin User: {getattr(settings, "MIKROTIK_USER", "admin")}')
+        self.stdout.write(f'Admin Pass: {"Set" if getattr(settings, "MIKROTIK_PASSWORD", "") else "Not Set"}')
         self.stdout.write(f'Hotspot Name: {getattr(settings, "MIKROTIK_HOTSPOT_NAME", "hotspot1")}')
         
         self.stdout.write('\n' + '='*50)
