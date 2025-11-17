@@ -64,10 +64,12 @@ TEMPLATES = [
 WSGI_APPLICATION = 'kitonga.wsgi.application'
 
 # Database
+# Allow overriding DB file location via SQLITE_PATH env for proper permissions in production
+DB_FILE = config('SQLITE_PATH', default=str(BASE_DIR / 'db.sqlite3'))
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': DB_FILE,
     }
 }
 
@@ -110,6 +112,8 @@ WHITENOISE_SKIP_COMPRESS_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'zip
 STATICFILES_DIRS = []
 if (BASE_DIR / 'static').exists():
     STATICFILES_DIRS.append(BASE_DIR / 'static')
+if (BASE_DIR / 'kitonga' / 'static').exists():
+    STATICFILES_DIRS.append(BASE_DIR / 'kitonga' / 'static')
 
 # Media files configuration (for user uploads if needed)
 MEDIA_URL = '/media/'
