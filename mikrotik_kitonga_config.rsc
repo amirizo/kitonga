@@ -22,15 +22,15 @@ set time-zone-name=Africa/Dar_es_Salaam
 
 # Configure bridge for LAN
 /interface bridge
-add name=bridge-local protocol-mode=rstp
+add name=bridgeLocal protocol-mode=rstp
 
 # Add interfaces to bridge
 /interface bridge port
-add bridge=bridge-local interface=ether2
-add bridge=bridge-local interface=ether3
-add bridge=bridge-local interface=ether4
-add bridge=bridge-local interface=ether5
-add bridge=bridge-local interface=wlan1
+add bridge=bridgeLocal interface=ether2
+add bridge=bridgeLocal interface=ether3
+add bridge=bridgeLocal interface=ether4
+add bridge=bridgeLocal interface=ether5
+add bridge=bridgeLocal interface=wlan1
 
 # Configure WiFi interface
 /interface wireless
@@ -42,8 +42,8 @@ set [ find default-name=wlan1 ] band=2ghz-b/g/n channel-width=20/40mhz-XX \
 /interface wireless security-profiles
 set [ find default=yes ] authentication-types=wpa2-psk eap-methods="" \
     group-ciphers=tkip,aes-ccm mode=dynamic-keys supplicant-identity=MikroTik \
-    unicast-ciphers=tkip,aes-ccm wpa-pre-shared-key="kitonga2025" \
-    wpa2-pre-shared-key="kitonga2025"
+    unicast-ciphers=tkip,aes-ccm wpa-pre-shared-key="Server_room" \
+    wpa2-pre-shared-key="Server_room"
 
 # ==========================================
 # IP CONFIGURATION
@@ -51,14 +51,14 @@ set [ find default=yes ] authentication-types=wpa2-psk eap-methods="" \
 
 # Configure IP address on bridge
 /ip address
-add address=192.168.88.1/24 interface=bridge-local network=192.168.88.0
+add address=192.168.88.1/24 interface=bridgeLocal network=192.168.88.0
 
 # Configure DHCP server
 /ip pool
 add name=dhcp-pool ranges=192.168.88.10-192.168.88.100
 
 /ip dhcp-server
-add address-pool=dhcp-pool disabled=no interface=bridge-local lease-time=1h name=dhcp-server
+add address-pool=dhcp-pool disabled=no interface=bridgeLocal lease-time=1h name=dhcp-server
 
 /ip dhcp-server network
 add address=192.168.88.0/24 dns-server=192.168.88.1 gateway=192.168.88.1
@@ -82,7 +82,7 @@ add action=accept chain=input comment="allow DNS" dst-port=53 protocol=udp
 add action=accept chain=input comment="allow DHCP" dst-port=67 protocol=udp
 add action=accept chain=input comment="allow Winbox" dst-port=8291 protocol=tcp
 add action=accept chain=input comment="allow API" dst-port=8728 protocol=tcp
-add action=accept chain=input comment="allow from LAN" in-interface=bridge-local
+add action=accept chain=input comment="allow from LAN" in-interface=bridgeLocal
 add action=drop chain=input comment="drop all else"
 
 # NAT configuration
@@ -122,7 +122,7 @@ add dns-name="kitonga.wifi" \
 /ip hotspot
 add address-pool=dhcp-pool \
     disabled=no \
-    interface=bridge-local \
+    interface=bridgeLocal \
     name="kitonga-hotspot" \
     profile=kitonga-hotspot-profile
 
@@ -241,7 +241,7 @@ add interval=1d name=daily-backup on-event=daily-backup policy=ftp,reboot,read,w
 
 # Enable graphing for monitoring
 /tool graphing interface
-add allow-address=192.168.88.0/24 interface=bridge-local
+add allow-address=192.168.88.0/24 interface=bridgeLocal
 
 /tool graphing resource
 add allow-address=192.168.88.0/24

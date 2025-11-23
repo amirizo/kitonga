@@ -287,6 +287,7 @@ try:
     # Control SSL certificate verification for self-signed certs (default: disabled)
     MIKROTIK_SSL_VERIFY = _cfg('MIKROTIK_SSL_VERIFY', default=False, cast=bool)
     MIKROTIK_DEFAULT_PROFILE = _cfg('MIKROTIK_DEFAULT_PROFILE', default='default')
+    MIKROTIK_HOTSPOT_NAME = _cfg('MIKROTIK_HOTSPOT', default='hotspot1')
 except Exception:
     # Fallback defaults
     MIKROTIK_HOST = '10.10.0.1'
@@ -296,6 +297,7 @@ except Exception:
     MIKROTIK_USE_SSL = False
     MIKROTIK_SSL_VERIFY = False
     MIKROTIK_DEFAULT_PROFILE = 'default'
+    MIKROTIK_HOTSPOT_NAME = 'hotspot1'
 
 # Jazzmin Configuration
 JAZZMIN_SETTINGS = {

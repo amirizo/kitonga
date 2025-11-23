@@ -166,10 +166,11 @@ def grant_user_access(username: str, mac_address: Optional[str] = None, password
     if password is None:
         password = username  # simple fallback
     try:
-        user_ok = create_hotspot_user(username, password, profile)
+        # Use the hotspot-aware user creation
+        user_ok = create_hotspot_user_with_server(username, password, profile)
         result['user_created'] = user_ok
     except Exception as e:
-        logger.error(f'grant_user_access: create_hotspot_user failed for {username}: {e}')
+        logger.error(f'grant_user_access: create_hotspot_user_with_server failed for {username}: {e}')
         result['errors'].append(f'user:{e}')
     if mac_address:
         try:
@@ -732,6 +733,93 @@ def list_interfaces() -> dict:
     except Exception as e:
         logger.error(f'list_interfaces error: {e}')
         return {'success': False, 'error': str(e)}
+    finally:
+        safe_close(api)
+
+
+def get_hotspot_interfaces() -> dict:
+    """List hotspot interfaces from /ip/hotspot."""
+    api = None
+    try:
+        api = get_mikrotik_api()
+        res = api.get_resource('/ip/hotspot')
+        items = res.get()
+        data = []
+        for item in items:
+            data.append({
+                'name': item.get('name'),
+                'interface': item.get('interface'),
+                'address_pool': item.get('address-pool'),
+                'profile': item.get('profile'),
+                'idle_timeout': item.get('idle-timeout'),
+                'disabled': item.get('disabled'),
+            })
+        return {'success': True, 'data': data}
+    except Exception as e:
+        logger.error(f'get_hotspot_interfaces error: {e}')
+        return {'success': False, 'error': str(e)}
+    finally:
+        safe_close(api)
+
+
+def get_hotspot_active_users_by_interface(hotspot_name: str = None) -> dict:
+    """Get active users for a specific hotspot interface."""
+    if not hotspot_name:
+        hotspot_name = getattr(settings, 'MIKROTIK_HOTSPOT_NAME', 'hotspot1')
+    
+    api = None
+    try:
+        api = get_mikrotik_api()
+        active = api.get_resource('/ip/hotspot/active').get()
+        users = []
+        for u in active:
+            # Filter by hotspot server if specified
+            if hotspot_name and u.get('server') != hotspot_name:
+                continue
+            users.append({
+                'user': u.get('user'),
+                'server': u.get('server'),
+                'address': u.get('address'),
+                'mac_address': u.get('mac-address'),
+                'uptime': u.get('uptime'),
+                'session_time_left': u.get('session-time-left'),
+                'bytes_in': u.get('bytes-in'),
+                'bytes_out': u.get('bytes-out')
+            })
+        return {'success': True, 'data': users, 'hotspot': hotspot_name}
+    except Exception as e:
+        logger.error(f'Error getting active users for hotspot {hotspot_name}: {e}')
+        return {'success': False, 'error': str(e), 'hotspot': hotspot_name}
+    finally:
+        safe_close(api)
+
+
+def create_hotspot_user_with_server(username: str, password: str, profile: Optional[str] = None, server: str = None) -> bool:
+    """Create or update /ip/hotspot/user entry with specific server."""
+    if not username:
+        return False
+    
+    api = get_mikrotik_api()
+    try:
+        profile = profile or getattr(settings, 'MIKROTIK_DEFAULT_PROFILE', 'default')
+        server = server or getattr(settings, 'MIKROTIK_HOTSPOT_NAME', 'hotspot1')
+        
+        users = api.get_resource('/ip/hotspot/user')
+        exist = users.get(name=username)
+        
+        if exist:
+            for item in exist:
+                if '.id' in item:
+                    users.set(id=item['.id'], password=password, profile=profile, server=server, disabled='no')
+            logger.info(f'Updated hotspot user {username} on server {server}')
+            return True
+        
+        users.add(name=username, password=password, profile=profile, server=server, disabled='no')
+        logger.info(f'Created hotspot user {username} on server {server}')
+        return True
+    except Exception as e:
+        logger.error(f'create_hotspot_user_with_server failed for {username}: {e}')
+        return False
     finally:
         safe_close(api)
 

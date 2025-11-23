@@ -9,6 +9,8 @@ from billing.mikrotik import (
     get_router_info,
     get_active_hotspot_users,
     list_interfaces,
+    get_hotspot_interfaces,
+    get_hotspot_active_users_by_interface,
 )
 import requests
 import socket
@@ -108,6 +110,39 @@ class Command(BaseCommand):
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'✗ Error listing interfaces: {str(e)}'))
 
+        # 3c. List hotspot interfaces
+        self.stdout.write('\n3c. Listing hotspot interfaces...')
+        try:
+            hotspot_result = get_hotspot_interfaces()
+            if hotspot_result.get('success'):
+                hotspots = hotspot_result.get('data', [])
+                if not hotspots:
+                    self.stdout.write(self.style.WARNING('⚠ No hotspot interfaces found'))
+                else:
+                    for i, hs in enumerate(hotspots, 1):
+                        self.stdout.write(f"  {i}. {hs.get('name')}\tInterface: {hs.get('interface')}\tPool: {hs.get('address_pool')}\tDisabled: {hs.get('disabled')}")
+                    self.stdout.write(self.style.SUCCESS(f'✓ Found {len(hotspots)} hotspot interface(s)'))
+            else:
+                self.stdout.write(self.style.ERROR(f"✗ Failed to list hotspot interfaces: {hotspot_result.get('error')}"))
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'✗ Error listing hotspot interfaces: {str(e)}'))
+
+        # 3d. Test hotspot-specific active users
+        self.stdout.write('\n3d. Testing hotspot-specific active users...')
+        try:
+            hotspot_name = getattr(settings, 'MIKROTIK_HOTSPOT_NAME', 'hotspot1')
+            hotspot_users_result = get_hotspot_active_users_by_interface(hotspot_name)
+            if hotspot_users_result.get('success'):
+                users = hotspot_users_result.get('data', [])
+                self.stdout.write(self.style.SUCCESS(f'✓ Found {len(users)} active user(s) on hotspot "{hotspot_name}"'))
+                if users:
+                    for i, user in enumerate(users[:3], 1):  # Show first 3 users
+                        self.stdout.write(f"  {i}. {user.get('user')} ({user.get('address')}) Server: {user.get('server')}")
+            else:
+                self.stdout.write(self.style.ERROR(f"✗ Failed to get users for hotspot {hotspot_name}: {hotspot_users_result.get('error')}"))
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'✗ Error getting hotspot users: {str(e)}'))
+
         # Test 4: Test authentication (this will fail if user doesn't exist in Django)
         self.stdout.write('\n4. Testing authentication flow...')
         try:
@@ -143,6 +178,8 @@ class Command(BaseCommand):
         self.stdout.write(f'Use SSL: {getattr(settings, "MIKROTIK_USE_SSL", False)} (verify={getattr(settings, "MIKROTIK_SSL_VERIFY", False)})')
         self.stdout.write(f'Admin User: {getattr(settings, "MIKROTIK_USER", "admin")}')
         self.stdout.write(f'Admin Pass: {"Set" if getattr(settings, "MIKROTIK_PASSWORD", "") else "Not Set"}')
+        self.stdout.write(f'Hotspot Name: {getattr(settings, "MIKROTIK_HOTSPOT_NAME", "hotspot1")}')
+        self.stdout.write(f'Default Profile: {getattr(settings, "MIKROTIK_DEFAULT_PROFILE", "default")}')
         self.stdout.write(f'Hotspot Name: {getattr(settings, "MIKROTIK_HOTSPOT_NAME", "hotspot1")}')
         
         self.stdout.write('\n' + '='*50)
