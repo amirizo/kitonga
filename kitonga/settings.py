@@ -65,13 +65,13 @@ WSGI_APPLICATION = 'kitonga.wsgi.application'
 
 # Database
 # Allow overriding DB file location via SQLITE_PATH env for proper permissions in production
-DB_FILE = config('SQLITE_PATH', default=str(BASE_DIR / 'db.sqlite3'))
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': DB_FILE,
+        'NAME': BASE_DIR / 'db.sqlite3',  # <- ensure this path is correct
     }
 }
+
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
