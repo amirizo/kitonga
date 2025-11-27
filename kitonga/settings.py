@@ -279,7 +279,7 @@ ADMIN_TOKEN_SECRET = config('ADMIN_TOKEN_SECRET', default=SECRET_KEY)
 try:
     from decouple import config as _cfg
     # Prefer WireGuard tunnel IP by default when not provided via .env
-    MIKROTIK_HOST = _cfg('MIKROTIK_HOST', default=_cfg('MIKROTIK_ROUTER_IP', default='10.10.0.1'))
+    MIKROTIK_HOST = _cfg('MIKROTIK_HOST', default=_cfg('MIKROTIK_ROUTER_IP', default='10.50.0.1'))
     MIKROTIK_PORT = _cfg('MIKROTIK_PORT', default=_cfg('MIKROTIK_API_PORT', default=8728, cast=int), cast=int)
     MIKROTIK_USER = _cfg('MIKROTIK_USER', default=_cfg('MIKROTIK_ADMIN_USER', default='admin'))
     MIKROTIK_PASSWORD = _cfg('MIKROTIK_PASSWORD', default=_cfg('MIKROTIK_ADMIN_PASS', default='Kijangwani2003'))
@@ -290,7 +290,7 @@ try:
     MIKROTIK_HOTSPOT_NAME = _cfg('MIKROTIK_HOTSPOT', default='hotspot1')
 except Exception:
     # Fallback defaults
-    MIKROTIK_HOST = '10.10.0.1'
+    MIKROTIK_HOST = '10.50.0.1'
     MIKROTIK_PORT = 8728
     MIKROTIK_USER = 'admin'
     MIKROTIK_PASSWORD = 'Kijangwani2003'
