@@ -1714,7 +1714,17 @@ def verify_access(request):
     mac_address = serializer.validated_data.get('mac_address', '')
     
     try:
-        user = User.objects.get(phone_number=phone_number)
+        # Find user with normalized phone number
+        from .utils import find_user_by_phone
+        user = find_user_by_phone(phone_number)
+        
+        if not user:
+            return Response({
+                'access_granted': False,
+                'message': 'User not found. Please register and pay to access Wi-Fi.',
+                'suggestion': 'Make a payment or redeem a voucher to create account and get access',
+                'normalized_phone': phone_number  # Show what the system tried to find
+            }, status=status.HTTP_404_NOT_FOUND)
         
         # Core access check - works for both payment and voucher users
         has_access = user.has_active_access()
@@ -1971,8 +1981,19 @@ def initiate_payment(request):
     ip_address = request.data.get('ip_address', request.META.get('REMOTE_ADDR'))
     mac_address = request.data.get('mac_address', '')
     
-    # Get or create user
-    user, created = User.objects.get_or_create(phone_number=phone_number)
+    # Get or create user with normalized phone number
+    from .utils import get_or_create_user
+    try:
+        user, created = get_or_create_user(phone_number)
+        if created:
+            logger.info(f'Created new user {user.phone_number} (normalized from {phone_number}) for payment')
+        else:
+            logger.info(f'Found existing user {user.phone_number} for payment')
+    except ValueError as e:
+        return Response({
+            'success': False,
+            'message': f'Invalid phone number: {str(e)}'
+        }, status=status.HTTP_400_BAD_REQUEST)
     
     # Register device if MAC address provided
     device = None
@@ -2470,14 +2491,19 @@ def redeem_voucher(request):
                 }
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Get or create user
-        user, created = User.objects.get_or_create(
-            phone_number=phone_number,
-            defaults={'max_devices': 1}  # Default device limit
-        )
-        
-        if created:
-            logger.info(f'Created new user {phone_number} via voucher redemption')
+        # Get or create user with normalized phone number
+        from .utils import get_or_create_user
+        try:
+            user, created = get_or_create_user(phone_number, max_devices=1)
+            if created:
+                logger.info(f'Created new user {user.phone_number} (normalized from {phone_number}) via voucher redemption')
+            else:
+                logger.info(f'Found existing user {user.phone_number} for voucher redemption')
+        except ValueError as e:
+            return Response({
+                'success': False,
+                'message': f'Invalid phone number: {str(e)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
         
         # Redeem voucher - this will extend user access
         success, message = voucher.redeem(user)
@@ -2845,12 +2871,20 @@ def user_status(request, phone_number):
     Get user status and access information
     """
     try:
-        user = User.objects.get(phone_number=phone_number)
+        from .utils import find_user_by_phone
+        user = find_user_by_phone(phone_number)
+        
+        if not user:
+            return Response({
+                'message': 'User not found',
+                'phone_number_searched': phone_number
+            }, status=status.HTTP_404_NOT_FOUND)
+            
         return Response(UserSerializer(user).data)
-    except User.DoesNotExist:
+    except Exception as e:
         return Response({
-            'message': 'User not found'
-        }, status=status.HTTP_404_NOT_FOUND)
+            'message': f'Error retrieving user: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @staff_member_required
@@ -3033,20 +3067,30 @@ def list_user_devices(request, phone_number):
     List all devices for a user
     """
     try:
-        user = User.objects.get(phone_number=phone_number)
+        from .utils import find_user_by_phone
+        user = find_user_by_phone(phone_number)
+        
+        if not user:
+            return Response({
+                'success': False,
+                'message': 'User not found',
+                'phone_number_searched': phone_number
+            }, status=status.HTTP_404_NOT_FOUND)
+            
         devices = user.devices.all()
         
         return Response({
             'success': True,
             'max_devices': user.max_devices,
             'active_devices': user.get_active_devices().count(),
-            'devices': DeviceSerializer(devices, many=True).data
+            'devices': DeviceSerializer(devices, many=True).data,
+            'phone_number': user.phone_number  # Show normalized phone number
         })
-    except User.DoesNotExist:
+    except Exception as e:
         return Response({
             'success': False,
-            'message': 'User not found'
-        }, status=status.HTTP_404_NOT_FOUND)
+            'message': f'Error retrieving devices: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])
@@ -3065,7 +3109,16 @@ def remove_device(request):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     try:
-        user = User.objects.get(phone_number=phone_number)
+        from .utils import find_user_by_phone
+        user = find_user_by_phone(phone_number)
+        
+        if not user:
+            return Response({
+                'success': False,
+                'message': 'User not found',
+                'phone_number_searched': phone_number
+            }, status=status.HTTP_404_NOT_FOUND)
+            
         device = Device.objects.get(id=device_id, user=user)
         
         device.is_active = False
@@ -3073,18 +3126,19 @@ def remove_device(request):
         
         return Response({
             'success': True,
-            'message': 'Device removed successfully'
+            'message': 'Device removed successfully',
+            'phone_number': user.phone_number  # Show normalized phone number
         })
-    except User.DoesNotExist:
-        return Response({
-            'success': False,
-            'message': 'User not found'
-        }, status=status.HTTP_404_NOT_FOUND)
     except Device.DoesNotExist:
         return Response({
             'success': False,
             'message': 'Device not found'
         }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({
+            'success': False,
+            'message': f'Error removing device: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
@@ -3207,8 +3261,22 @@ def mikrotik_auth(request):
         return HttpResponse(error_msg, status=403)
     
     try:
-        # Check if user exists and has valid access
-        user = User.objects.get(phone_number=username)
+        # Check if user exists and has valid access with normalized phone number
+        from .utils import find_user_by_phone
+        user = find_user_by_phone(username)
+        
+        if not user:
+            logger.warning(f'Mikrotik auth failed for {username}: User not found - no payment or voucher history')
+            error_msg = 'User not found - please make payment or redeem voucher'
+            
+            if is_frontend_call:
+                return JsonResponse({
+                    'error': error_msg,
+                    'auth-state': 0,
+                    'success': False,
+                    'phone_number_searched': username
+                }, status=404)
+            return HttpResponse(error_msg, status=403)
         
         # Determine access method for better logging
         access_method = 'unknown'
