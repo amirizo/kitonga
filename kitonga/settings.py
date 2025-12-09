@@ -14,7 +14,15 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-kitonga-dev-key-chang
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=False, cast=bool)
 
+# Development vs Production URL Configuration
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,api.kitonga.klikcell.com,kitonga.klikcell.com,testserver', cast=Csv())
+
+# Add development-specific hosts when DEBUG is True
+if DEBUG:
+    additional_dev_hosts = ['0.0.0.0', '192.168.1.1', '10.0.0.1']
+    for host in additional_dev_hosts:
+        if host not in ALLOWED_HOSTS:
+            ALLOWED_HOSTS.append(host)
 
 # Application definition
 INSTALLED_APPS = [
@@ -42,6 +50,11 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+# Add debugging middleware in development
+if DEBUG:
+    # Ensure no middleware tries to force HTTPS in development
+    pass  # All middleware above is fine for development
 
 ROOT_URLCONF = 'kitonga.urls'
 
@@ -119,8 +132,9 @@ if (BASE_DIR / 'kitonga' / 'static').exists():
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# Production Security Settings (ONLY enabled when DEBUG=False)
+# Security Settings - Environment Aware Configuration
 if not DEBUG:
+    # Production Security Settings (ONLY enabled when DEBUG=False)
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
@@ -128,9 +142,8 @@ if not DEBUG:
     SECURE_REDIRECT_EXEMPT = []
     SECURE_SSL_REDIRECT = True
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-    USE_TZ = True
     
-    # Session security
+    # Session security for production
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_PRELOAD = True
@@ -139,10 +152,20 @@ if not DEBUG:
     X_FRAME_OPTIONS = 'DENY'
     SECURE_REFERRER_POLICY = 'same-origin'
 else:
-    # Development mode - disable HTTPS redirects
+    # Development mode - disable ALL HTTPS-related security features
     SECURE_SSL_REDIRECT = False
+    SECURE_BROWSER_XSS_FILTER = False
+    SECURE_CONTENT_TYPE_NOSNIFF = False
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_SECONDS = 0
+    SECURE_HSTS_PRELOAD = False
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
+    X_FRAME_OPTIONS = 'SAMEORIGIN'
+    SECURE_REFERRER_POLICY = None
+    
+    # Ensure no proxy SSL headers are processed in development
+    SECURE_PROXY_SSL_HEADER = None
     
 # Production Logging
 LOGGING = {
@@ -204,13 +227,30 @@ REST_FRAMEWORK = {
     'EXCEPTION_HANDLER': 'rest_framework.views.exception_handler',
 }
 
-# CORS settings
-CORS_ALLOW_ALL_ORIGINS = DEBUG
-CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='https://kitonga.klikcell.com,https://api.kitonga.klikcell.com', cast=Csv())
+# CORS settings - Environment Aware
+if DEBUG:
+    # Development: Allow all origins for testing
+    CORS_ALLOW_ALL_ORIGINS = True
+    CORS_ALLOWED_ORIGINS = []
+else:
+    # Production: Restrict to specific origins
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='https://kitonga.klikcell.com,https://api.kitonga.klikcell.com', cast=Csv())
 
-CSRF_TRUSTED_ORIGINS = [
-    "https://kitonga.klikcell.com",
-]
+# CSRF settings - Environment Aware
+if DEBUG:
+    # Development: More permissive CSRF settings
+    CSRF_TRUSTED_ORIGINS = [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:3000",  # For frontend development
+    ]
+else:
+    # Production: Strict CSRF settings
+    CSRF_TRUSTED_ORIGINS = [
+        "https://kitonga.klikcell.com",
+        "https://api.kitonga.klikcell.com",
+    ]
 
 # Allow specific headers for CORS
 CORS_ALLOW_HEADERS = [
@@ -479,3 +519,20 @@ JAZZMIN_UI_TWEAKS = {
         "success": "btn-success"
     }
 }
+
+# Development Configuration Summary (for debugging)
+if DEBUG:
+    print("=" * 50)
+    print("🔧 DEVELOPMENT MODE DETECTED")
+    print("=" * 50)
+    print(f"DEBUG: {DEBUG}")
+    print(f"SECURE_SSL_REDIRECT: {globals().get('SECURE_SSL_REDIRECT', 'Not Set')}")
+    print(f"SESSION_COOKIE_SECURE: {globals().get('SESSION_COOKIE_SECURE', 'Not Set')}")
+    print(f"CSRF_COOKIE_SECURE: {globals().get('CSRF_COOKIE_SECURE', 'Not Set')}")
+    print(f"CORS_ALLOW_ALL_ORIGINS: {globals().get('CORS_ALLOW_ALL_ORIGINS', 'Not Set')}")
+    print(f"ALLOWED_HOSTS: {ALLOWED_HOSTS}")
+    print("🚀 Server should accept HTTP requests on:")
+    print("   - http://localhost:8000")
+    print("   - http://127.0.0.1:8000")
+    print("⚠️  Do NOT use HTTPS URLs in development!")
+    print("=" * 50)

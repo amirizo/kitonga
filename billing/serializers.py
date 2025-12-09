@@ -3,6 +3,29 @@ Serializers for API requests and responses
 """
 from rest_framework import serializers
 from .models import User, Payment, AccessLog, Voucher, Bundle, Device
+from .utils import normalize_phone_number, validate_tanzania_phone_number
+
+
+def validate_phone_number_field(phone_number):
+    """
+    Validator for phone number fields in serializers
+    """
+    if not phone_number:
+        raise serializers.ValidationError("Phone number is required")
+    
+    try:
+        # Normalize the phone number
+        normalized = normalize_phone_number(phone_number)
+        
+        # Validate it's a Tanzania number
+        is_valid, network, normalized = validate_tanzania_phone_number(normalized)
+        if not is_valid:
+            raise serializers.ValidationError(f"Invalid Tanzania phone number: {phone_number}")
+        
+        return normalized
+        
+    except ValueError as e:
+        raise serializers.ValidationError(f"Invalid phone number format: {e}")
 
 
 class DeviceSerializer(serializers.ModelSerializer):
@@ -72,18 +95,8 @@ class InitiatePaymentSerializer(serializers.Serializer):
     bundle_id = serializers.IntegerField(required=False)
     
     def validate_phone_number(self, value):
-        # Remove spaces and special characters
-        value = value.replace(' ', '').replace('-', '').replace('+', '')
-        
-        # Validate format
-        if not value.isdigit():
-            raise serializers.ValidationError('Phone number must contain only digits')
-        
-        # Validate length (Tanzanian numbers)
-        if len(value) < 9 or len(value) > 12:
-            raise serializers.ValidationError('Invalid phone number length')
-        
-        return value
+        """Validate and normalize phone number"""
+        return validate_phone_number_field(value)
     
     def validate_bundle_id(self, value):
         if value is not None:
@@ -99,6 +112,10 @@ class VerifyAccessSerializer(serializers.Serializer):
     phone_number = serializers.CharField(max_length=15)
     ip_address = serializers.IPAddressField(required=False)
     mac_address = serializers.CharField(max_length=17, required=False)
+    
+    def validate_phone_number(self, value):
+        """Validate and normalize phone number"""
+        return validate_phone_number_field(value)
 
 
 class VoucherSerializer(serializers.ModelSerializer):
@@ -122,18 +139,8 @@ class GenerateVouchersSerializer(serializers.Serializer):
     language = serializers.ChoiceField(choices=['en', 'sw'], default='en', required=False)
     
     def validate_admin_phone_number(self, value):
-        # Remove spaces and special characters
-        value = value.replace(' ', '').replace('-', '').replace('+', '')
-        
-        # Validate format
-        if not value.isdigit():
-            raise serializers.ValidationError('Phone number must contain only digits')
-        
-        # Validate length (Tanzanian numbers)
-        if len(value) < 9 or len(value) > 12:
-            raise serializers.ValidationError('Invalid phone number length')
-        
-        return value
+        """Validate and normalize admin phone number"""
+        return validate_phone_number_field(value)
 
 
 class RedeemVoucherSerializer(serializers.Serializer):
@@ -154,14 +161,8 @@ class RedeemVoucherSerializer(serializers.Serializer):
         return value
     
     def validate_phone_number(self, value):
-        # Remove spaces and special characters
-        value = value.replace(' ', '').replace('-', '').replace('+', '')
-        
-        # Validate format
-        if not value.isdigit():
-            raise serializers.ValidationError('Phone number must contain only digits')
-        
-        return value
+        """Validate and normalize phone number"""
+        return validate_phone_number_field(value)
     
     def validate_mac_address(self, value):
         if value:

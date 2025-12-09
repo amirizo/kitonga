@@ -4,6 +4,7 @@ Database models for Kitonga Wi-Fi Billing System
 from django.db import models
 from django.utils import timezone
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from datetime import timedelta
 
 
@@ -33,6 +34,7 @@ class Bundle(models.Model):
 class User(models.Model):
     """
     User model - identified by phone number
+    Phone numbers are automatically normalized to 255XXXXXXXXX format
     """
     phone_number = models.CharField(max_length=15, unique=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -48,8 +50,34 @@ class User(models.Model):
     def __str__(self):
         return f"{self.phone_number} - Active: {self.is_active}"
     
+    def clean(self):
+        """Validate and normalize phone number"""
+        if self.phone_number:
+            from .utils import normalize_phone_number, validate_tanzania_phone_number
+            try:
+                # Normalize the phone number
+                normalized = normalize_phone_number(self.phone_number)
+                
+                # Validate it's a Tanzania number
+                is_valid, network, normalized = validate_tanzania_phone_number(self.phone_number)
+                if not is_valid:
+                    raise ValidationError(f"Invalid Tanzania phone number: {self.phone_number}")
+                
+                # Check for existing user with same normalized number (excluding self)
+                existing_user = User.objects.filter(phone_number=normalized).exclude(pk=self.pk).first()
+                if existing_user:
+                    raise ValidationError(f"User with phone number {normalized} already exists (ID: {existing_user.id})")
+                
+                self.phone_number = normalized
+                
+            except ValueError as e:
+                raise ValidationError(f"Invalid phone number format: {e}")
+    
     def save(self, *args, **kwargs):
-        """Override save to ensure max_devices defaults to 1"""
+        """Override save to ensure phone number normalization and max_devices defaults"""
+        # Normalize phone number before saving
+        self.clean()
+        
         # Always ensure max_devices has a value (for both new and existing users)
         if self.max_devices is None:
             self.max_devices = 1
