@@ -13,6 +13,7 @@ from django.core.cache import cache
 import uuid
 import json
 import logging
+import ipaddress
 from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import render
 from django.db.models import Count, Sum
@@ -99,23 +100,58 @@ def get_user_agent(request):
 def get_mac_address_from_request(request):
     """
     Extract MAC address from request data with validation
+    Enhanced to handle multiple MAC address sources and formats
     """
     mac_address = ''
     
-    # Try different possible sources
-    if hasattr(request, 'data') and request.data:
-        mac_address = request.data.get('mac_address', '')
-    elif hasattr(request, 'POST') and request.POST:
-        mac_address = request.POST.get('mac_address', '')
-    elif hasattr(request, 'GET') and request.GET:
-        mac_address = request.GET.get('mac_address', '')
+    # Try different possible sources in order of preference
+    sources = []
     
-    # Basic MAC address validation (simplified)
+    # Check POST/PUT data first
+    if hasattr(request, 'data') and request.data:
+        sources.append(request.data)
+    
+    # Check form data
+    if hasattr(request, 'POST') and request.POST:
+        sources.append(request.POST)
+    
+    # Check query parameters
+    if hasattr(request, 'GET') and request.GET:
+        sources.append(request.GET)
+    
+    # Check various MAC address field names
+    mac_field_names = ['mac_address', 'macAddress', 'mac', 'device_mac', 'client_mac']
+    
+    for source in sources:
+        for field_name in mac_field_names:
+            mac_candidate = source.get(field_name, '')
+            if mac_candidate:
+                mac_address = mac_candidate
+                break
+        if mac_address:
+            break
+    
+    # Enhanced MAC address validation and normalization
     if mac_address:
+        # Remove whitespace and convert to uppercase
         mac_address = mac_address.strip().upper()
-        # Basic format check (XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX)
-        if len(mac_address) == 17 and ((':' in mac_address) or ('-' in mac_address)):
-            return mac_address.replace('-', ':')  # Normalize to colon format
+        
+        # Remove common separators for processing
+        mac_clean = mac_address.replace(':', '').replace('-', '').replace('.', '').replace(' ', '')
+        
+        # Check if it's a valid 12-character hex string
+        if len(mac_clean) == 12 and all(c in '0123456789ABCDEF' for c in mac_clean):
+            # Format as standard MAC address (XX:XX:XX:XX:XX:XX)
+            formatted_mac = ':'.join([mac_clean[i:i+2] for i in range(0, 12, 2)])
+            
+            # Additional validation - check for broadcast or invalid MACs
+            if formatted_mac != '00:00:00:00:00:00' and formatted_mac != 'FF:FF:FF:FF:FF:FF':
+                logger.info(f'Valid MAC address extracted: {formatted_mac}')
+                return formatted_mac
+            else:
+                logger.warning(f'Invalid MAC address detected: {formatted_mac}')
+        else:
+            logger.warning(f'Invalid MAC address format: {mac_address}')
     
     return ''
 
@@ -123,19 +159,48 @@ def get_mac_address_from_request(request):
 def get_request_info(request, serializer_data=None):
     """
     Extract comprehensive request information including IP, MAC, and user agent
+    Enhanced to prioritize explicitly provided data over auto-detected values
     """
     # Get IP address using improved extraction
     ip_address = get_client_ip(request)
     
-    # Get MAC address from request data or serializer
+    # Enhanced MAC address extraction with multiple fallback methods
     mac_address = ''
+    
+    # First priority: explicitly provided data from serializer (from API calls)
     if serializer_data and 'mac_address' in serializer_data:
-        mac_address = serializer_data.get('mac_address', '')
-    else:
+        mac_candidate = serializer_data.get('mac_address', '').strip()
+        if mac_candidate:
+            # Validate and normalize the MAC address
+            mac_clean = mac_candidate.upper().replace(':', '').replace('-', '').replace('.', '').replace(' ', '')
+            if len(mac_clean) == 12 and all(c in '0123456789ABCDEF' for c in mac_clean):
+                mac_address = ':'.join([mac_clean[i:i+2] for i in range(0, 12, 2)])
+                logger.info(f'MAC address from serializer: {mac_address}')
+    
+    # Second priority: extract from request data
+    if not mac_address:
         mac_address = get_mac_address_from_request(request)
+        if mac_address:
+            logger.info(f'MAC address from request: {mac_address}')
+    
+    # Third priority: try to detect from headers (limited success)
+    if not mac_address:
+        # Some captive portals or network equipment pass MAC in headers
+        header_mac_fields = ['HTTP_X_MAC_ADDRESS', 'HTTP_X_DEVICE_MAC', 'HTTP_CLIENT_MAC']
+        for header in header_mac_fields:
+            header_mac = request.META.get(header, '').strip()
+            if header_mac:
+                mac_clean = header_mac.upper().replace(':', '').replace('-', '').replace('.', '').replace(' ', '')
+                if len(mac_clean) == 12 and all(c in '0123456789ABCDEF' for c in mac_clean):
+                    mac_address = ':'.join([mac_clean[i:i+2] for i in range(0, 12, 2)])
+                    logger.info(f'MAC address from header {header}: {mac_address}')
+                    break
     
     # Get user agent
     user_agent = get_user_agent(request)
+    
+    # Log the extracted information for debugging
+    logger.info(f'Request info extracted - IP: {ip_address}, MAC: {mac_address or "Not provided"}, User-Agent: {user_agent[:50]}...')
     
     return {
         'ip_address': ip_address,
