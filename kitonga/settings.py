@@ -235,7 +235,7 @@ if DEBUG:
 else:
     # Production: Restrict to specific origins
     CORS_ALLOW_ALL_ORIGINS = False
-    CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='https://kitonga.klikcell.com,https://api.kitonga.klikcell.com', cast=Csv())
+    CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='https://kitonga.klikcell.com,https://api.kitonga.klikcell.com,http://localhost:3000', cast=Csv())
 
 # CSRF settings - Environment Aware
 if DEBUG:
@@ -250,6 +250,7 @@ else:
     CSRF_TRUSTED_ORIGINS = [
         "https://kitonga.klikcell.com",
         "https://api.kitonga.klikcell.com",
+        "http://localhost:3000"
     ]
 
 # Allow specific headers for CORS
