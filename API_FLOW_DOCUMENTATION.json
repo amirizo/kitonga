@@ -1,0 +1,650 @@
+{
+  "kitonga_wifi_api_documentation": {
+    "version": "1.0.0",
+    "description": "Complete API documentation for Kitonga WiFi Billing System with automatic MikroTik integration",
+    "base_url": "https://api.kitonga.klikcell.com/api",
+    "authentication": "Token-based for admin endpoints, public for user endpoints",
+    
+    "phone_normalization_system": {
+      "description": "Automatic phone number normalization to prevent duplicate users",
+      "supported_formats": [
+        "+255772236727",
+        "255772236727", 
+        "0772236727"
+      ],
+      "normalized_output": "255772236727",
+      "duplicate_prevention": "System automatically finds existing users regardless of format used",
+      "validation_rules": {
+        "length": "Must be valid Tanzanian mobile number",
+        "prefixes": ["255", "+255", "0"],
+        "networks": ["Vodacom", "Airtel", "Tigo", "Halotel", "TTCL"]
+      }
+    },
+
+    "core_connection_flow": {
+      "description": "Complete user journey from connection attempt to internet access",
+      "steps": [
+        "1. User connects to WiFi hotspot",
+        "2. System captures device info (MAC, IP)",
+        "3. User provides phone number for verification",
+        "4. System checks access status (payment/voucher)",
+        "5. If valid: MikroTik grants internet access",
+        "6. If invalid: User must pay or redeem voucher",
+        "7. After payment/voucher: Automatic internet connection"
+      ]
+    },
+
+    "endpoints": {
+      "verify_access": {
+        "url": "/verify/",
+        "method": "POST",
+        "description": "Core endpoint that checks user access and automatically connects/disconnects from MikroTik",
+        "authentication": "None required",
+        "automatic_actions": [
+          "Phone number normalization",
+          "User lookup and creation",
+          "Device tracking and registration",
+          "MikroTik connection if access valid",
+          "MikroTik disconnection if access expired",
+          "Access logging"
+        ],
+        "request_body": {
+          "required": {
+            "phone_number": "string (any format: +255, 255, or 0 prefix)"
+          },
+          "optional": {
+            "mac_address": "string (for device tracking)",
+            "ip_address": "string (auto-detected if not provided)"
+          }
+        },
+        "response_examples": {
+          "valid_access_user": {
+            "access_granted": true,
+            "denial_reason": "",
+            "user": {
+              "id": 123,
+              "phone_number": "255772236727",
+              "is_active": true,
+              "paid_until": "2025-12-10T15:30:00Z",
+              "max_devices": 1,
+              "created_at": "2025-12-09T10:00:00Z"
+            },
+            "access_method": "payment",
+            "device": {
+              "mac_address": "AA:BB:CC:DD:EE:FF",
+              "registered": true,
+              "is_active": true,
+              "device_name": "iPhone-John"
+            },
+            "mikrotik_connection": {
+              "action": "connected",
+              "success": true,
+              "message": "Successfully connected to internet"
+            },
+            "debug_info": {
+              "has_payments": true,
+              "has_vouchers": false,
+              "paid_until": "2025-12-10T15:30:00Z",
+              "is_active": true,
+              "device_count": 1,
+              "max_devices": 1
+            }
+          },
+          "expired_access_user": {
+            "access_granted": false,
+            "denial_reason": "Access expired 2 hours ago",
+            "user": {
+              "id": 124,
+              "phone_number": "255787654321",
+              "is_active": false,
+              "paid_until": "2025-12-09T08:00:00Z",
+              "max_devices": 1,
+              "created_at": "2025-12-08T10:00:00Z"
+            },
+            "access_method": "voucher",
+            "device": {
+              "mac_address": "BB:CC:DD:EE:FF:11",
+              "registered": true,
+              "is_active": false,
+              "device_name": null
+            },
+            "mikrotik_connection": {
+              "action": "disconnected",
+              "success": true,
+              "message": "Disconnected from internet (no valid access)"
+            },
+            "debug_info": {
+              "has_payments": false,
+              "has_vouchers": true,
+              "paid_until": "2025-12-09T08:00:00Z",
+              "is_active": false,
+              "device_count": 1,
+              "max_devices": 1
+            }
+          },
+          "new_user_no_access": {
+            "access_granted": false,
+            "message": "User not found. Please register and pay to access Wi-Fi.",
+            "suggestion": "Make a payment or redeem a voucher to create account and get access",
+            "normalized_phone": "255798765432"
+          }
+        }
+      },
+
+      "initiate_payment": {
+        "url": "/initiate-payment/",
+        "method": "POST",
+        "description": "Start ClickPesa USSD payment process with automatic device registration",
+        "authentication": "None required",
+        "automatic_actions": [
+          "Phone number normalization",
+          "User creation if new",
+          "Device registration if MAC provided",
+          "Payment record creation",
+          "USSD push to user's phone"
+        ],
+        "request_body": {
+          "required": {
+            "phone_number": "string (any format)"
+          },
+          "optional": {
+            "bundle_id": "integer (defaults to daily bundle)",
+            "mac_address": "string (for device tracking)",
+            "ip_address": "string (auto-detected if not provided)"
+          }
+        },
+        "response_examples": {
+          "success": {
+            "success": true,
+            "message": "Payment initiated successfully. Please complete USSD payment on your phone.",
+            "transaction_id": "550e8400-e29b-41d4-a716-446655440000",
+            "order_reference": "KITONGA123ABC12345",
+            "amount": 1000.0,
+            "bundle": {
+              "id": 1,
+              "name": "Daily Access",
+              "price": "1000.00",
+              "duration_hours": 24,
+              "description": "24 hours unlimited internet access"
+            },
+            "channel": "USSD_PUSH"
+          },
+          "error": {
+            "success": false,
+            "message": "Invalid phone number: Must be a valid Tanzanian mobile number"
+          }
+        }
+      },
+
+      "redeem_voucher": {
+        "url": "/vouchers/redeem/",
+        "method": "POST",
+        "description": "Redeem voucher code with automatic internet access",
+        "authentication": "None required",
+        "automatic_actions": [
+          "Phone number normalization",
+          "User creation if new",
+          "Voucher validation and redemption",
+          "Device registration if MAC provided",
+          "Access extension",
+          "Automatic MikroTik connection"
+        ],
+        "request_body": {
+          "required": {
+            "voucher_code": "string",
+            "phone_number": "string (any format)"
+          },
+          "optional": {
+            "mac_address": "string (for immediate connection)",
+            "ip_address": "string (auto-detected if not provided)"
+          }
+        },
+        "response_examples": {
+          "success": {
+            "success": true,
+            "message": "Voucher redeemed successfully! You now have 24 hours of internet access.",
+            "voucher": {
+              "code": "H7SQ-V5XB-HOK2",
+              "duration_hours": 24,
+              "redeemed_at": "2025-12-09T14:30:00Z"
+            },
+            "user": {
+              "phone_number": "255772236727",
+              "access_until": "2025-12-10T14:30:00Z",
+              "is_active": true
+            },
+            "device": {
+              "mac_address": "CC:DD:EE:FF:11:22",
+              "registered": true,
+              "connected": true
+            },
+            "mikrotik_connection": {
+              "action": "connected",
+              "success": true,
+              "message": "Automatically connected to internet"
+            }
+          },
+          "already_used": {
+            "success": false,
+            "message": "This voucher has already been used"
+          },
+          "invalid_code": {
+            "success": false,
+            "message": "Invalid voucher code"
+          }
+        }
+      },
+
+      "user_status": {
+        "url": "/user-status/{normalized_phone}/",
+        "method": "GET",
+        "description": "Check user's current access status and remaining time",
+        "authentication": "None required",
+        "path_parameters": {
+          "normalized_phone": "Phone number in normalized format (255XXXXXXXXX)"
+        },
+        "response_examples": {
+          "active_user": {
+            "has_active_access": true,
+            "phone_number": "255772236727",
+            "access_until": "2025-12-10T15:30:00Z",
+            "time_remaining": {
+              "hours": 23,
+              "minutes": 45,
+              "seconds": 30
+            },
+            "access_method": "payment",
+            "devices": [
+              {
+                "mac_address": "AA:BB:CC:DD:EE:FF",
+                "device_name": "iPhone-John",
+                "is_active": true,
+                "last_seen": "2025-12-09T14:25:00Z"
+              }
+            ],
+            "payment_history": [
+              {
+                "amount": "1000.00",
+                "completed_at": "2025-12-09T15:30:00Z",
+                "bundle_name": "Daily Access"
+              }
+            ]
+          },
+          "expired_user": {
+            "has_active_access": false,
+            "phone_number": "255787654321",
+            "access_until": "2025-12-09T08:00:00Z",
+            "time_remaining": null,
+            "access_method": "voucher",
+            "message": "Access expired. Please make a payment or redeem a voucher."
+          }
+        }
+      },
+
+      "bundles": {
+        "url": "/bundles/",
+        "method": "GET",
+        "description": "List all available internet bundles/packages",
+        "authentication": "None required",
+        "response_example": [
+          {
+            "id": 1,
+            "name": "Hourly Access",
+            "price": "500.00",
+            "duration_hours": 1,
+            "description": "1 hour unlimited internet access",
+            "is_active": true
+          },
+          {
+            "id": 2,
+            "name": "Daily Access",
+            "price": "1000.00",
+            "duration_hours": 24,
+            "description": "24 hours unlimited internet access",
+            "is_active": true
+          },
+          {
+            "id": 3,
+            "name": "Weekly Access",
+            "price": "5000.00",
+            "duration_hours": 168,
+            "description": "7 days unlimited internet access",
+            "is_active": true
+          }
+        ]
+      },
+
+      "mikrotik_auth": {
+        "url": "/mikrotik/auth/",
+        "method": "POST",
+        "description": "MikroTik hotspot authentication endpoint",
+        "authentication": "None required (used by MikroTik router)",
+        "request_body": {
+          "username": "string (normalized phone number)",
+          "password": "string (last 6 digits of phone)"
+        },
+        "response_examples": {
+          "authorized": "OK",
+          "denied": {
+            "auth-state": 1,
+            "error": "User not found or access expired"
+          }
+        }
+      }
+    },
+
+    "automatic_systems": {
+      "phone_normalization": {
+        "description": "Converts all phone number formats to standard 255XXXXXXXXX format",
+        "examples": {
+          "input": ["+255772236727", "255772236727", "0772236727"],
+          "output": "255772236727"
+        },
+        "prevents_duplicates": "Users with same number in different formats are treated as one user"
+      },
+
+      "mikrotik_integration": {
+        "description": "Automatic internet connection/disconnection based on access status",
+        "connection_triggers": [
+          "Successful payment webhook",
+          "Voucher redemption",
+          "Access verification for valid user"
+        ],
+        "disconnection_triggers": [
+          "Access expiration",
+          "Access verification for expired user",
+          "Manual admin disconnect"
+        ],
+        "functions": {
+          "grant_user_access": "Creates hotspot user and allows MAC address",
+          "revoke_user_access": "Removes hotspot user and blocks MAC address"
+        }
+      },
+
+      "device_tracking": {
+        "description": "Automatic device registration and management",
+        "features": [
+          "MAC address tracking",
+          "Device limit enforcement (1 device per user by default)",
+          "Automatic device activation/deactivation",
+          "Device naming and identification"
+        ]
+      }
+    },
+
+    "payment_flow": {
+      "description": "Complete payment process from initiation to internet access",
+      "steps": [
+        {
+          "step": 1,
+          "action": "User submits phone number",
+          "api": "/initiate-payment/",
+          "result": "Payment initiated, USSD sent to phone"
+        },
+        {
+          "step": 2,
+          "action": "User completes USSD payment",
+          "api": "External (ClickPesa)",
+          "result": "Payment processed by mobile money provider"
+        },
+        {
+          "step": 3,
+          "action": "ClickPesa sends webhook",
+          "api": "/clickpesa-webhook/",
+          "result": "Payment marked as completed, access granted"
+        },
+        {
+          "step": 4,
+          "action": "User requests verification",
+          "api": "/verify/",
+          "result": "User connected to internet via MikroTik"
+        }
+      ]
+    },
+
+    "voucher_flow": {
+      "description": "Complete voucher redemption process",
+      "steps": [
+        {
+          "step": 1,
+          "action": "Admin generates vouchers",
+          "api": "/generate-vouchers/",
+          "result": "Voucher codes created and sent via SMS"
+        },
+        {
+          "step": 2,
+          "action": "User redeems voucher code",
+          "api": "/vouchers/redeem/",
+          "result": "Voucher validated, access granted, user connected"
+        },
+        {
+          "step": 3,
+          "action": "Automatic internet connection",
+          "api": "Internal MikroTik integration",
+          "result": "User gets immediate internet access"
+        }
+      ]
+    },
+
+    "error_handling": {
+      "common_errors": {
+        "invalid_phone": {
+          "status_code": 400,
+          "message": "Invalid phone number: Must be a valid Tanzanian mobile number",
+          "solution": "Use correct Tanzanian mobile format"
+        },
+        "user_not_found": {
+          "status_code": 404,
+          "message": "User not found. Please register and pay to access Wi-Fi.",
+          "solution": "Make payment or redeem voucher to create account"
+        },
+        "access_expired": {
+          "status_code": 200,
+          "access_granted": false,
+          "denial_reason": "Access expired X hours ago",
+          "solution": "Renew access by payment or voucher"
+        },
+        "device_limit": {
+          "status_code": 200,
+          "access_granted": false,
+          "denial_reason": "Device limit exceeded (1/1 devices active)",
+          "solution": "Disconnect other device or contact admin"
+        }
+      }
+    },
+
+    "frontend_integration": {
+      "captive_portal_flow": {
+        "description": "How to integrate with captive portal on user devices",
+        "steps": [
+          {
+            "step": 1,
+            "description": "Capture user's MAC address and IP",
+            "code_example": "navigator.mediaDevices.getUserMedia() or DHCP detection"
+          },
+          {
+            "step": 2,
+            "description": "Show phone number input form",
+            "validation": "Accept any format (+255, 255, 0 prefix)"
+          },
+          {
+            "step": 3,
+            "description": "Call verify_access API",
+            "handle_response": "If access_granted=true, show success. If false, show payment/voucher options"
+          },
+          {
+            "step": 4,
+            "description": "For payment: call initiate_payment API",
+            "user_action": "User completes USSD payment on phone"
+          },
+          {
+            "step": 5,
+            "description": "For voucher: call redeem_voucher API",
+            "user_action": "User enters voucher code"
+          },
+          {
+            "step": 6,
+            "description": "Poll verify_access until access_granted=true",
+            "interval": "Check every 5-10 seconds after payment/voucher"
+          }
+        ]
+      },
+
+      "javascript_examples": {
+        "verify_access": `
+// Check if user has internet access
+async function verifyAccess(phoneNumber, macAddress, ipAddress) {
+  const response = await fetch('/api/verify/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      phone_number: phoneNumber, // Any format: +255, 255, or 0
+      mac_address: macAddress,   // Optional but recommended
+      ip_address: ipAddress      // Optional, auto-detected
+    })
+  });
+  
+  const data = await response.json();
+  
+  if (data.access_granted) {
+    // User has access and is automatically connected to internet
+    showSuccessMessage('Connected to internet!');
+    if (data.mikrotik_connection.success) {
+      showConnectionStatus('Internet access granted');
+    }
+  } else {
+    // Show payment or voucher options
+    showAccessDeniedMessage(data.denial_reason);
+    showPaymentOptions();
+  }
+  
+  return data;
+}`,
+
+        "initiate_payment": `
+// Start payment process
+async function initiatePayment(phoneNumber, bundleId, macAddress, ipAddress) {
+  const response = await fetch('/api/initiate-payment/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      phone_number: phoneNumber,
+      bundle_id: bundleId,
+      mac_address: macAddress,
+      ip_address: ipAddress
+    })
+  });
+  
+  const data = await response.json();
+  
+  if (data.success) {
+    // Show USSD instructions
+    showPaymentInstructions(data.message, data.order_reference);
+    
+    // Start polling for payment completion
+    pollPaymentStatus(data.order_reference, phoneNumber, macAddress, ipAddress);
+  } else {
+    showErrorMessage(data.message);
+  }
+  
+  return data;
+}`,
+
+        "redeem_voucher": `
+// Redeem voucher code
+async function redeemVoucher(voucherCode, phoneNumber, macAddress, ipAddress) {
+  const response = await fetch('/api/vouchers/redeem/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      voucher_code: voucherCode,
+      phone_number: phoneNumber,
+      mac_address: macAddress,
+      ip_address: ipAddress
+    })
+  });
+  
+  const data = await response.json();
+  
+  if (data.success) {
+    showSuccessMessage(data.message);
+    
+    // Check if automatically connected
+    if (data.mikrotik_connection && data.mikrotik_connection.success) {
+      showConnectionStatus('Connected to internet!');
+    } else {
+      // Manually verify access
+      verifyAccess(phoneNumber, macAddress, ipAddress);
+    }
+  } else {
+    showErrorMessage(data.message);
+  }
+  
+  return data;
+}`,
+
+        "poll_payment_status": `
+// Poll for payment completion after USSD payment
+function pollPaymentStatus(orderReference, phoneNumber, macAddress, ipAddress) {
+  const pollInterval = setInterval(async () => {
+    try {
+      // Check access status instead of payment status for immediate response
+      const accessData = await verifyAccess(phoneNumber, macAddress, ipAddress);
+      
+      if (accessData.access_granted) {
+        clearInterval(pollInterval);
+        showSuccessMessage('Payment completed! You are now connected to internet.');
+      }
+      
+      // Stop polling after 5 minutes
+      setTimeout(() => clearInterval(pollInterval), 300000);
+    } catch (error) {
+      console.error('Polling error:', error);
+    }
+  }, 10000); // Poll every 10 seconds
+}`
+      }
+    },
+
+    "admin_endpoints": {
+      "description": "Admin-only endpoints requiring token authentication",
+      "authentication": "Header: Authorization: Token <admin_token>",
+      "endpoints": {
+        "generate_vouchers": "/generate-vouchers/",
+        "list_users": "/users/",
+        "list_payments": "/payments/",
+        "mikrotik_management": "/mikrotik/",
+        "system_status": "/system/status/"
+      }
+    },
+
+    "webhooks": {
+      "clickpesa_webhook": {
+        "url": "/clickpesa-webhook/",
+        "method": "POST",
+        "description": "Receives payment notifications from ClickPesa",
+        "automatic_actions": [
+          "Payment status update",
+          "User access extension",
+          "Automatic MikroTik connection",
+          "Webhook logging"
+        ],
+        "security": "IP whitelisting and signature verification"
+      }
+    },
+
+    "testing": {
+      "test_numbers": {
+        "description": "Use these for testing (won't charge real money)",
+        "payment_test": "255000000000",
+        "voucher_test": "Use generated test vouchers",
+        "existing_user": "255772236727"
+      },
+      "test_vouchers": {
+        "generate": "Use admin panel to generate test vouchers",
+        "format": "XXXX-XXXX-XXXX",
+        "example": "H7SQ-V5XB-HOK2"
+      }
+    }
+  }
+}

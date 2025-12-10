@@ -167,10 +167,10 @@ def grant_user_access(username: str, mac_address: Optional[str] = None, password
         password = username  # simple fallback
     try:
         # Use the hotspot-aware user creation
-        user_ok = create_hotspot_user_with_server(username, password, profile)
+        user_ok = create_hotspot_user(username, password, profile)
         result['user_created'] = user_ok
     except Exception as e:
-        logger.error(f'grant_user_access: create_hotspot_user_with_server failed for {username}: {e}')
+        logger.error(f'grant_user_access: create_hotspot_user failed for {username}: {e}')
         result['errors'].append(f'user:{e}')
     if mac_address:
         try:
@@ -590,7 +590,7 @@ def trigger_immediate_hotspot_login(phone_number, mac_address, ip_address):
         }
     except Exception as e:
         logger.error(f'trigger_immediate_hotspot_login error for {phone_number}: {e}')
-        return {'success': False, 'message': str(e), 'method': 'error', 'device_tracked': False}
+        return {'success': False, 'message': str(e)}
 
 
 def track_device_connection(phone_number, mac_address, ip_address, connection_type='wifi', access_method='unknown'):
@@ -701,136 +701,171 @@ def enhance_device_tracking_for_voucher(voucher_user, mac_address, ip_address):
         if not mac_address:
             logger.warning(f'Voucher device tracking: No MAC address provided for {voucher_user.phone_number}')
             return {'success': False, 'message': 'No MAC address provided', 'device_tracked': False}
-        result = track_device_connection(voucher_user.phone_number, mac_address, ip_address, connection_type='wifi', access_method='voucher')
+        
+        result = track_device_connection(
+            voucher_user.phone_number, 
+            mac_address, 
+            ip_address, 
+            connection_type='wifi', 
+            access_method='voucher'
+        )
+        
         if result['success']:
             logger.info(f'Voucher device tracking successful for {voucher_user.phone_number}: {mac_address}')
         else:
             logger.warning(f'Voucher device tracking failed for {voucher_user.phone_number}: {result["message"]}')
+            
         return result
     except Exception as e:
         logger.error(f'Error in voucher device tracking for {voucher_user.phone_number}: {e}')
         return {'success': False, 'message': f'Voucher device tracking error: {e}', 'device_tracked': False}
 
 
-def list_interfaces() -> dict:
-    """List MikroTik interfaces and return details suitable for printing."""
-    api = None
-    try:
-        api = get_mikrotik_api()
-        res = api.get_resource('/interface')
-        items = res.get()
-        data = []
-        for it in items:
-            data.append({
-                'name': it.get('name'),
-                'type': it.get('type'),
-                'mac_address': it.get('mac-address'),
-                'mtu': it.get('mtu'),
-                'running': it.get('running'),
-                'disabled': it.get('disabled'),
-            })
-        return {'success': True, 'data': data}
-    except Exception as e:
-        logger.error(f'list_interfaces error: {e}')
-        return {'success': False, 'error': str(e)}
-    finally:
-        safe_close(api)
-
-
-def get_hotspot_interfaces() -> dict:
-    """List hotspot interfaces from /ip/hotspot."""
-    api = None
-    try:
-        api = get_mikrotik_api()
-        res = api.get_resource('/ip/hotspot')
-        items = res.get()
-        data = []
-        for item in items:
-            data.append({
-                'name': item.get('name'),
-                'interface': item.get('interface'),
-                'address_pool': item.get('address-pool'),
-                'profile': item.get('profile'),
-                'idle_timeout': item.get('idle-timeout'),
-                'disabled': item.get('disabled'),
-            })
-        return {'success': True, 'data': data}
-    except Exception as e:
-        logger.error(f'get_hotspot_interfaces error: {e}')
-        return {'success': False, 'error': str(e)}
-    finally:
-        safe_close(api)
-
-
-def get_hotspot_active_users_by_interface(hotspot_name: str = None) -> dict:
-    """Get active users for a specific hotspot interface."""
-    if not hotspot_name:
-        hotspot_name = getattr(settings, 'MIKROTIK_HOTSPOT_NAME', 'hotspot1')
+def create_hotspot_user_and_login(username: str, mac_address: str = None, ip_address: str = None, password: str = None, profile: Optional[str] = None) -> dict:
+    """
+    Complete auto-login process: Create hotspot user + IP binding + immediate access
     
-    api = None
-    try:
-        api = get_mikrotik_api()
-        active = api.get_resource('/ip/hotspot/active').get()
-        users = []
-        for u in active:
-            # Filter by hotspot server if specified
-            if hotspot_name and u.get('server') != hotspot_name:
-                continue
-            users.append({
-                'user': u.get('user'),
-                'server': u.get('server'),
-                'address': u.get('address'),
-                'mac_address': u.get('mac-address'),
-                'uptime': u.get('uptime'),
-                'session_time_left': u.get('session-time-left'),
-                'bytes_in': u.get('bytes-in'),
-                'bytes_out': u.get('bytes-out')
-            })
-        return {'success': True, 'data': users, 'hotspot': hotspot_name}
-    except Exception as e:
-        logger.error(f'Error getting active users for hotspot {hotspot_name}: {e}')
-        return {'success': False, 'error': str(e), 'hotspot': hotspot_name}
-    finally:
-        safe_close(api)
-
-
-def create_hotspot_user_with_server(username: str, password: str, profile: Optional[str] = None, server: str = None) -> bool:
-    """Create or update /ip/hotspot/user entry with specific server."""
+    This function implements the full flow:
+    1. Create/update hotspot user
+    2. Add IP binding bypass for MAC address (if provided)
+    3. Return comprehensive result for auto-login
+    """
     if not username:
-        return False
+        return {'success': False, 'message': 'Username required', 'user_created': False, 'ip_binding_created': False}
     
-    api = get_mikrotik_api()
+    password = password or username
+    result = {'user_created': False, 'ip_binding_created': False, 'errors': []}
+    
     try:
-        profile = profile or getattr(settings, 'MIKROTIK_DEFAULT_PROFILE', 'default')
-        server = server or getattr(settings, 'MIKROTIK_HOTSPOT_NAME', 'hotspot1')
+        # Step 1: Create hotspot user
+        user_created = create_hotspot_user(username, password, profile)
+        result['user_created'] = user_created
         
-        users = api.get_resource('/ip/hotspot/user')
-        exist = users.get(name=username)
+        if not user_created:
+            result['errors'].append('Failed to create hotspot user')
+        else:
+            logger.info(f'Hotspot user created for auto-login: {username}')
         
-        if exist:
-            for item in exist:
-                if '.id' in item:
-                    users.set(id=item['.id'], password=password, profile=profile, server=server, disabled='no')
-            logger.info(f'Updated hotspot user {username} on server {server}')
-            return True
+        # Step 2: Create IP binding bypass if MAC address provided
+        if mac_address:
+            binding_created = allow_mac(mac_address, comment=f'Auto-login: {username}')
+            result['ip_binding_created'] = binding_created
+            
+            if not binding_created:
+                result['errors'].append('Failed to create IP binding bypass')
+            else:
+                logger.info(f'IP binding bypass created for auto-login: {mac_address} -> {username}')
+        else:
+            # No MAC address, but user can still login manually
+            result['ip_binding_created'] = True  # Not needed
+            logger.info(f'Hotspot user created without IP binding (no MAC): {username}')
         
-        users.add(name=username, password=password, profile=profile, server=server, disabled='no')
-        logger.info(f'Created hotspot user {username} on server {server}')
-        return True
+        # Overall success if user created (IP binding is optional)
+        result['success'] = result['user_created']
+        
+        if result['success']:
+            result['message'] = 'Auto-login setup completed'
+            logger.info(f'Auto-login setup successful for {username}: user={user_created}, binding={result["ip_binding_created"]}')
+        else:
+            result['message'] = 'Auto-login setup failed: ' + ', '.join(result['errors'])
+            logger.error(f'Auto-login setup failed for {username}: {result["errors"]}')
+        
+        return result
+        
     except Exception as e:
-        logger.error(f'create_hotspot_user_with_server failed for {username}: {e}')
-        return False
-    finally:
-        safe_close(api)
+        logger.error(f'create_hotspot_user_and_login failed for {username}: {e}')
+        return {
+            'success': False,
+            'message': f'Auto-login setup error: {e}',
+            'user_created': False,
+            'ip_binding_created': False,
+            'errors': [str(e)]
+        }
 
 
-# Example usage function for quick manual testing
-def print_interfaces():
-    """Fetch and print interface details to stdout (for ad-hoc testing)."""
-    result = list_interfaces()
-    if result.get('success'):
-        for i, it in enumerate(result['data'], 1):
-            print(f"{i}. {it['name']}\tType: {it.get('type')}\tMAC: {it.get('mac_address')}\tRunning: {it.get('running')}\tDisabled: {it.get('disabled')}")
-    else:
-        print('Failed to list interfaces:', result.get('error'))
+def force_immediate_internet_access(username: str, mac_address: str, ip_address: str, access_type: str = 'payment') -> dict:
+    """
+    Force immediate internet access after payment/voucher redemption
+    
+    This is the comprehensive auto-login function that:
+    1. Creates hotspot user
+    2. Creates IP binding bypass 
+    3. Attempts immediate authentication
+    4. Returns detailed status for debugging
+    """
+    try:
+        logger.info(f'Starting force_immediate_internet_access for {username} (MAC: {mac_address}, Type: {access_type})')
+        
+        # Create complete auto-login setup
+        auto_login_result = create_hotspot_user_and_login(
+            username=username,
+            mac_address=mac_address,
+            ip_address=ip_address,
+            password=username
+        )
+        
+        if auto_login_result['success']:
+            logger.info(f'✓ Auto-login setup completed for {username} - hotspot user + IP binding created')
+            
+            # Additional verification - check if hotspot user exists
+            try:
+                api = get_mikrotik_api()
+                users = api.get_resource('/ip/hotspot/user')
+                existing_user = users.get(name=username)
+                
+                if existing_user:
+                    logger.info(f'✓ Verified hotspot user exists for {username}')
+                    hotspot_user_verified = True
+                else:
+                    logger.warning(f'⚠ Hotspot user not found after creation for {username}')
+                    hotspot_user_verified = False
+                    
+                safe_close(api)
+                
+            except Exception as verify_error:
+                logger.error(f'Error verifying hotspot user for {username}: {verify_error}')
+                hotspot_user_verified = False
+            
+            return {
+                'success': True,
+                'message': 'Immediate internet access granted',
+                'username': username,
+                'mac_address': mac_address,
+                'ip_address': ip_address,
+                'access_type': access_type,
+                'hotspot_user_created': auto_login_result['user_created'],
+                'ip_binding_created': auto_login_result['ip_binding_created'],
+                'hotspot_user_verified': hotspot_user_verified,
+                'instructions': [
+                    'Device should now have immediate internet access',
+                    'If not working, disconnect and reconnect to WiFi',
+                    'Browser should automatically redirect or grant access'
+                ]
+            }
+        else:
+            logger.error(f'✗ Auto-login setup failed for {username}: {auto_login_result["message"]}')
+            return {
+                'success': False,
+                'message': f'Failed to grant immediate access: {auto_login_result["message"]}',
+                'username': username,
+                'mac_address': mac_address,
+                'access_type': access_type,
+                'errors': auto_login_result.get('errors', []),
+                'instructions': [
+                    'Auto-login failed - user will need to manually authenticate',
+                    'Connect to WiFi and open browser',
+                    'Enter phone number when prompted'
+                ]
+            }
+            
+    except Exception as e:
+        logger.error(f'force_immediate_internet_access failed for {username}: {e}')
+        return {
+            'success': False,
+            'message': f'Immediate access setup error: {e}',
+            'username': username,
+            'mac_address': mac_address,
+            'access_type': access_type,
+            'errors': [str(e)]
+        }
 

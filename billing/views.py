@@ -39,11 +39,109 @@ from .mikrotik import (
     enhance_device_tracking_for_voucher,
     grant_user_access,
     revoke_user_access,
-    trigger_immediate_hotspot_login
+    trigger_immediate_hotspot_login,
+    force_immediate_internet_access,
+    create_hotspot_user_and_login
 )
 import ipaddress
 
 logger = logging.getLogger(__name__)
+
+
+def get_client_ip(request):
+    """
+    Extract the real client IP address from request headers
+    Handles proxy headers like X-Forwarded-For, X-Real-IP, etc.
+    """
+    # Check for common proxy headers in order of preference
+    proxy_headers = [
+        'HTTP_X_FORWARDED_FOR',
+        'HTTP_X_REAL_IP', 
+        'HTTP_X_FORWARDED',
+        'HTTP_X_CLUSTER_CLIENT_IP',
+        'HTTP_FORWARDED_FOR',
+        'HTTP_FORWARDED',
+        'REMOTE_ADDR'
+    ]
+    
+    for header in proxy_headers:
+        ip = request.META.get(header)
+        if ip:
+            # X-Forwarded-For can contain multiple IPs separated by commas
+            # The first IP is usually the original client IP
+            if ',' in ip:
+                ip = ip.split(',')[0].strip()
+            
+            # Basic validation - check if it's a valid IP format
+            try:
+                ipaddress.ip_address(ip)
+                # Prefer non-local IPs unless it's our only option
+                if ip != '127.0.0.1' and not ip.startswith('192.168.') and not ip.startswith('10.'):
+                    return ip
+                elif header == 'REMOTE_ADDR':
+                    # If this is the last resort, return it even if it's private/local
+                    return ip
+            except ValueError:
+                # Invalid IP format, continue to next header
+                continue
+    
+    # Final fallback
+    return '127.0.0.1'
+
+
+def get_user_agent(request):
+    """
+    Extract user agent string for device tracking
+    """
+    return request.META.get('HTTP_USER_AGENT', 'Unknown')
+
+
+def get_mac_address_from_request(request):
+    """
+    Extract MAC address from request data with validation
+    """
+    mac_address = ''
+    
+    # Try different possible sources
+    if hasattr(request, 'data') and request.data:
+        mac_address = request.data.get('mac_address', '')
+    elif hasattr(request, 'POST') and request.POST:
+        mac_address = request.POST.get('mac_address', '')
+    elif hasattr(request, 'GET') and request.GET:
+        mac_address = request.GET.get('mac_address', '')
+    
+    # Basic MAC address validation (simplified)
+    if mac_address:
+        mac_address = mac_address.strip().upper()
+        # Basic format check (XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX)
+        if len(mac_address) == 17 and ((':' in mac_address) or ('-' in mac_address)):
+            return mac_address.replace('-', ':')  # Normalize to colon format
+    
+    return ''
+
+
+def get_request_info(request, serializer_data=None):
+    """
+    Extract comprehensive request information including IP, MAC, and user agent
+    """
+    # Get IP address using improved extraction
+    ip_address = get_client_ip(request)
+    
+    # Get MAC address from request data or serializer
+    mac_address = ''
+    if serializer_data and 'mac_address' in serializer_data:
+        mac_address = serializer_data.get('mac_address', '')
+    else:
+        mac_address = get_mac_address_from_request(request)
+    
+    # Get user agent
+    user_agent = get_user_agent(request)
+    
+    return {
+        'ip_address': ip_address,
+        'mac_address': mac_address,
+        'user_agent': user_agent
+    }
 
 
 # Health Check API
@@ -1427,12 +1525,13 @@ def mikrotik_disconnect_user(request):
         result = logout_user_from_mikrotik(username)
         
         if result:
-            # Log the disconnection
+            # Log the disconnection with proper IP extraction
             try:
+                request_info = get_request_info(request)
                 user = User.objects.get(phone_number=username)
                 AccessLog.objects.create(
                     user=user,
-                    ip_address=request.META.get('REMOTE_ADDR', '127.0.0.1'),
+                    ip_address=request_info['ip_address'],
                     mac_address='',
                     access_granted=False,
                     denial_reason=f'Disconnected by admin user: {request.user.username if request.user.is_authenticated else "Unknown"}'
@@ -1475,14 +1574,15 @@ def mikrotik_disconnect_all_users(request):
         result = disconnect_all_hotspot_users()
         
         if result['success']:
-            # Log the mass disconnection (using system user if available)
+            # Log the mass disconnection with proper IP extraction
             try:
+                request_info = get_request_info(request)
                 # Try to create admin log without user reference
                 from django.contrib.auth.models import User as AuthUser
                 admin_user = request.user if request.user.is_authenticated else None
                 AccessLog.objects.create(
                     user=admin_user if isinstance(admin_user, User) else None,
-                    ip_address=request.META.get('REMOTE_ADDR', '127.0.0.1'),
+                    ip_address=request_info['ip_address'],
                     mac_address='ADMIN_ACTION',
                     access_granted=False,
                     denial_reason=f'All users disconnected by admin: {request.user.username if request.user.is_authenticated else "Unknown"}'
@@ -1534,13 +1634,14 @@ def mikrotik_reboot_router(request):
         result = reboot_router()
         
         if result['success']:
-            # Log the reboot (skip logging if it fails)
+            # Log the reboot with proper IP extraction
             try:
+                request_info = get_request_info(request)
                 from django.contrib.auth.models import User as AuthUser
                 admin_user = request.user if request.user.is_authenticated else None
                 AccessLog.objects.create(
                     user=admin_user if isinstance(admin_user, User) else None,
-                    ip_address=request.META.get('REMOTE_ADDR', '127.0.0.1'),
+                    ip_address=request_info['ip_address'],
                     mac_address='ADMIN_ACTION',
                     access_granted=False,
                     denial_reason=f'Router reboot initiated by admin: {request.user.username if request.user.is_authenticated else "Unknown"}'
@@ -1710,15 +1811,23 @@ def verify_access(request):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     phone_number = serializer.validated_data['phone_number']
-    ip_address = serializer.validated_data.get('ip_address', request.META.get('REMOTE_ADDR'))
-    mac_address = serializer.validated_data.get('mac_address', '')
+    
+    # Use improved IP and MAC extraction
+    request_info = get_request_info(request, serializer.validated_data)
+    ip_address = request_info['ip_address']
+    mac_address = request_info['mac_address']
+    user_agent = request_info['user_agent']
     
     try:
         # Find user with normalized phone number
         from .utils import find_user_by_phone
         user = find_user_by_phone(phone_number)
         
+        # Log the access attempt with real user info for debugging
+        logger.info(f'Access verification request: phone={phone_number}, ip={ip_address}, mac={mac_address}, user_agent={user_agent[:50]}...')
+        
         if not user:
+            logger.warning(f'User not found during access verification: phone={phone_number}, ip={ip_address}, mac={mac_address}')
             return Response({
                 'access_granted': False,
                 'message': 'User not found. Please register and pay to access Wi-Fi.',
@@ -1913,11 +2022,13 @@ def verify_access(request):
                 logger.error(f'✗ Error disconnecting {phone_number} from MikroTik: {str(e)}')
         
         # Log access attempt with enhanced information
+        logger.info(f'Creating AccessLog: user={user.phone_number}, ip={ip_address}, mac={mac_address}, access_granted={has_access}, device={device.device_name if device else "None"}')
+        
         AccessLog.objects.create(
             user=user,
             device=device,
-            ip_address=ip_address or '127.0.0.1',
-            mac_address=mac_address,
+            ip_address=ip_address,  # Now guaranteed to have a valid IP
+            mac_address=mac_address or '',  # Ensure we log empty string instead of None
             access_granted=has_access,
             denial_reason=denial_reason
         )
@@ -1950,7 +2061,9 @@ def verify_access(request):
                 'paid_until': user.paid_until.isoformat() if user.paid_until else None,
                 'is_active': user.is_active,
                 'device_count': user.devices.filter(is_active=True).count(),
-                'max_devices': user.max_devices
+                'max_devices': user.max_devices,
+                'client_ip': ip_address,  # Show the detected client IP
+                'user_agent_snippet': user_agent[:50] if user_agent != 'Unknown' else 'Unknown'
             }
         }
         
@@ -1977,9 +2090,11 @@ def initiate_payment(request):
     phone_number = serializer.validated_data['phone_number']
     bundle_id = serializer.validated_data.get('bundle_id')
     
-    # Optional device information for immediate access after payment
-    ip_address = request.data.get('ip_address', request.META.get('REMOTE_ADDR'))
-    mac_address = request.data.get('mac_address', '')
+    # Extract comprehensive request information  
+    request_info = get_request_info(request, serializer.validated_data)
+    ip_address = request_info['ip_address']
+    mac_address = request_info['mac_address']
+    user_agent = request_info['user_agent']
     
     # Get or create user with normalized phone number
     from .utils import get_or_create_user
@@ -2006,7 +2121,7 @@ def initiate_payment(request):
             device_tracking_result = enhance_device_tracking_for_payment(
                 payment_user=user,
                 mac_address=mac_address,
-                ip_address=ip_address or '127.0.0.1'
+                ip_address=ip_address
             )
             
             if device_tracking_result['success']:
@@ -2132,7 +2247,9 @@ def clickpesa_webhook(request):
             except ValueError:
                 amount = None
         
-        # Create webhook log entry
+        # Create webhook log entry with improved IP extraction
+        request_info = get_request_info(request)
+        
         from .models import PaymentWebhook
         webhook_log = PaymentWebhook.objects.create(
             event_type=event_type if event_type in dict(PaymentWebhook.WEBHOOK_EVENT_CHOICES) else 'OTHER',
@@ -2142,8 +2259,8 @@ def clickpesa_webhook(request):
             channel=channel or '',
             amount=amount,
             raw_payload=webhook_data,
-            source_ip=request.META.get('REMOTE_ADDR'),
-            user_agent=request.META.get('HTTP_USER_AGENT', '')
+            source_ip=request_info['ip_address'],
+            user_agent=request_info['user_agent']
         )
         
         if not order_reference:
@@ -2177,8 +2294,6 @@ def clickpesa_webhook(request):
                 mikrotik_auth_result = None
                 connection_success = False
                 try:
-                    from .mikrotik import grant_user_access, enhance_device_tracking_for_payment
-                    
                     # Get user and their devices
                     user = payment.user
                     devices = user.devices.filter(is_active=True)
@@ -2194,36 +2309,35 @@ def clickpesa_webhook(request):
                                     ip_address=device.ip_address
                                 )
                                 
-                                # Grant immediate access via MikroTik (creates/updates hotspot user + bypasses MAC)
-                                mikrotik_result = grant_user_access(
+                                # Grant immediate access via MikroTik (creates hotspot user + IP binding)
+                                auto_access_result = force_immediate_internet_access(
                                     username=payment.phone_number,
                                     mac_address=device.mac_address,
-                                    password=payment.phone_number,
-                                    comment=f'Payment {payment.order_reference}'
+                                    ip_address=device.ip_address,
+                                    access_type='payment'
                                 )
                                 
-                                if mikrotik_result.get('success'):
+                                if auto_access_result.get('success'):
                                     connection_success = True
-                                    logger.info(f'✓ Automatically connected {payment.phone_number} to internet via device {device.mac_address}')
+                                    logger.info(f'✓ Auto-login successful for {payment.phone_number} via device {device.mac_address}')
                                 else:
-                                    logger.warning(f'Failed to auto-connect device {device.mac_address} for {payment.phone_number}: {mikrotik_result}')
+                                    logger.warning(f'Auto-login failed for device {device.mac_address} for {payment.phone_number}: {auto_access_result}')
                                     
                             except Exception as device_error:
-                                logger.error(f'Error auto-connecting device {device.mac_address} for {payment.phone_number}: {str(device_error)}')
+                                logger.error(f'Error during auto-login for device {device.mac_address} for {payment.phone_number}: {str(device_error)}')
                         
                         mikrotik_auth_result = {'success': connection_success}
                     else:
-                        # No devices yet, create hotspot user so they can connect
-                        mikrotik_result = grant_user_access(
+                        # No devices yet, create hotspot user so they can connect immediately when they join WiFi
+                        auto_access_result = create_hotspot_user_and_login(
                             username=payment.phone_number,
-                            password=payment.phone_number,
-                            comment=f'Payment {payment.order_reference}'
+                            password=payment.phone_number
                         )
-                        mikrotik_auth_result = mikrotik_result
-                        logger.info(f'No active devices for {payment.phone_number} - created hotspot user for future connection')
+                        mikrotik_auth_result = auto_access_result
+                        logger.info(f'No active devices for {payment.phone_number} - created hotspot user for immediate connection')
                         
                 except Exception as e:
-                    logger.error(f'MikroTik auto-connection failed after payment for {payment.phone_number}: {str(e)}')
+                    logger.error(f'MikroTik auto-login failed after payment for {payment.phone_number}: {str(e)}')
                     mikrotik_auth_result = {'success': False, 'error': str(e)}
                 
                 from .nextsms import NextSMSAPI
@@ -2471,9 +2585,12 @@ def redeem_voucher(request):
     
     voucher_code = serializer.validated_data['voucher_code']
     phone_number = serializer.validated_data['phone_number']
-    # Optional device information for immediate access
-    ip_address = request.data.get('ip_address', request.META.get('REMOTE_ADDR'))
-    mac_address = request.data.get('mac_address', '')
+    
+    # Extract comprehensive request information
+    request_info = get_request_info(request, serializer.validated_data)
+    ip_address = request_info['ip_address']
+    mac_address = request_info['mac_address']
+    user_agent = request_info['user_agent']
     
     try:
         voucher = Voucher.objects.get(code=voucher_code)
@@ -2645,40 +2762,38 @@ def redeem_voucher(request):
                 
                 # AUTOMATIC CONNECTION: Try to authenticate with MikroTik immediately after successful voucher redemption
                 try:
-                    from .mikrotik import grant_user_access, trigger_immediate_hotspot_login
-                    
-                    # Grant immediate internet access using the new unified method
-                    if mac_address and ip_address:
+                    # Grant immediate internet access using the new comprehensive method
+                    if mac_address and ip_address and device_info.get('device_registered'):
                         try:
-                            # Directly grant access (creates/updates hotspot user + bypasses MAC)
-                            access_result = grant_user_access(
+                            # Use the comprehensive auto-login function for immediate access
+                            auto_access_result = force_immediate_internet_access(
                                 username=phone_number,
                                 mac_address=mac_address,
-                                password=phone_number,
-                                comment=f'Voucher {voucher_code}'
+                                ip_address=ip_address,
+                                access_type='voucher'
                             )
                             
-                            mikrotik_auth_result = access_result.get('success', False)
+                            mikrotik_auth_result = auto_access_result.get('success', False)
                             immediate_login_success = mikrotik_auth_result
                             
                             if immediate_login_success:
-                                logger.info(f'✓ Automatically connected {phone_number} to internet via voucher redemption - device: {mac_address}')
+                                logger.info(f'✓ Auto-login successful for voucher user {phone_number} - device: {mac_address}')
                             else:
-                                logger.warning(f'Failed to auto-connect {phone_number} after voucher redemption: {access_result}')
+                                logger.warning(f'Auto-login failed for voucher user {phone_number}: {auto_access_result.get("message")}')
                                 
                         except Exception as login_error:
-                            logger.error(f'Error during immediate connection for {phone_number}: {str(login_error)}')
+                            logger.error(f'Error during auto-login for voucher user {phone_number}: {str(login_error)}')
                             mikrotik_auth_result = False
                             immediate_login_success = False
                     else:
-                        # No MAC/IP provided, just create hotspot user for future connection
-                        access_result = grant_user_access(
+                        # No MAC/IP provided or device registration failed, create hotspot user for manual connection
+                        hotspot_user_result = create_hotspot_user_and_login(
                             username=phone_number,
-                            password=phone_number,
-                            comment=f'Voucher {voucher_code}'
+                            password=phone_number
                         )
-                        mikrotik_auth_result = access_result.get('success', False)
+                        mikrotik_auth_result = hotspot_user_result.get('success', False)
                         immediate_login_success = False
+                        logger.info(f'Created hotspot user for voucher user {phone_number} - will connect when they join WiFi')
                         logger.info(f'Created hotspot user for {phone_number} - will connect when they join WiFi')
                     
                     mikrotik_integration_info = {
@@ -3798,10 +3913,11 @@ def force_user_logout(request):
         # Deactivate all user devices
         user.devices.update(is_active=False)
         
-        # Log the forced logout
+        # Log the forced logout with proper IP extraction
+        request_info = get_request_info(request)
         AccessLog.objects.create(
             user=user,
-            ip_address=request.META.get('REMOTE_ADDR', '127.0.0.1'),
+            ip_address=request_info['ip_address'],
             mac_address='ADMIN_ACTION',
             access_granted=False,
             denial_reason='Admin forced logout'
@@ -3835,7 +3951,12 @@ def test_voucher_access(request):
     """
     phone_number = request.data.get('phone_number')
     mac_address = request.data.get('mac_address', '')
-    ip_address = request.data.get('ip_address', request.META.get('REMOTE_ADDR', '127.0.0.1'))
+    
+    # Extract comprehensive request information
+    request_info = get_request_info(request, request.data)
+    ip_address = request_info['ip_address']
+    mac_address = request_info['mac_address'] or mac_address
+    user_agent = request_info['user_agent']
     
     if not phone_number:
         return Response({
@@ -3980,7 +4101,12 @@ def trigger_device_authentication(request):
     """
     phone_number = request.data.get('phone_number')
     mac_address = request.data.get('mac_address', '')
-    ip_address = request.data.get('ip_address', request.META.get('REMOTE_ADDR'))
+    
+    # Extract comprehensive request information
+    request_info = get_request_info(request, request.data)
+    ip_address = request_info['ip_address']
+    mac_address = request_info['mac_address'] or mac_address
+    user_agent = request_info['user_agent']
     
     if not phone_number:
         return Response({

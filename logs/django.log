@@ -1792,3 +1792,9 @@ INFO 2025-12-09 12:32:13,383 basehttp 6803 6243692544 code 400, message Bad requ
 ERROR 2025-12-09 12:32:13,383 basehttp 6803 6243692544 You're accessing the development server over HTTPS, but it only supports HTTP.
 INFO 2025-12-09 12:32:13,385 basehttp 6803 6193213440 code 400, message Bad request version ('JJ\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x063**\x00\x00\x00\x1b\x00\x03\x02\x00\x02\x00')
 ERROR 2025-12-09 12:32:13,385 basehttp 6803 6193213440 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-09 14:35:10,532 views 32022 8753373312 Access denied for 255798123456: Access expired 0 hours ago - payment or voucher required (method: manual, paid_until: 2025-12-09 11:30:10.528127+00:00)
+INFO 2025-12-09 14:35:10,532 views 32022 8753373312 ✗ User 255798123456 has no valid access - disconnecting from MikroTik (Reason: Access expired 0 hours ago - payment or voucher required)
+ERROR 2025-12-09 14:35:25,535 mikrotik 32022 8753373312 revoke_user_access: revoke_mac failed for 99:88:77:66:55:44: timed out
+ERROR 2025-12-09 14:35:40,537 mikrotik 32022 8753373312 revoke_user_access: disable user failed for 255798123456: timed out
+WARNING 2025-12-09 14:35:40,537 views 32022 8753373312 ⚠ Failed to disconnect 255798123456 from MikroTik: Disconnection failed: mac:timed out, user:timed out
+INFO 2025-12-09 14:35:40,539 views 32022 8753373312 User 255798123456 deactivated due to expired access (method was: manual)
