@@ -151,12 +151,12 @@ class RedeemVoucherSerializer(serializers.Serializer):
     mac_address = serializers.CharField(max_length=17, required=False)
     
     def validate_voucher_code(self, value):
-        # Remove spaces and convert to uppercase
-        value = value.replace(' ', '').replace('-', '').upper()
+        # Remove extra spaces and convert to uppercase, but preserve the original format
+        value = value.strip().upper()
         
-        # Add dashes back in correct format
-        if len(value) == 12:
-            value = f"{value[:4]}-{value[4:8]}-{value[8:]}"
+        # Don't modify the voucher code format - use it as provided
+        # Just clean up any extra whitespace
+        value = ' '.join(value.split())
         
         return value
     

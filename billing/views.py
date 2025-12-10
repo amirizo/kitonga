@@ -76,11 +76,12 @@ def get_client_ip(request):
             # Basic validation - check if it's a valid IP format
             try:
                 ipaddress.ip_address(ip)
-                # Prefer non-local IPs unless it's our only option
-                if ip != '127.0.0.1' and not ip.startswith('192.168.') and not ip.startswith('10.'):
+                # For captive portals, 192.168.x.x and 10.x.x.x are valid client IPs
+                # Only reject 127.0.0.1 (localhost) unless it's our last resort
+                if ip != '127.0.0.1':
                     return ip
                 elif header == 'REMOTE_ADDR':
-                    # If this is the last resort, return it even if it's private/local
+                    # If this is the last resort, return it even if it's localhost
                     return ip
             except ValueError:
                 # Invalid IP format, continue to next header
@@ -161,8 +162,23 @@ def get_request_info(request, serializer_data=None):
     Extract comprehensive request information including IP, MAC, and user agent
     Enhanced to prioritize explicitly provided data over auto-detected values
     """
-    # Get IP address using improved extraction
-    ip_address = get_client_ip(request)
+    # Enhanced IP address extraction with priority for explicitly provided data
+    ip_address = '127.0.0.1'  # Default fallback
+    
+    # First priority: explicitly provided IP from serializer (from API calls)
+    if serializer_data and 'ip_address' in serializer_data:
+        provided_ip = serializer_data.get('ip_address', '').strip()
+        if provided_ip:
+            try:
+                ipaddress.ip_address(provided_ip)
+                ip_address = provided_ip
+                logger.info(f'IP address from serializer: {ip_address}')
+            except ValueError:
+                logger.warning(f'Invalid IP address from serializer: {provided_ip}')
+    
+    # Second priority: extract from request headers
+    if ip_address == '127.0.0.1':
+        ip_address = get_client_ip(request)
     
     # Enhanced MAC address extraction with multiple fallback methods
     mac_address = ''
@@ -2745,85 +2761,56 @@ def redeem_voucher(request):
                 except Exception as device_error:
                     logger.error(f'Device tracking error during voucher redemption for {phone_number}: {str(device_error)}')
                     # Fallback to original device registration method
-                    device, device_created = Device.objects.get_or_create(
-                        user=user,
-                        mac_address=mac_address,
-                        defaults={'ip_address': ip_address or '127.0.0.1', 'is_active': True}
-                    )
-                    
-                    if device_created:
-                        active_devices = user.get_active_devices().count()
-                        if active_devices <= user.max_devices:
+                    try:
+                        device, device_created = Device.objects.get_or_create(
+                            user=user,
+                            mac_address=mac_address,
+                            defaults={'ip_address': ip_address or '127.0.0.1', 'is_active': True}
+                        )
+                        
+                        if device_created:
+                            active_devices = user.get_active_devices().count()
+                            if active_devices <= user.max_devices:
+                                device_info = {
+                                    'device_registered': True,
+                                    'device_id': device.id,
+                                    'mac_address': mac_address,
+                                    'device_count': active_devices,
+                                    'max_devices': user.max_devices,
+                                    'fallback_registration': True
+                                }
+                                logger.info(f'Fallback device registration successful for voucher user {phone_number}: {mac_address}')
+                            else:
+                                # Device limit exceeded
+                                device.is_active = False
+                                device.save()
+                                device_info = {
+                                    'device_registered': False,
+                                    'device_limit_exceeded': True,
+                                    'device_count': active_devices,
+                                    'max_devices': user.max_devices,
+                                    'warning': 'Device limit exceeded. Please remove an existing device first.'
+                                }
+                                logger.warning(f'Device limit exceeded for voucher user {phone_number}: {active_devices}/{user.max_devices}')
+                        else:
+                            # Update existing device
+                            device.ip_address = ip_address or device.ip_address
+                            device.is_active = True
+                            device.save()
                             device_info = {
                                 'device_registered': True,
                                 'device_id': device.id,
                                 'mac_address': mac_address,
-                                'device_count': active_devices,
-                                'max_devices': user.max_devices,
+                                'existing_device_updated': True,
                                 'fallback_registration': True
                             }
-                            logger.info(f'Fallback device registration successful for voucher user {phone_number}: {mac_address}')
-                        else:
-                            # Device limit exceeded
-                            device.is_active = False
-                            device.save()
-                            device_info = {
-                                'device_registered': False,
-                                'device_limit_exceeded': True,
-                                'device_count': active_devices,
-                                'max_devices': user.max_devices,
-                                'warning': 'Device limit exceeded. Please remove an existing device first.'
-                            }
-                            logger.warning(f'Device limit exceeded for voucher user {phone_number}: {active_devices}/{user.max_devices}')
-                    else:
-                        # Update existing device
-                        device.ip_address = ip_address or device.ip_address
-                        device.is_active = True
-                        device.save()
-                        device_info = {
-                            'device_registered': True,
-                            'device_id': device.id,
-                            'mac_address': mac_address,
-                            'existing_device_updated': True,
-                            'fallback_registration': True
-                        }
-                        logger.info(f'Fallback device update successful for voucher user {phone_number}: {mac_address}')
-                
-                if device_created:
-                    active_devices = user.get_active_devices().count()
-                    if active_devices <= user.max_devices:
-                        device_info = {
-                            'device_registered': True,
-                            'device_id': device.id,
-                            'mac_address': mac_address,
-                            'device_count': active_devices,
-                            'max_devices': user.max_devices
-                        }
-                        logger.info(f'Registered device {mac_address} for voucher user {phone_number} ({active_devices}/{user.max_devices})')
-                    else:
-                        # Device limit exceeded
-                        device.is_active = False
-                        device.save()
+                            logger.info(f'Fallback device update successful for voucher user {phone_number}: {mac_address}')
+                    except Exception as fallback_error:
+                        logger.error(f'Fallback device registration also failed for voucher user {phone_number}: {str(fallback_error)}')
                         device_info = {
                             'device_registered': False,
-                            'device_limit_exceeded': True,
-                            'device_count': active_devices,
-                            'max_devices': user.max_devices,
-                            'warning': 'Device limit exceeded. Please remove an existing device first.'
+                            'error': f'Device registration failed: {str(fallback_error)}'
                         }
-                        logger.warning(f'Device limit exceeded for voucher user {phone_number}: {active_devices}/{user.max_devices}')
-                else:
-                    # Update existing device
-                    device.ip_address = ip_address or device.ip_address
-                    device.is_active = True
-                    device.save()
-                    device_info = {
-                        'device_registered': True,
-                        'device_id': device.id,
-                        'mac_address': mac_address,
-                        'existing_device_updated': True
-                    }
-                    logger.info(f'Updated existing device {mac_address} for voucher user {phone_number}')
                 
                 # AUTOMATIC CONNECTION: Try to authenticate with MikroTik immediately after successful voucher redemption
                 try:

@@ -1799,3 +1799,92 @@ ERROR 2025-12-09 14:35:40,537 mikrotik 32022 8753373312 revoke_user_access: disa
 WARNING 2025-12-09 14:35:40,537 views 32022 8753373312 ⚠ Failed to disconnect 255798123456 from MikroTik: Disconnection failed: mac:timed out, user:timed out
 INFO 2025-12-09 14:35:40,539 views 32022 8753373312 User 255798123456 deactivated due to expired access (method was: manual)
 INFO 2025-12-10 14:03:42,031 autoreload 7858 8298061952 Watching for file changes with StatReloader
+INFO 2025-12-10 15:46:52,548 views 16314 8298061952 MAC address from serializer: 11:22:33:44:55:66
+INFO 2025-12-10 15:46:52,549 views 16314 8298061952 Request info extracted - IP: 127.0.0.1, MAC: 11:22:33:44:55:66, User-Agent: Test-Browser/1.0...
+WARNING 2025-12-10 15:46:52,549 views 16314 8298061952 Invalid voucher code TEST120906013C attempted by 255787654321
+INFO 2025-12-10 15:46:52,550 views 16314 8298061952 MAC address from serializer: 11:22:33:44:55:66
+INFO 2025-12-10 15:46:52,550 views 16314 8298061952 Request info extracted - IP: 127.0.0.1, MAC: 11:22:33:44:55:66, User-Agent: Test-Browser/1.0...
+INFO 2025-12-10 15:46:52,550 views 16314 8298061952 Access verification request: phone=255787654321, ip=127.0.0.1, mac=11:22:33:44:55:66, user_agent=Test-Browser/1.0...
+WARNING 2025-12-10 15:46:52,550 views 16314 8298061952 User not found during access verification: phone=255787654321, ip=127.0.0.1, mac=11:22:33:44:55:66
+INFO 2025-12-10 15:48:39,928 views 16812 8298061952 IP address from serializer: 192.168.1.200
+INFO 2025-12-10 15:48:39,928 views 16812 8298061952 MAC address from serializer: 11:22:33:44:55:66
+INFO 2025-12-10 15:48:39,928 views 16812 8298061952 Request info extracted - IP: 192.168.1.200, MAC: 11:22:33:44:55:66, User-Agent: Test-Browser/1.0...
+INFO 2025-12-10 15:48:39,930 views 16812 8298061952 Created new user 255787654321 (normalized from 255787654321) via voucher redemption
+INFO 2025-12-10 15:48:39,931 views 16812 8298061952 Voucher TEST-120906-013C redeemed by 255787654321 - access granted for 24 hours
+INFO 2025-12-10 15:48:39,934 mikrotik 16812 8298061952 Voucher device tracking successful for 255787654321: 11:22:33:44:55:66
+INFO 2025-12-10 15:48:39,934 views 16812 8298061952 Enhanced device tracking successful for voucher user 255787654321: 11:22:33:44:55:66
+ERROR 2025-12-10 15:48:39,934 views 16812 8298061952 Error during voucher redemption TEST-120906-013C by 255787654321: cannot access local variable 'device_created' where it is not associated with a value
+INFO 2025-12-10 15:48:39,936 views 16812 8298061952 IP address from serializer: 192.168.1.200
+INFO 2025-12-10 15:48:39,936 views 16812 8298061952 MAC address from serializer: 11:22:33:44:55:66
+INFO 2025-12-10 15:48:39,936 views 16812 8298061952 Request info extracted - IP: 192.168.1.200, MAC: 11:22:33:44:55:66, User-Agent: Test-Browser/1.0...
+INFO 2025-12-10 15:48:39,936 views 16812 8298061952 Access verification request: phone=255787654321, ip=192.168.1.200, mac=11:22:33:44:55:66, user_agent=Test-Browser/1.0...
+INFO 2025-12-10 15:48:39,938 views 16812 8298061952 Device tracking successful for 255787654321: 11:22:33:44:55:66 (method: voucher)
+INFO 2025-12-10 15:48:39,938 views 16812 8298061952 ✓ User 255787654321 has valid access - connecting to MikroTik (MAC: 11:22:33:44:55:66, IP: 192.168.1.200)
+ERROR 2025-12-10 15:48:54,942 mikrotik 16812 8298061952 grant_user_access: create_hotspot_user failed for 255787654321: timed out
+ERROR 2025-12-10 15:49:09,945 mikrotik 16812 8298061952 grant_user_access: allow_mac failed for 11:22:33:44:55:66: timed out
+ERROR 2025-12-10 15:49:09,947 views 16812 8298061952 ✗ Failed to connect 255787654321 to MikroTik: Connection failed: user:timed out, mac:timed out
+INFO 2025-12-10 15:49:09,947 views 16812 8298061952 Creating AccessLog: user=255787654321, ip=192.168.1.200, mac=11:22:33:44:55:66, access_granted=True, device=Device-44:55:66
+INFO 2025-12-10 15:50:13,668 views 16931 8298061952 IP address from serializer: 192.168.1.200
+INFO 2025-12-10 15:50:13,668 views 16931 8298061952 MAC address from serializer: 11:22:33:44:55:66
+INFO 2025-12-10 15:50:13,668 views 16931 8298061952 Request info extracted - IP: 192.168.1.200, MAC: 11:22:33:44:55:66, User-Agent: Test-Browser/1.0...
+INFO 2025-12-10 15:50:13,669 views 16931 8298061952 Found existing user 255787654321 for voucher redemption
+INFO 2025-12-10 15:50:13,671 views 16931 8298061952 Voucher TEST-120716-3E6F redeemed by 255787654321 - access granted for 24 hours
+INFO 2025-12-10 15:50:13,673 mikrotik 16931 8298061952 Voucher device tracking successful for 255787654321: 11:22:33:44:55:66
+INFO 2025-12-10 15:50:13,674 views 16931 8298061952 Enhanced device tracking successful for voucher user 255787654321: 11:22:33:44:55:66
+INFO 2025-12-10 15:50:13,674 mikrotik 16931 8298061952 Starting force_immediate_internet_access for 255787654321 (MAC: 11:22:33:44:55:66, Type: voucher)
+ERROR 2025-12-10 15:50:28,677 mikrotik 16931 8298061952 create_hotspot_user_and_login failed for 255787654321: timed out
+ERROR 2025-12-10 15:50:28,679 mikrotik 16931 8298061952 ✗ Auto-login setup failed for 255787654321: Auto-login setup error: timed out
+WARNING 2025-12-10 15:50:28,679 views 16931 8298061952 Auto-login failed for voucher user 255787654321: Failed to grant immediate access: Auto-login setup error: timed out
+WARNING 2025-12-10 15:50:28,682 views 16931 8298061952 MikroTik integration incomplete for voucher user 255787654321 - user will authenticate on next WiFi connection
+INFO 2025-12-10 15:50:29,836 nextsms 16931 8298061952 SMS sent successfully to 255787654321
+INFO 2025-12-10 15:50:29,848 views 16931 8298061952 IP address from serializer: 192.168.1.200
+INFO 2025-12-10 15:50:29,848 views 16931 8298061952 MAC address from serializer: 11:22:33:44:55:66
+INFO 2025-12-10 15:50:29,849 views 16931 8298061952 Request info extracted - IP: 192.168.1.200, MAC: 11:22:33:44:55:66, User-Agent: Test-Browser/1.0...
+INFO 2025-12-10 15:50:29,849 views 16931 8298061952 Access verification request: phone=255787654321, ip=192.168.1.200, mac=11:22:33:44:55:66, user_agent=Test-Browser/1.0...
+INFO 2025-12-10 15:50:29,856 views 16931 8298061952 Device tracking successful for 255787654321: 11:22:33:44:55:66 (method: voucher)
+INFO 2025-12-10 15:50:29,856 views 16931 8298061952 ✓ User 255787654321 has valid access - connecting to MikroTik (MAC: 11:22:33:44:55:66, IP: 192.168.1.200)
+ERROR 2025-12-10 15:50:44,859 mikrotik 16931 8298061952 grant_user_access: create_hotspot_user failed for 255787654321: timed out
+ERROR 2025-12-10 15:50:59,864 mikrotik 16931 8298061952 grant_user_access: allow_mac failed for 11:22:33:44:55:66: timed out
+ERROR 2025-12-10 15:50:59,866 views 16931 8298061952 ✗ Failed to connect 255787654321 to MikroTik: Connection failed: user:timed out, mac:timed out
+INFO 2025-12-10 15:50:59,866 views 16931 8298061952 Creating AccessLog: user=255787654321, ip=192.168.1.200, mac=11:22:33:44:55:66, access_granted=True, device=Device-44:55:66
+INFO 2025-12-10 15:54:50,892 views 17238 8298061952 IP address from serializer: 192.168.1.150
+INFO 2025-12-10 15:54:50,893 views 17238 8298061952 MAC address from serializer: AA:BB:CC:DD:EE:11
+INFO 2025-12-10 15:54:50,893 views 17238 8298061952 Request info extracted - IP: 192.168.1.150, MAC: AA:BB:CC:DD:EE:11, User-Agent: WiFi-Device/1.0...
+INFO 2025-12-10 15:54:50,893 views 17238 8298061952 Access verification request: phone=255777888999, ip=192.168.1.150, mac=AA:BB:CC:DD:EE:11, user_agent=WiFi-Device/1.0...
+INFO 2025-12-10 15:54:50,896 views 17238 8298061952 Device tracking successful for 255777888999: AA:BB:CC:DD:EE:11 (method: manual)
+INFO 2025-12-10 15:54:50,896 views 17238 8298061952 ✓ User 255777888999 has valid access - connecting to MikroTik (MAC: AA:BB:CC:DD:EE:11, IP: 192.168.1.150)
+ERROR 2025-12-10 15:55:05,901 mikrotik 17238 8298061952 grant_user_access: create_hotspot_user failed for 255777888999: timed out
+ERROR 2025-12-10 15:55:20,907 mikrotik 17238 8298061952 grant_user_access: allow_mac failed for AA:BB:CC:DD:EE:11: timed out
+ERROR 2025-12-10 15:55:20,909 views 17238 8298061952 ✗ Failed to connect 255777888999 to MikroTik: Connection failed: user:timed out, mac:timed out
+INFO 2025-12-10 15:55:20,910 views 17238 8298061952 Creating AccessLog: user=255777888999, ip=192.168.1.150, mac=AA:BB:CC:DD:EE:11, access_granted=True, device=Device-DD:EE:11
+INFO 2025-12-10 15:55:20,929 views 17238 8298061952 IP address from serializer: 192.168.1.151
+INFO 2025-12-10 15:55:20,930 views 17238 8298061952 MAC address from serializer: FF:EE:DD:CC:BB:22
+INFO 2025-12-10 15:55:20,930 views 17238 8298061952 Request info extracted - IP: 192.168.1.151, MAC: FF:EE:DD:CC:BB:22, User-Agent: Second-Device/1.0...
+INFO 2025-12-10 15:55:20,931 views 17238 8298061952 Access verification request: phone=255777888999, ip=192.168.1.151, mac=FF:EE:DD:CC:BB:22, user_agent=Second-Device/1.0...
+WARNING 2025-12-10 15:55:20,936 mikrotik 17238 8298061952 Device limit exceeded for 255777888999: 2/1
+WARNING 2025-12-10 15:55:20,936 views 17238 8298061952 Device limit exceeded for 255777888999: 2/1 (method: manual)
+INFO 2025-12-10 15:55:20,936 views 17238 8298061952 ✗ User 255777888999 has no valid access - disconnecting from MikroTik (Reason: Device limit exceeded. Max 1 device(s) allowed.)
+ERROR 2025-12-10 15:55:35,937 mikrotik 17238 8298061952 revoke_user_access: revoke_mac failed for FF:EE:DD:CC:BB:22: timed out
+ERROR 2025-12-10 15:55:50,935 mikrotik 17238 8298061952 revoke_user_access: disable user failed for 255777888999: timed out
+WARNING 2025-12-10 15:55:50,936 views 17238 8298061952 ⚠ Failed to disconnect 255777888999 from MikroTik: Disconnection failed: mac:timed out, user:timed out
+INFO 2025-12-10 15:55:50,937 views 17238 8298061952 Creating AccessLog: user=255777888999, ip=192.168.1.151, mac=FF:EE:DD:CC:BB:22, access_granted=False, device=None
+INFO 2025-12-10 15:58:07,033 views 17776 8298061952 IP address from serializer: 192.168.1.150
+INFO 2025-12-10 15:58:07,033 views 17776 8298061952 MAC address from serializer: AA:BB:CC:DD:EE:11
+INFO 2025-12-10 15:58:07,033 views 17776 8298061952 Request info extracted - IP: 192.168.1.150, MAC: AA:BB:CC:DD:EE:11, User-Agent: WiFi-Device/1.0...
+INFO 2025-12-10 15:58:07,033 views 17776 8298061952 Access verification request: phone=255777888999, ip=192.168.1.150, mac=AA:BB:CC:DD:EE:11, user_agent=WiFi-Device/1.0...
+INFO 2025-12-10 15:58:07,036 views 17776 8298061952 Device tracking successful for 255777888999: AA:BB:CC:DD:EE:11 (method: manual)
+INFO 2025-12-10 15:58:07,036 views 17776 8298061952 ✓ User 255777888999 has valid access - connecting to MikroTik (MAC: AA:BB:CC:DD:EE:11, IP: 192.168.1.150)
+ERROR 2025-12-10 15:58:22,039 mikrotik 17776 8298061952 grant_user_access: create_hotspot_user failed for 255777888999: timed out
+ERROR 2025-12-10 15:58:37,042 mikrotik 17776 8298061952 grant_user_access: allow_mac failed for AA:BB:CC:DD:EE:11: timed out
+ERROR 2025-12-10 15:58:37,043 views 17776 8298061952 ✗ Failed to connect 255777888999 to MikroTik: Connection failed: user:timed out, mac:timed out
+INFO 2025-12-10 15:58:37,044 views 17776 8298061952 Creating AccessLog: user=255777888999, ip=192.168.1.150, mac=AA:BB:CC:DD:EE:11, access_granted=True, device=Device-DD:EE:11
+INFO 2025-12-10 15:58:37,059 views 17776 8298061952 IP address from serializer: 192.168.1.151
+INFO 2025-12-10 15:58:37,059 views 17776 8298061952 MAC address from serializer: FF:EE:DD:CC:BB:22
+INFO 2025-12-10 15:58:37,059 views 17776 8298061952 Request info extracted - IP: 192.168.1.151, MAC: FF:EE:DD:CC:BB:22, User-Agent: Second-Device/1.0...
+INFO 2025-12-10 15:58:37,060 views 17776 8298061952 Access verification request: phone=255777888999, ip=192.168.1.151, mac=FF:EE:DD:CC:BB:22, user_agent=Second-Device/1.0...
+INFO 2025-12-10 15:58:37,066 views 17776 8298061952 Device tracking successful for 255777888999: FF:EE:DD:CC:BB:22 (method: manual)
+INFO 2025-12-10 15:58:37,066 views 17776 8298061952 ✓ User 255777888999 has valid access - connecting to MikroTik (MAC: FF:EE:DD:CC:BB:22, IP: 192.168.1.151)
+ERROR 2025-12-10 15:58:52,067 mikrotik 17776 8298061952 grant_user_access: create_hotspot_user failed for 255777888999: timed out
+ERROR 2025-12-10 15:59:07,070 mikrotik 17776 8298061952 grant_user_access: allow_mac failed for FF:EE:DD:CC:BB:22: timed out
+ERROR 2025-12-10 15:59:07,071 views 17776 8298061952 ✗ Failed to connect 255777888999 to MikroTik: Connection failed: user:timed out, mac:timed out
+INFO 2025-12-10 15:59:07,072 views 17776 8298061952 Creating AccessLog: user=255777888999, ip=192.168.1.151, mac=FF:EE:DD:CC:BB:22, access_granted=True, device=Device-CC:BB:22
