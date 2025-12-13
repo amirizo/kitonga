@@ -1888,3 +1888,271 @@ ERROR 2025-12-10 15:58:52,067 mikrotik 17776 8298061952 grant_user_access: creat
 ERROR 2025-12-10 15:59:07,070 mikrotik 17776 8298061952 grant_user_access: allow_mac failed for FF:EE:DD:CC:BB:22: timed out
 ERROR 2025-12-10 15:59:07,071 views 17776 8298061952 ✗ Failed to connect 255777888999 to MikroTik: Connection failed: user:timed out, mac:timed out
 INFO 2025-12-10 15:59:07,072 views 17776 8298061952 Creating AccessLog: user=255777888999, ip=192.168.1.151, mac=FF:EE:DD:CC:BB:22, access_granted=True, device=Device-CC:BB:22
+INFO 2025-12-13 11:10:33,402 autoreload 58088 8298061952 Watching for file changes with StatReloader
+ERROR 2025-12-13 11:10:46,022 exception 58088 6168113152 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:10:46,025 log 58088 6168113152 Bad Request: /
+WARNING 2025-12-13 11:10:46,025 basehttp 58088 6168113152 "GET / HTTP/1.1" 400 143
+ERROR 2025-12-13 11:10:46,055 exception 58088 6184939520 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:10:46,055 log 58088 6184939520 Bad Request: /favicon.ico
+WARNING 2025-12-13 11:10:46,056 basehttp 58088 6184939520 "GET /favicon.ico HTTP/1.1" 400 143
+ERROR 2025-12-13 11:10:57,281 exception 58088 6168113152 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:10:57,283 log 58088 6168113152 Bad Request: /admin
+WARNING 2025-12-13 11:10:57,283 basehttp 58088 6168113152 "GET /admin HTTP/1.1" 400 143
+ERROR 2025-12-13 11:10:57,300 exception 58088 6184939520 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:10:57,301 log 58088 6184939520 Bad Request: /favicon.ico
+WARNING 2025-12-13 11:10:57,301 basehttp 58088 6184939520 "GET /favicon.ico HTTP/1.1" 400 143
+INFO 2025-12-13 11:14:13,016 autoreload 58088 8298061952 /Users/macbookair/Desktop/kitonga/kitonga/settings.py changed, reloading.
+INFO 2025-12-13 11:14:13,589 autoreload 58187 8298061952 Watching for file changes with StatReloader
+ERROR 2025-12-13 11:14:19,064 exception 58187 6137573376 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:14:19,067 log 58187 6137573376 Bad Request: /admin
+WARNING 2025-12-13 11:14:19,068 basehttp 58187 6137573376 "GET /admin HTTP/1.1" 400 143
+ERROR 2025-12-13 11:14:19,081 exception 58187 6154399744 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:14:19,082 log 58187 6154399744 Bad Request: /favicon.ico
+WARNING 2025-12-13 11:14:19,082 basehttp 58187 6154399744 "GET /favicon.ico HTTP/1.1" 400 143
+ERROR 2025-12-13 11:14:19,761 exception 58187 6171226112 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:14:19,763 log 58187 6171226112 Bad Request: /admin
+WARNING 2025-12-13 11:14:19,763 basehttp 58187 6171226112 "GET /admin HTTP/1.1" 400 143
+ERROR 2025-12-13 11:14:19,778 exception 58187 6188052480 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:14:19,780 log 58187 6188052480 Bad Request: /favicon.ico
+WARNING 2025-12-13 11:14:19,780 basehttp 58187 6188052480 "GET /favicon.ico HTTP/1.1" 400 143
+ERROR 2025-12-13 11:14:19,961 exception 58187 6204878848 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:14:19,964 log 58187 6204878848 Bad Request: /admin
+WARNING 2025-12-13 11:14:19,964 basehttp 58187 6204878848 "GET /admin HTTP/1.1" 400 143
+ERROR 2025-12-13 11:14:19,978 exception 58187 6137573376 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:14:19,979 log 58187 6137573376 Bad Request: /favicon.ico
+WARNING 2025-12-13 11:14:19,979 basehttp 58187 6137573376 "GET /favicon.ico HTTP/1.1" 400 143
+INFO 2025-12-13 11:15:11,024 basehttp 58187 6188052480 code 400, message Bad request version ('.®\x8c"¨®Ró5TNïì»_\x11\x10\x9foÉ!\x81#K\x82\x1b.îd\x7fÓ\x96¥Å\x9f¿rg\x00\'z\x99')
+ERROR 2025-12-13 11:15:11,025 basehttp 58187 6188052480 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:11,028 basehttp 58187 6188052480 code 400, message Bad request version ('\x17')
+ERROR 2025-12-13 11:15:11,028 basehttp 58187 6188052480 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:15,560 basehttp 58187 6188052480 code 400, message Bad request version ('¹Ç\x00&à')
+ERROR 2025-12-13 11:15:15,561 basehttp 58187 6188052480 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:15,561 basehttp 58187 6221705216 code 400, message Bad request version ('\x00\x12\x00\x10\x04\x03\x08\x04\x04\x01\x05\x03\x08\x05\x05\x01\x08\x06\x06\x01\x00\x12\x00\x00\x00')
+ERROR 2025-12-13 11:15:15,561 basehttp 58187 6221705216 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:15,562 basehttp 58187 6188052480 code 400, message Bad request version ('\x00\x02\x01\x00\x00\x12\x00\x00\x00')
+ERROR 2025-12-13 11:15:15,563 basehttp 58187 6188052480 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:15,563 basehttp 58187 6221705216 code 400, message Bad request version ('\x00\x12\x00\x10\x04\x03\x08\x04\x04\x01\x05\x03\x08\x05\x05\x01\x08\x06\x06\x01\x00\x17\x00\x00\x00-\x00\x02\x01\x01\x003\x04ï\x04íªª\x00\x01\x00\x11ì\x04À`¨Ãâ£\x88eËP@\x88(\x80¢\x1a,Ë&')
+ERROR 2025-12-13 11:15:15,563 basehttp 58187 6221705216 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:15,756 basehttp 58187 6188052480 code 400, message Bad request version ('Ä-Õ\x18X×&\x98')
+ERROR 2025-12-13 11:15:15,756 basehttp 58187 6188052480 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:15,757 basehttp 58187 6188052480 code 400, message Bad request version ('\\\x8e\x00')
+ERROR 2025-12-13 11:15:15,758 basehttp 58187 6188052480 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:15,758 basehttp 58187 6221705216 code 400, message Bad request version ('\x9aºbxE-x¹u')
+ERROR 2025-12-13 11:15:15,758 basehttp 58187 6221705216 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:15,759 basehttp 58187 6188052480 code 400, message Bad request version ('Ï£Y,\x8a')
+ERROR 2025-12-13 11:15:15,759 basehttp 58187 6188052480 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:16,130 basehttp 58187 6188052480 code 400, message Bad request version ('\x00\x12\x00\x10\x04\x03\x08\x04\x04\x01\x05\x03\x08\x05\x05\x01\x08\x06\x06\x01\x00')
+ERROR 2025-12-13 11:15:16,131 basehttp 58187 6188052480 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:16,132 basehttp 58187 6188052480 code 400, message Bad request version ('Uoè[\x9fZ8\x14\x06nOW3\x9a¢n\x9ec\x924')
+ERROR 2025-12-13 11:15:16,132 basehttp 58187 6188052480 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:16,133 basehttp 58187 6221705216 code 400, message Bad request version ('\x02h2\x08http/1.1\x003\x04ï\x04íÊÊ\x00\x01\x00\x11ì\x04À')
+ERROR 2025-12-13 11:15:16,133 basehttp 58187 6221705216 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:16,134 basehttp 58187 6188052480 code 400, message Bad request version ('PD»Í\x05ßPè½`õ\x84zEÃ#ùP\x9bÖ®;\x14+ÞèáôÍh[1¥íõ®E')
+ERROR 2025-12-13 11:15:16,134 basehttp 58187 6188052480 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:20,827 basehttp 58187 6154399744 "GET /admin/login/?next=/admin/dashboard/ HTTP/1.1" 301 0
+INFO 2025-12-13 11:15:20,830 basehttp 58187 6154399744 code 400, message Bad request syntax ('\x16\x03\x01\x06À\x01\x00\x06¼\x03\x03û|5ÖîÕ:\x89.=G:Õ¡\x03ô®\x98ç\x1a¾l\x1av-Ü')
+ERROR 2025-12-13 11:15:20,830 basehttp 58187 6154399744 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:20,831 basehttp 58187 6154399744 code 400, message Bad request version ('xâ\x878È?{L1Æ\x80öøµ1\x9b\x07\x92\x00ç*Î:L´d\x12iº®')
+ERROR 2025-12-13 11:15:20,831 basehttp 58187 6154399744 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:22,762 basehttp 58187 6154399744 code 400, message Bad request version ('Ê¥B\x18*\x077s×x\x96<Ä\x02uo.NU;IÉ0\x19\x98¯')
+ERROR 2025-12-13 11:15:22,763 basehttp 58187 6154399744 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:22,764 basehttp 58187 6154399744 code 400, message Bad request version ('jj\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x06S')
+ERROR 2025-12-13 11:15:22,764 basehttp 58187 6154399744 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:22,765 basehttp 58187 6154399744 code 400, message Bad request version ('5')
+ERROR 2025-12-13 11:15:22,765 basehttp 58187 6154399744 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:22,766 basehttp 58187 6154399744 code 400, message Bad request version ('+·')
+ERROR 2025-12-13 11:15:22,767 basehttp 58187 6154399744 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:28,151 basehttp 58187 6154399744 code 400, message Bad request version ('\x0e",\x9d`5\'Èá\x8d\x9f°\x90Ð\xad\x9aÒp¼Oò¯/\x04NÎê\x051W\x8b\x80Ô\x10;\x1a²\x05\x90;\x98Ô·à\x84°º\x12ÙVÀ\x8ag°û\x08(ò\x9eË\x86Ê\x0283\x04µaÜ\x89«¹\x94\x03z')
+ERROR 2025-12-13 11:15:28,151 basehttp 58187 6154399744 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:28,152 basehttp 58187 6188052480 code 400, message Bad request version ('\x00\x12\x00\x10\x04\x03\x08\x04\x04\x01\x05\x03\x08\x05\x05\x01\x08\x06\x06\x01\x00\x12\x00\x00\x00')
+ERROR 2025-12-13 11:15:28,152 basehttp 58187 6188052480 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:28,152 basehttp 58187 6154399744 code 400, message Bad request version ('ÊÊ\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x063**\x00\x00DÍ\x00\x05\x00\x03\x02h2\x00-\x00\x02\x01\x01\x00\x1b\x00\x03\x02\x00\x02\x00+\x00\x07\x06ZZ\x03\x04\x03\x03\x003\x04ï\x04íêê\x00\x01\x00\x11ì\x04À.ÑU\x8c\x92Á}Ò\x95b\x81DÅâ!FT\x11*+')
+ERROR 2025-12-13 11:15:28,153 basehttp 58187 6154399744 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:28,154 basehttp 58187 6221705216 code 400, message Bad request version ('\x00\x02\x01\x00\x00')
+ERROR 2025-12-13 11:15:28,155 basehttp 58187 6221705216 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:48,728 basehttp 58187 6171226112 "GET /admin/login/?next= HTTP/1.1" 301 0
+INFO 2025-12-13 11:15:48,732 basehttp 58187 6154399744 code 400, message Bad request version ('[àñ6çð1u\x8a¸¾\x15êìñáTµ°')
+ERROR 2025-12-13 11:15:48,732 basehttp 58187 6154399744 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 11:15:48,735 basehttp 58187 6154399744 code 400, message Bad request syntax ('\x16\x03\x01\x06À\x01\x00\x06¼\x03\x03`ÆÀ\x83a\x9eÂ¶Ë.')
+ERROR 2025-12-13 11:15:48,735 basehttp 58187 6154399744 You're accessing the development server over HTTPS, but it only supports HTTP.
+ERROR 2025-12-13 11:16:50,709 exception 58187 6154399744 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:16:50,714 log 58187 6154399744 Bad Request: /favicon.ico
+WARNING 2025-12-13 11:16:50,715 basehttp 58187 6154399744 "GET /favicon.ico HTTP/1.1" 400 143
+ERROR 2025-12-13 11:17:23,780 exception 58538 6177435648 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:17:23,787 log 58538 6177435648 Bad Request: /admin
+WARNING 2025-12-13 11:17:23,788 basehttp 58538 6177435648 "GET /admin HTTP/1.1" 400 143
+ERROR 2025-12-13 11:17:23,806 exception 58538 6194262016 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:17:23,807 log 58538 6194262016 Bad Request: /favicon.ico
+WARNING 2025-12-13 11:17:23,807 basehttp 58538 6194262016 "GET /favicon.ico HTTP/1.1" 400 143
+INFO 2025-12-13 11:18:26,669 autoreload 58730 8298061952 Watching for file changes with StatReloader
+ERROR 2025-12-13 11:18:30,481 exception 58730 6160199680 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:18:30,486 log 58730 6160199680 Bad Request: /admin
+WARNING 2025-12-13 11:18:30,487 basehttp 58730 6160199680 "GET /admin HTTP/1.1" 400 143
+ERROR 2025-12-13 11:18:30,504 exception 58730 6177026048 Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+Traceback (most recent call last):
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/utils/deprecation.py", line 133, in __call__
+    response = self.process_request(request)
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/middleware/security.py", line 28, in process_request
+    host = self.redirect_host or request.get_host()
+                                 ~~~~~~~~~~~~~~~~^^
+  File "/Users/macbookair/venv/lib/python3.13/site-packages/django/http/request.py", line 167, in get_host
+    raise DisallowedHost(msg)
+django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
+WARNING 2025-12-13 11:18:30,505 log 58730 6177026048 Bad Request: /favicon.ico
+WARNING 2025-12-13 11:18:30,505 basehttp 58730 6177026048 "GET /favicon.ico HTTP/1.1" 400 143

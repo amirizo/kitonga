@@ -2043,29 +2043,31 @@ def verify_access(request):
         mikrotik_action = 'none'
         mikrotik_success = False
         mikrotik_message = ''
+        auto_login_result = {}  # Initialize for auto-login details
         
         if has_access and mac_address:
             # User has valid access - CONNECT to MikroTik
             try:
                 logger.info(f'✓ User {phone_number} has valid access - connecting to MikroTik (MAC: {mac_address}, IP: {ip_address})')
                 
-                # Grant access on MikroTik router
-                grant_result = grant_user_access(
+                # Use force_immediate_internet_access for comprehensive auto-login
+                # This creates hotspot user + IP binding bypass for immediate access
+                auto_login_result = force_immediate_internet_access(
                     username=phone_number,
                     mac_address=mac_address,
-                    password=phone_number[-6:],  # Use last 6 digits as password
-                    comment=f'Auto-connected on access verification ({access_method})'
+                    ip_address=ip_address,
+                    access_type=access_method
                 )
                 
-                if grant_result.get('success'):
+                if auto_login_result.get('success'):
                     mikrotik_action = 'connected'
                     mikrotik_success = True
                     mikrotik_message = 'Successfully connected to internet'
-                    logger.info(f'✓ Automatically connected {phone_number} to internet via MikroTik')
+                    logger.info(f'✓ Automatically connected {phone_number} to internet via MikroTik (method: {auto_login_result.get("method_used")})')
                 else:
                     mikrotik_action = 'connect_failed'
                     mikrotik_success = False
-                    mikrotik_message = f'Connection failed: {", ".join(grant_result.get("errors", ["Unknown error"]))}'
+                    mikrotik_message = f'Connection failed: {auto_login_result.get("message", "Unknown error")}'
                     logger.error(f'✗ Failed to connect {phone_number} to MikroTik: {mikrotik_message}')
                     
             except Exception as e:
@@ -2136,6 +2138,19 @@ def verify_access(request):
                 'success': mikrotik_success,
                 'message': mikrotik_message
             },
+            # Include auto-login details when access is granted
+            'mikrotik_auto_login': {
+                'success': auto_login_result.get('success', False),
+                'message': auto_login_result.get('message', ''),
+                'device_mac': mac_address,
+                'device_ip': ip_address,
+                'hotspot_user_created': auto_login_result.get('hotspot_user_created', False),
+                'ip_binding_created': auto_login_result.get('ip_binding_created', False),
+                'method_used': auto_login_result.get('method_used'),
+                'immediate_access': auto_login_result.get('success', False),
+                # Include device capture from MikroTik
+                'device_capture': auto_login_result.get('device_capture', {})
+            } if has_access and mac_address else None,
             'debug_info': {
                 'has_payments': user.payments.filter(status='completed').exists(),
                 'has_vouchers': user.vouchers_used.filter(is_used=True).exists(),
@@ -2533,20 +2548,93 @@ def query_payment_status(request, order_reference):
             
             status_code = payment_data.get('status')
             
+            # Initialize MikroTik auto-login result
+            mikrotik_auto_login = None
+            
             # Update payment status if changed
-            if status_code == 'COMPLETED' and payment.status == 'pending':
+            # ClickPesa uses: PROCESSING, SUCCESS, SETTLED, FAILED, CANCELLED
+            if status_code in ['COMPLETED', 'SUCCESS', 'SETTLED'] and payment.status == 'pending':
                 payment.mark_completed(
-                    payment_reference=payment_data.get('id'),
+                    payment_reference=payment_data.get('paymentReference') or payment_data.get('id'),
                     channel=payment_data.get('channel')
                 )
-            elif status_code == 'FAILED' and payment.status == 'pending':
+                
+                # === MIKROTIK AUTO-LOGIN AFTER SUCCESSFUL PAYMENT ===
+                # Get user's most recent active device for auto-login
+                try:
+                    user = payment.user
+                    device = user.devices.filter(is_active=True).order_by('-last_seen').first()
+                    
+                    if device:
+                        logger.info(f'Attempting MikroTik auto-login for payment user {user.phone_number} with device {device.mac_address}')
+                        
+                        # Use the comprehensive auto-login function
+                        auto_access_result = force_immediate_internet_access(
+                            username=user.phone_number,
+                            mac_address=device.mac_address,
+                            ip_address=device.ip_address or '0.0.0.0',
+                            access_type='payment'
+                        )
+                        
+                        mikrotik_auto_login = {
+                            'success': auto_access_result.get('success', False),
+                            'message': auto_access_result.get('message', ''),
+                            'device_mac': device.mac_address,
+                            'device_ip': device.ip_address,
+                            'hotspot_user_created': auto_access_result.get('hotspot_user_created', False),
+                            'ip_binding_created': auto_access_result.get('ip_binding_created', False),
+                            'immediate_access': auto_access_result.get('success', False),
+                            # Include device capture from MikroTik
+                            'device_capture': auto_access_result.get('device_capture', {})
+                        }
+                        
+                        if auto_access_result.get('success'):
+                            logger.info(f'✓ MikroTik auto-login successful for payment user {user.phone_number}')
+                        else:
+                            logger.warning(f'MikroTik auto-login failed for payment user {user.phone_number}: {auto_access_result.get("message")}')
+                    else:
+                        # No device registered yet, create hotspot user for when they connect
+                        logger.info(f'No device found for payment user {user.phone_number}, creating hotspot user for later connection')
+                        
+                        hotspot_result = create_hotspot_user_and_login(
+                            username=user.phone_number,
+                            password=user.phone_number
+                        )
+                        
+                        mikrotik_auto_login = {
+                            'success': hotspot_result.get('success', False),
+                            'message': 'Hotspot user created. User will auto-connect when joining WiFi.',
+                            'device_mac': None,
+                            'device_ip': None,
+                            'hotspot_user_created': hotspot_result.get('success', False),
+                            'ip_binding_created': False,
+                            'immediate_access': False,
+                            'note': 'User needs to connect to WiFi hotspot to get internet access'
+                        }
+                        
+                except Exception as mikrotik_error:
+                    logger.error(f'MikroTik auto-login error for payment {order_reference}: {str(mikrotik_error)}')
+                    mikrotik_auto_login = {
+                        'success': False,
+                        'message': f'MikroTik connection error: {str(mikrotik_error)}',
+                        'error': str(mikrotik_error)
+                    }
+                # === END MIKROTIK AUTO-LOGIN ===
+                
+            elif status_code in ['FAILED', 'CANCELLED'] and payment.status == 'pending':
                 payment.mark_failed()
             
-            return Response({
+            response_data = {
                 'success': True,
                 'payment': PaymentSerializer(payment).data,
                 'clickpesa_status': payment_data
-            })
+            }
+            
+            # Include MikroTik auto-login info if payment was just completed
+            if mikrotik_auto_login:
+                response_data['mikrotik_auto_login'] = mikrotik_auto_login
+            
+            return Response(response_data)
         else:
             # ClickPesa query failed, return local payment status
             logger.warning(f'ClickPesa query failed for {order_reference}: {result["message"]}')
@@ -2712,6 +2800,7 @@ def redeem_voucher(request):
             # Initialize variables that will be used throughout the response
             immediate_login_success = False
             mikrotik_auth_result = False
+            auto_access_result = {}  # Initialize for auto-login details
             
             # Handle device registration if MAC address provided
             device = None
@@ -2855,6 +2944,19 @@ def redeem_voucher(request):
                         'immediate_login_success': immediate_login_success,
                         'ready_for_internet': immediate_login_success or (mikrotik_auth_result and user.has_active_access()),
                         'auto_connect_status': 'connected' if immediate_login_success else 'ready_to_connect',
+                        # Include detailed auto-login info (same as payment flow)
+                        'auto_login_details': {
+                            'success': auto_access_result.get('success', False),
+                            'message': auto_access_result.get('message', 'No auto-login attempted'),
+                            'device_mac': mac_address,
+                            'device_ip': ip_address,
+                            'hotspot_user_created': auto_access_result.get('hotspot_user_created', False),
+                            'ip_binding_created': auto_access_result.get('ip_binding_created', False),
+                            'method_used': auto_access_result.get('method_used'),
+                            'immediate_access': immediate_login_success,
+                            # Include device capture from MikroTik
+                            'device_capture': auto_access_result.get('device_capture', {})
+                        },
                         'device_tracking': {
                             'device_registered': bool(device),
                             'device_id': device.id if device else None,

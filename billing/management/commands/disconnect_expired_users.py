@@ -24,15 +24,22 @@ class Command(BaseCommand):
         if result['success']:
             self.stdout.write(
                 self.style.SUCCESS(
-                    f'✓ Disconnected {result["disconnected"]} expired users'
+                    f'✓ Disconnected {result["disconnected"]} expired users from MikroTik'
                 )
             )
+            if result.get('devices_deactivated', 0) > 0:
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f'✓ Deactivated {result["devices_deactivated"]} devices'
+                    )
+                )
             if result['failed'] > 0:
                 self.stdout.write(
                     self.style.WARNING(
-                        f'⚠ Failed to disconnect {result["failed"]} users'
+                        f'⚠ Failed to process {result["failed"]} items'
                     )
                 )
+            self.stdout.write(f'  Total users checked: {result.get("total_checked", 0)}')
         else:
             self.stdout.write(
                 self.style.ERROR(f'✗ Error: {result.get("error", "Unknown error")}')

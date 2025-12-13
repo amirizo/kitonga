@@ -19,8 +19,8 @@ urlpatterns = [
     path('clickpesa-webhook/', views.clickpesa_webhook, name='clickpesa_webhook'),
     path('payment-status/<str:order_reference>/', views.query_payment_status, name='query_payment_status'),
     path('user-status/<str:phone_number>/', views.user_status, name='user_status'),
+    path('devices/remove/', views.remove_device, name='remove_device'),  # Must be before devices/<str:phone_number>/
     path('devices/<str:phone_number>/', views.list_user_devices, name='list_user_devices'),
-    path('devices/remove/', views.remove_device, name='remove_device'),
     path('trigger-auth/', views.trigger_device_authentication, name='trigger_device_authentication'),
     
     # Voucher endpoints
