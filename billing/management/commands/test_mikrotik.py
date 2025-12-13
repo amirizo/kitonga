@@ -36,7 +36,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS('Testing Mikrotik Router Connectivity\n'))
         
         # Get router IP
-        router_ip = options.get('router_ip') or getattr(settings, 'MIKROTIK_HOST', '192.168.0.173')
+        router_ip = options.get('router_ip') or getattr(settings, 'MIKROTIK_HOST', '10.50.0.2')
         test_user = options['test_user']
         
         self.stdout.write(f'Router IP: {router_ip}')

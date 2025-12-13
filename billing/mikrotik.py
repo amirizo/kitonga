@@ -47,7 +47,7 @@ def get_mikrotik_api(retries: int = 3, timeout: int = 10):
     if routeros_api is None:
         raise ImportError('routeros-api is not installed. Add it to requirements.txt')
 
-    host = getattr(settings, 'MIKROTIK_HOST', '192.168.0.173')
+    host = getattr(settings, 'MIKROTIK_HOST', '10.50.0.2')
     port = int(getattr(settings, 'MIKROTIK_PORT', 8728))
     user = getattr(settings, 'MIKROTIK_USER', 'admin')
     password = getattr(settings, 'MIKROTIK_PASSWORD', 'Kijangwani2003')
@@ -380,7 +380,7 @@ def logout_user_from_mikrotik(phone_number: str, mac_address: str = '') -> dict:
 def test_mikrotik_connection(host=None, username=None, password=None, port=8728):
     """Test low-level TCP connectivity to MikroTik API port."""
     try:
-        host = host or getattr(settings, 'MIKROTIK_HOST', '192.168.0.173')
+        host = host or getattr(settings, 'MIKROTIK_HOST', '10.50.0.2')
         username = username or getattr(settings, 'MIKROTIK_USER', 'admin')
         password = password or getattr(settings, 'MIKROTIK_PASSWORD', '')
 

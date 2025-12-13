@@ -15,11 +15,11 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-kitonga-dev-key-chang
 DEBUG = config('DEBUG', default=False, cast=bool)
 
 # Development vs Production URL Configuration
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,api.kitonga.klikcell.com,kitonga.klikcell.com,testserver,192.168.0.85', cast=Csv())
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,api.kitonga.klikcell.com,kitonga.klikcell.com,testserver', cast=Csv())
 
 # Add development-specific hosts when DEBUG is True
 if DEBUG:
-    additional_dev_hosts = ['0.0.0.0', '192.168.1.1', '10.0.0.1']
+    additional_dev_hosts = ['192.168.1.1', '10.0.0.1']
     for host in additional_dev_hosts:
         if host not in ALLOWED_HOSTS:
             ALLOWED_HOSTS.append(host)
@@ -320,8 +320,8 @@ ADMIN_TOKEN_SECRET = config('ADMIN_TOKEN_SECRET', default=SECRET_KEY)
 # MikroTik API Configuration (env-driven)
 try:
     from decouple import config as _cfg
-    # Default to local router IP for development, VPS uses WireGuard tunnel (10.50.0.2)
-    MIKROTIK_HOST = _cfg('MIKROTIK_HOST', default='192.168.0.173')
+    # Default to WireGuard VPN tunnel IP for remote router access
+    MIKROTIK_HOST = _cfg('MIKROTIK_HOST', default='10.50.0.2')
     MIKROTIK_PORT = _cfg('MIKROTIK_PORT', default=8728, cast=int)
     MIKROTIK_USER = _cfg('MIKROTIK_USER', default='admin')
     MIKROTIK_PASSWORD = _cfg('MIKROTIK_PASSWORD', default='Kijangwani2003')
@@ -331,8 +331,8 @@ try:
     MIKROTIK_DEFAULT_PROFILE = _cfg('MIKROTIK_DEFAULT_PROFILE', default='default')
     MIKROTIK_HOTSPOT_NAME = _cfg('MIKROTIK_HOTSPOT', default='hotspot1')
 except Exception:
-    # Fallback defaults (local development)
-    MIKROTIK_HOST = '192.168.0.173'
+    # Fallback defaults (WireGuard VPN tunnel)
+    MIKROTIK_HOST = '10.50.0.2'
     MIKROTIK_PORT = 8728
     MIKROTIK_USER = 'admin'
     MIKROTIK_PASSWORD = 'Kijangwani2003'

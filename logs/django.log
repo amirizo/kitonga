@@ -2156,3 +2156,4 @@ Traceback (most recent call last):
 django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8000'. You may need to add '192.168.0.85' to ALLOWED_HOSTS.
 WARNING 2025-12-13 11:18:30,505 log 58730 6177026048 Bad Request: /favicon.ico
 WARNING 2025-12-13 11:18:30,505 basehttp 58730 6177026048 "GET /favicon.ico HTTP/1.1" 400 143
+INFO 2025-12-13 23:37:26,280 autoreload 16709 8298061952 Watching for file changes with StatReloader

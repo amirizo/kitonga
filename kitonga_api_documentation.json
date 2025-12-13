@@ -674,7 +674,7 @@
         "response": {
           "success": true,
           "mikrotik_connected": true,
-          "router_ip": "192.168.0.173"
+          "router_ip": "10.50.0.2"
         }
       },
       "mikrotik_user_status": {
@@ -706,7 +706,7 @@
         "response": {
           "success": true,
           "configuration": {
-            "router_ip": "192.168.0.173",
+            "router_ip": "10.50.0.2",
             "username": "admin",
             "password_configured": true,
             "api_port": 8728,
@@ -724,7 +724,7 @@
           "success": true,
           "message": "Connection successful",
           "router_info": {
-            "ip": "192.168.0.173",
+            "ip": "10.50.0.2",
             "port": 8728,
             "status": "reachable",
             "api_status": "api_ok"
@@ -959,7 +959,7 @@
         "response": {
           "success": true,
           "settings": {
-            "mikrotik_ip": "192.168.0.173",
+            "mikrotik_ip": "10.50.0.2",
             "mikrotik_port": 8728,
             "mikrotik_username": "admin",
             "default_max_devices": 1,
