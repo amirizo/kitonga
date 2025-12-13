@@ -144,3 +144,83 @@ def cleanup_inactive_devices():
             'success': False,
             'error': str(e)
         }
+
+
+def send_expiry_notifications():
+    """
+    Send SMS notifications to users whose access is about to expire.
+    This should be run hourly via cron.
+    
+    Notifies users 1 hour before their access expires.
+    """
+    try:
+        from datetime import timedelta
+        from .nextsms import NextSMSAPI
+        from .models import SMSLog
+        
+        now = timezone.now()
+        
+        # Find users expiring in the next hour who haven't been notified
+        expiry_window_start = now
+        expiry_window_end = now + timedelta(hours=1)
+        
+        users_to_notify = User.objects.filter(
+            is_active=True,
+            paid_until__gte=expiry_window_start,
+            paid_until__lte=expiry_window_end,
+            expiry_notification_sent=False
+        )
+        
+        notified_count = 0
+        failed_count = 0
+        
+        nextsms = NextSMSAPI()
+        
+        for user in users_to_notify:
+            try:
+                # Calculate remaining time
+                remaining = user.paid_until - now
+                remaining_minutes = int(remaining.total_seconds() / 60)
+                
+                # Send SMS notification
+                message = f"Kitonga WiFi: Your internet access expires in {remaining_minutes} minutes. To continue using WiFi, please make a payment or redeem a voucher."
+                
+                result = nextsms.send_sms(user.phone_number, message)
+                
+                if result.get('success'):
+                    user.expiry_notification_sent = True
+                    user.save()
+                    notified_count += 1
+                    logger.info(f'Sent expiry notification to {user.phone_number}')
+                    
+                    # Log SMS
+                    SMSLog.objects.create(
+                        phone_number=user.phone_number,
+                        message=message,
+                        sms_type='expiry_notification',
+                        success=True,
+                        response_data=result
+                    )
+                else:
+                    failed_count += 1
+                    logger.warning(f'Failed to send expiry notification to {user.phone_number}: {result}')
+                    
+            except Exception as user_error:
+                failed_count += 1
+                logger.error(f'Error sending notification to {user.phone_number}: {str(user_error)}')
+        
+        logger.info(f'Expiry notifications: {notified_count} sent, {failed_count} failed')
+        
+        return {
+            'success': True,
+            'notified': notified_count,
+            'failed': failed_count,
+            'total_checked': users_to_notify.count()
+        }
+        
+    except Exception as e:
+        logger.error(f'Error in send_expiry_notifications task: {str(e)}')
+        return {
+            'success': False,
+            'error': str(e)
+        }

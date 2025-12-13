@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
+    'django_crontab',  # For scheduled tasks
     'billing',
 ]
 
@@ -520,6 +521,32 @@ JAZZMIN_UI_TWEAKS = {
         "success": "btn-success"
     }
 }
+
+# ============================================
+# CRONTAB CONFIGURATION FOR SCHEDULED TASKS
+# ============================================
+# These tasks run automatically at scheduled intervals
+# Run 'python manage.py crontab add' to install cron jobs
+# Run 'python manage.py crontab show' to list active cron jobs
+# Run 'python manage.py crontab remove' to uninstall cron jobs
+
+CRONJOBS = [
+    # Disconnect expired users every 5 minutes
+    # This removes MikroTik sessions, IP bindings, and deactivates users whose access has expired
+    ('*/5 * * * *', 'billing.tasks.disconnect_expired_users', '>> /var/log/kitonga_cron.log 2>&1'),
+    
+    # Send expiry notifications every hour
+    # Notifies users 1 hour before their access expires
+    ('0 * * * *', 'billing.tasks.send_expiry_notifications', '>> /var/log/kitonga_cron.log 2>&1'),
+    
+    # Cleanup inactive devices daily at 3 AM
+    # Deactivates devices that haven't been seen in 30 days
+    ('0 3 * * *', 'billing.tasks.cleanup_inactive_devices', '>> /var/log/kitonga_cron.log 2>&1'),
+]
+
+# For development/testing, you can also manually run:
+# python manage.py disconnect_expired_users
+# python manage.py send_expiry_notifications
 
 # Development Configuration Summary (for debugging)
 if DEBUG:

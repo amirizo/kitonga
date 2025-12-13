@@ -532,6 +532,7 @@ def create_admin_user(request):
 def list_users(request):
     """
     List all Wi-Fi users (Admin only)
+    Returns: Phone Number, Account Status, Access Status, Devices, Total Payments, Paid Until, Joined Date, MAC Addresses
     """
     try:
         users = User.objects.all().order_by('-created_at')
@@ -539,13 +540,28 @@ def list_users(request):
         # Apply filters
         phone_filter = request.GET.get('phone_number')
         is_active_filter = request.GET.get('is_active')
+        has_access_filter = request.GET.get('has_access')
         
         if phone_filter:
             users = users.filter(phone_number__icontains=phone_filter)
         
-        if is_active_filter is not None:
+        if is_active_filter is not None and is_active_filter != '':
             is_active = is_active_filter.lower() == 'true'
             users = users.filter(is_active=is_active)
+        
+        # Filter by access status (has valid paid_until)
+        if has_access_filter is not None and has_access_filter != '':
+            from django.utils import timezone
+            from django.db.models import Q
+            now = timezone.now()
+            if has_access_filter.lower() == 'true':
+                users = users.filter(is_active=True, paid_until__gt=now)
+            else:
+                users = users.filter(
+                    Q(is_active=False) | 
+                    Q(paid_until__isnull=True) | 
+                    Q(paid_until__lte=now)
+                )
         
         # Pagination
         page_size = int(request.GET.get('page_size', 20))
@@ -556,36 +572,82 @@ def list_users(request):
         total_users = users.count()
         users_page = users[start:end]
         
-        # Serialize users with basic data first
+        # Serialize users with all required data
         users_data = []
         for user in users_page:
             try:
+                # Get active devices with MAC addresses
+                active_devices = []
+                all_mac_addresses = []
+                try:
+                    devices = user.devices.all()
+                    for device in devices:
+                        all_mac_addresses.append(device.mac_address)
+                        if device.is_active:
+                            active_devices.append({
+                                'id': device.id,
+                                'mac_address': device.mac_address,
+                                'ip_address': device.ip_address,
+                                'device_name': device.device_name or f'Device-{device.mac_address[-8:]}',
+                                'is_active': device.is_active,
+                                'last_seen': device.last_seen.isoformat() if device.last_seen else None
+                            })
+                except Exception as e:
+                    logger.error(f'Error getting devices for user {user.id}: {str(e)}')
+                
+                # Calculate time remaining
+                time_remaining = None
+                if user.paid_until:
+                    from django.utils import timezone
+                    now = timezone.now()
+                    if user.paid_until > now:
+                        remaining = user.paid_until - now
+                        hours = int(remaining.total_seconds() // 3600)
+                        minutes = int((remaining.total_seconds() % 3600) // 60)
+                        time_remaining = {'hours': hours, 'minutes': minutes}
+                
                 user_data = {
                     'id': user.id,
                     'phone_number': user.phone_number,
+                    
+                    # Account Status
                     'is_active': user.is_active,
-                    'created_at': user.created_at.isoformat(),
-                    'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+                    'account_status': 'Active' if user.is_active else 'Inactive',
+                    
+                    # Access Status
                     'has_active_access': user.has_active_access(),
+                    'access_status': 'Has Access' if user.has_active_access() else 'No Access',
+                    
+                    # Dates
+                    'created_at': user.created_at.isoformat(),
+                    'joined_date': user.created_at.strftime('%Y-%m-%d %H:%M'),
+                    'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+                    'paid_until_formatted': user.paid_until.strftime('%Y-%m-%d %H:%M') if user.paid_until else 'Never',
+                    'time_remaining': time_remaining,
+                    
+                    # Device info
                     'max_devices': user.max_devices,
-                    'total_payments': user.total_payments
+                    'device_count': len(active_devices),
+                    'total_devices': len(all_mac_addresses),
+                    'devices': active_devices,
+                    'mac_addresses': all_mac_addresses,  # List of all MAC addresses
+                    'primary_mac': all_mac_addresses[0] if all_mac_addresses else None,  # First/primary MAC
+                    
+                    # Payment info
+                    'total_payments': user.total_payments,
                 }
                 
-                # Safely get device count
+                # Get completed payment count and total amount
                 try:
-                    user_data['device_count'] = user.devices.filter(is_active=True).count()
+                    completed_payments = user.payments.filter(status='completed')
+                    user_data['completed_payments'] = completed_payments.count()
+                    user_data['total_spent'] = sum(float(p.amount) for p in completed_payments)
                 except Exception as e:
-                    logger.error(f'Error getting device count for user {user.id}: {str(e)}')
-                    user_data['device_count'] = 0
+                    logger.error(f'Error getting payment stats for user {user.id}: {str(e)}')
+                    user_data['completed_payments'] = 0
+                    user_data['total_spent'] = 0
                 
-                # Safely get payment count
-                try:
-                    user_data['payment_count'] = user.payments.filter(status='completed').count()
-                except Exception as e:
-                    logger.error(f'Error getting payment count for user {user.id}: {str(e)}')
-                    user_data['payment_count'] = 0
-                
-                # Safely get last payment
+                # Get last payment info
                 user_data['last_payment'] = None
                 try:
                     last_payment = user.payments.filter(status='completed').order_by('-completed_at').first()
@@ -597,7 +659,13 @@ def list_users(request):
                         }
                 except Exception as e:
                     logger.error(f'Error getting last payment for user {user.id}: {str(e)}')
-                    pass
+                
+                # Get voucher usage
+                try:
+                    vouchers_used = user.vouchers_used.filter(is_used=True).count()
+                    user_data['vouchers_used'] = vouchers_used
+                except Exception:
+                    user_data['vouchers_used'] = 0
                 
                 users_data.append(user_data)
                 
@@ -608,7 +676,11 @@ def list_users(request):
                     'id': user.id,
                     'phone_number': user.phone_number,
                     'is_active': user.is_active,
+                    'account_status': 'Active' if user.is_active else 'Inactive',
+                    'has_active_access': False,
+                    'access_status': 'Unknown',
                     'created_at': user.created_at.isoformat(),
+                    'joined_date': user.created_at.strftime('%Y-%m-%d %H:%M'),
                     'error': 'Failed to load complete user data'
                 })
         
@@ -636,6 +708,7 @@ def list_users(request):
 def get_user_detail(request, user_id):
     """
     Get detailed information about a specific user (Admin only)
+    Returns all user data including devices, payments, vouchers, and access logs
     """
     try:
         user = User.objects.get(id=user_id)
@@ -649,7 +722,10 @@ def get_user_detail(request, user_id):
                 'amount': str(payment.amount),
                 'status': payment.status,
                 'bundle_name': payment.bundle.name if payment.bundle else None,
+                'bundle_hours': payment.bundle.duration_hours if payment.bundle else None,
                 'order_reference': payment.order_reference,
+                'payment_reference': payment.payment_reference,
+                'payment_channel': payment.payment_channel,
                 'created_at': payment.created_at.isoformat(),
                 'completed_at': payment.completed_at.isoformat() if payment.completed_at else None
             })
@@ -657,18 +733,32 @@ def get_user_detail(request, user_id):
         # Get user's devices
         devices = user.devices.all()
         devices_data = []
+        mac_addresses = []
         for device in devices:
+            mac_addresses.append(device.mac_address)
             devices_data.append({
                 'id': device.id,
                 'mac_address': device.mac_address,
-                'device_name': device.device_name or 'Unknown Device',
+                'ip_address': device.ip_address,
+                'device_name': device.device_name or f'Device-{device.mac_address[-8:]}',
                 'is_active': device.is_active,
                 'last_seen': device.last_seen.isoformat() if device.last_seen else None,
-                'first_seen': device.first_seen.isoformat()
+                'first_seen': device.first_seen.isoformat() if device.first_seen else None
+            })
+        
+        # Get vouchers used
+        vouchers = user.vouchers_used.all().order_by('-used_at')
+        vouchers_data = []
+        for voucher in vouchers:
+            vouchers_data.append({
+                'id': voucher.id,
+                'code': voucher.code,
+                'duration_hours': voucher.duration_hours,
+                'used_at': voucher.used_at.isoformat() if voucher.used_at else None
             })
         
         # Get access logs
-        access_logs = AccessLog.objects.filter(user=user).order_by('-timestamp')[:10]
+        access_logs = AccessLog.objects.filter(user=user).order_by('-timestamp')[:20]
         logs_data = []
         for log in access_logs:
             logs_data.append({
@@ -680,20 +770,58 @@ def get_user_detail(request, user_id):
                 'timestamp': log.timestamp.isoformat()
             })
         
+        # Calculate time remaining
+        time_remaining = None
+        if user.paid_until:
+            from django.utils import timezone
+            now = timezone.now()
+            if user.paid_until > now:
+                remaining = user.paid_until - now
+                hours = int(remaining.total_seconds() // 3600)
+                minutes = int((remaining.total_seconds() % 3600) // 60)
+                time_remaining = {'hours': hours, 'minutes': minutes, 'formatted': f'{hours}h {minutes}m'}
+        
         user_data = {
             'id': user.id,
             'phone_number': user.phone_number,
+            
+            # Status
             'is_active': user.is_active,
-            'created_at': user.created_at.isoformat(),
+            'account_status': 'Active' if user.is_active else 'Inactive',
             'has_active_access': user.has_active_access(),
-            'payments': payments_data,
+            'access_status': 'Has Access' if user.has_active_access() else 'No Access',
+            
+            # Dates
+            'created_at': user.created_at.isoformat(),
+            'joined_date': user.created_at.strftime('%Y-%m-%d %H:%M'),
+            'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+            'paid_until_formatted': user.paid_until.strftime('%Y-%m-%d %H:%M') if user.paid_until else 'Never',
+            'time_remaining': time_remaining,
+            
+            # Devices
+            'max_devices': user.max_devices,
+            'mac_addresses': mac_addresses,
+            'primary_mac': mac_addresses[0] if mac_addresses else None,
             'devices': devices_data,
+            
+            # Payments & Vouchers
+            'payments': payments_data,
+            'vouchers': vouchers_data,
+            
+            # Access logs
             'access_logs': logs_data,
+            
+            # Statistics
             'statistics': {
-                'total_payments': len([p for p in payments_data if p['status'] == 'completed']),
+                'total_payments': user.total_payments,
+                'completed_payments': len([p for p in payments_data if p['status'] == 'completed']),
                 'total_spent': sum(float(p['amount']) for p in payments_data if p['status'] == 'completed'),
-                'device_count': len(devices_data),
-                'active_devices': len([d for d in devices_data if d['is_active']])
+                'vouchers_used': len(vouchers_data),
+                'total_devices': len(devices_data),
+                'active_devices': len([d for d in devices_data if d['is_active']]),
+                'total_access_logs': AccessLog.objects.filter(user=user).count(),
+                'successful_access': AccessLog.objects.filter(user=user, access_granted=True).count(),
+                'denied_access': AccessLog.objects.filter(user=user, access_granted=False).count()
             }
         }
         
