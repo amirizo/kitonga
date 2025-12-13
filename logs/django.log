@@ -2157,3 +2157,18 @@ django.core.exceptions.DisallowedHost: Invalid HTTP_HOST header: '192.168.0.85:8
 WARNING 2025-12-13 11:18:30,505 log 58730 6177026048 Bad Request: /favicon.ico
 WARNING 2025-12-13 11:18:30,505 basehttp 58730 6177026048 "GET /favicon.ico HTTP/1.1" 400 143
 INFO 2025-12-13 23:37:26,280 autoreload 16709 8298061952 Watching for file changes with StatReloader
+INFO 2025-12-13 23:39:37,163 autoreload 17161 8298061952 Watching for file changes with StatReloader
+INFO 2025-12-13 23:39:39,849 basehttp 17161 6167031808 code 400, message Bad request version ('gjóÒ\x95±yp\x89vD\x00LÏ[ÉzÎ')
+ERROR 2025-12-13 23:39:39,850 basehttp 17161 6167031808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 23:39:39,853 basehttp 17161 6167031808 code 400, message Bad request version ('\x00\x12\x00\x10\x04\x03\x08\x04\x04\x01\x05\x03\x08\x05\x05\x01\x08\x06\x06\x01\x00')
+ERROR 2025-12-13 23:39:39,853 basehttp 17161 6167031808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 23:39:57,981 basehttp 17161 6167031808 "GET /admin/billing/ HTTP/1.1" 301 0
+INFO 2025-12-13 23:39:57,984 basehttp 17161 6167031808 code 400, message Bad request version ('&\x84V\x9cAËô±-\x90ÖQHC\x0fó\x93Rþ')
+ERROR 2025-12-13 23:39:57,984 basehttp 17161 6167031808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 23:39:57,985 basehttp 17161 6167031808 code 400, message Bad request version ('êê\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x06SÚÚ\x00\x00\x00+\x00\x07\x06')
+ERROR 2025-12-13 23:39:57,985 basehttp 17161 6167031808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 23:40:07,469 basehttp 17161 6167031808 "GET /admin/billing/user/ HTTP/1.1" 301 0
+INFO 2025-12-13 23:40:07,471 basehttp 17161 6200684544 code 400, message Bad HTTP/0.9 request type ('\x16\x03\x01\x06à\x01\x00\x06Ü\x03\x03<c-\x17\x8d©')
+ERROR 2025-12-13 23:40:07,471 basehttp 17161 6200684544 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-13 23:40:07,473 basehttp 17161 6200684544 code 400, message Bad request version ('Kù6èÖ/\x1a±\x84¹\x02B\x84QªØÂ!J&XdÂ\x14ÞÖvi¹')
+ERROR 2025-12-13 23:40:07,473 basehttp 17161 6200684544 You're accessing the development server over HTTPS, but it only supports HTTP.
