@@ -186,14 +186,14 @@ class AccessExpiryWatcher:
         try:
             AccessLog.objects.create(
                 user=user,
-                phone_number=phone_number,
+                device=None,
                 access_granted=False,
-                denial_reason='Access expired - auto-disconnected',
-                ip_address='system',
+                denial_reason='Access expired - auto-disconnected by expiry watcher',
+                ip_address='127.0.0.1',
                 mac_address=''
             )
-        except Exception:
-            pass
+        except Exception as log_error:
+            logger.warning(f"Failed to create access log for {phone_number}: {log_error}")
         
         logger.info(f"  ✓ User {phone_number} fully disconnected and deactivated")
 

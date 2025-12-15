@@ -323,30 +323,78 @@ def grant_user_access(username: str, mac_address: Optional[str] = None, password
 
 
 def revoke_user_access(mac_address: Optional[str] = None, username: Optional[str] = None) -> dict:
-    """Revoke MAC bypass and optionally disable hotspot user."""
-    result = {'mac_revoked': False, 'user_revoked': False, 'errors': []}
-    if mac_address:
-        try:
-            result['mac_revoked'] = revoke_mac(mac_address)
-            if not result['mac_revoked']:
-                result['errors'].append('mac:revoke_failed')
-        except Exception as e:
-            logger.error(f'revoke_user_access: revoke_mac failed for {mac_address}: {e}')
-            result['errors'].append(f'mac:{e}')
-    if username and routeros_api is not None:
-        try:
+    """Revoke MAC bypass, disable hotspot user, AND kick active session."""
+    result = {'mac_revoked': False, 'user_revoked': False, 'session_kicked': False, 'errors': []}
+    api = None
+    
+    try:
+        if routeros_api is not None:
             api = get_mikrotik_api()
-            users = api.get_resource('/ip/hotspot/user')
-            existing = users.get(name=username)
-            for item in existing:
-                users.set(id=item['.id'], disabled='yes')
-                result['user_revoked'] = True
+        
+        # Step 1: Revoke MAC binding (IP bypass)
+        if mac_address:
+            try:
+                result['mac_revoked'] = revoke_mac(mac_address)
+                if not result['mac_revoked']:
+                    result['errors'].append('mac:revoke_failed')
+            except Exception as e:
+                logger.error(f'revoke_user_access: revoke_mac failed for {mac_address}: {e}')
+                result['errors'].append(f'mac:{e}')
+        
+        # Step 2: Disable hotspot user account
+        if username and api is not None:
+            try:
+                users = api.get_resource('/ip/hotspot/user')
+                existing = users.get(name=username)
+                for item in existing:
+                    users.set(id=item['.id'], disabled='yes')
+                    result['user_revoked'] = True
+                    logger.info(f'Disabled hotspot user: {username}')
+            except Exception as e:
+                logger.error(f'revoke_user_access: disable user failed for {username}: {e}')
+                result['errors'].append(f'user:{e}')
+        
+        # Step 3: KICK ACTIVE SESSION - This is the critical step!
+        # Remove user from /ip/hotspot/active to immediately disconnect them
+        if api is not None:
+            try:
+                active = api.get_resource('/ip/hotspot/active')
+                active_sessions = active.get()
+                
+                for session in active_sessions:
+                    session_user = session.get('user', '')
+                    session_mac = session.get('mac-address', '')
+                    
+                    # Match by username OR MAC address
+                    should_kick = False
+                    if username and session_user == username:
+                        should_kick = True
+                    if mac_address and session_mac.upper() == mac_address.upper():
+                        should_kick = True
+                    
+                    if should_kick:
+                        try:
+                            active.remove(id=session['.id'])
+                            result['session_kicked'] = True
+                            logger.info(f'Kicked active session: user={session_user}, mac={session_mac}')
+                        except Exception as kick_err:
+                            logger.error(f'Failed to kick session {session_user}: {kick_err}')
+                            result['errors'].append(f'kick:{kick_err}')
+                
+            except Exception as e:
+                logger.error(f'revoke_user_access: kick active session failed: {e}')
+                result['errors'].append(f'active:{e}')
+        
+        result['success'] = result['mac_revoked'] or result['user_revoked'] or result['session_kicked']
+        return result
+        
+    except Exception as e:
+        logger.error(f'revoke_user_access failed: {e}')
+        result['errors'].append(f'general:{e}')
+        return result
+    finally:
+        if api is not None:
             safe_close(api)
-        except Exception as e:
-            logger.error(f'revoke_user_access: disable user failed for {username}: {e}')
-            result['errors'].append(f'user:{e}')
-    result['success'] = result['mac_revoked'] or result['user_revoked']
-    return result
 
 
 def authenticate_user_with_mikrotik(phone_number: str, mac_address: str = '', ip_address: str = '') -> dict:

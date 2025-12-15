@@ -1973,17 +1973,20 @@ def mikrotik_disconnect_user(request):
     """
     try:
         username = request.data.get('username')
+        mac_address = request.data.get('mac_address')  # Optional MAC for targeted disconnect
+        
         if not username:
             return Response({
                 'success': False,
                 'message': 'Username is required'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        from .mikrotik import logout_user_from_mikrotik
+        # Use the comprehensive disconnect function that kicks active sessions
+        from .mikrotik import disconnect_user_from_mikrotik
         
-        result = logout_user_from_mikrotik(username)
+        result = disconnect_user_from_mikrotik(username=username, mac_address=mac_address)
         
-        if result:
+        if result.get('success') or result.get('session_removed'):
             # Log the disconnection with proper IP extraction
             try:
                 request_info = get_request_info(request)
@@ -1991,7 +1994,7 @@ def mikrotik_disconnect_user(request):
                 AccessLog.objects.create(
                     user=user,
                     ip_address=request_info['ip_address'],
-                    mac_address='',
+                    mac_address=mac_address or '',
                     access_granted=False,
                     denial_reason=f'Disconnected by admin user: {request.user.username if request.user.is_authenticated else "Unknown"}'
                 )
@@ -2000,12 +2003,18 @@ def mikrotik_disconnect_user(request):
             
             return Response({
                 'success': True,
-                'message': f'User {username} disconnected successfully'
+                'message': f'User {username} disconnected successfully',
+                'details': {
+                    'session_removed': result.get('session_removed', False),
+                    'binding_removed': result.get('binding_removed', False),
+                    'user_disabled': result.get('user_disabled', False)
+                }
             })
         else:
             return Response({
                 'success': False,
-                'message': f'Failed to disconnect user {username}'
+                'message': f'Failed to disconnect user {username}',
+                'errors': result.get('errors', [])
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
     except ImportError:
