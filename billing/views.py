@@ -934,6 +934,113 @@ def delete_user(request, user_id):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@permission_classes([SimpleAdminTokenPermission])
+def disconnect_user(request, user_id):
+    """
+    Forcefully disconnect a user from MikroTik and revoke their access (Admin only)
+    
+    This endpoint:
+    1. Removes the user's active hotspot session from MikroTik
+    2. Removes any IP binding/bypass entries for their devices
+    3. Disables their hotspot user account on MikroTik
+    4. Marks their devices as inactive in the database
+    5. Deactivates the user's access
+    
+    Use this when a user's access has expired but they're still connected,
+    or when you need to immediately terminate a user's access.
+    """
+    try:
+        from .mikrotik import disconnect_user_from_mikrotik
+        
+        user = User.objects.get(id=user_id)
+        phone_number = user.phone_number
+        
+        logger.info(f'Admin requested disconnect for user: {phone_number}')
+        
+        disconnected_devices = 0
+        disconnect_errors = []
+        
+        # Get all devices for this user
+        devices = user.devices.all()
+        
+        # Disconnect each device from MikroTik
+        for device in devices:
+            try:
+                result = disconnect_user_from_mikrotik(
+                    username=phone_number,
+                    mac_address=device.mac_address
+                )
+                
+                if result.get('success'):
+                    disconnected_devices += 1
+                    logger.info(f'Disconnected device {device.mac_address} for {phone_number}')
+                else:
+                    disconnect_errors.append(f'{device.mac_address}: {result.get("message", "Unknown error")}')
+                
+                # Mark device as inactive
+                device.is_active = False
+                device.save()
+                
+            except Exception as device_error:
+                disconnect_errors.append(f'{device.mac_address}: {str(device_error)}')
+                logger.error(f'Error disconnecting device {device.mac_address}: {device_error}')
+        
+        # Also try to disconnect by username only (for any orphaned sessions)
+        try:
+            result = disconnect_user_from_mikrotik(
+                username=phone_number,
+                mac_address=None
+            )
+            if result.get('success'):
+                logger.info(f'Cleanup disconnect for {phone_number}: {result.get("message")}')
+        except Exception as cleanup_error:
+            logger.debug(f'Cleanup disconnect for {phone_number}: {cleanup_error}')
+        
+        # Deactivate user access in database
+        user.deactivate_access()
+        
+        # Create access log
+        AccessLog.objects.create(
+            user=user,
+            phone_number=phone_number,
+            access_granted=False,
+            denial_reason=f'Admin forced disconnect',
+            ip_address=get_client_ip(request),
+            mac_address=''
+        )
+        
+        message = f'User {phone_number} disconnected. {disconnected_devices} device(s) processed.'
+        if disconnect_errors:
+            message += f' Errors: {len(disconnect_errors)}'
+        
+        logger.info(message)
+        
+        return Response({
+            'success': True,
+            'message': message,
+            'details': {
+                'phone_number': phone_number,
+                'devices_disconnected': disconnected_devices,
+                'total_devices': devices.count(),
+                'errors': disconnect_errors if disconnect_errors else None,
+                'user_deactivated': True
+            }
+        })
+        
+    except User.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f'Error disconnecting user: {str(e)}')
+        return Response({
+            'success': False,
+            'message': f'Error disconnecting user: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # Payment Management APIs
 
 @api_view(['GET'])
@@ -1477,6 +1584,61 @@ def system_status(request):
         return Response({
             'success': False,
             'message': f'Error retrieving system status: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([SimpleAdminTokenPermission])
+def cleanup_expired_users(request):
+    """
+    Manually trigger cleanup of expired users (Admin only)
+    
+    This endpoint:
+    1. Finds all users whose access has expired (paid_until < now)
+    2. Disconnects them from MikroTik router (removes active sessions, IP bindings)
+    3. Disables their hotspot user account
+    4. Deactivates their devices in the database
+    
+    Use this when you notice users with expired access are still connected to the network.
+    The cron job runs this automatically every 5 minutes, but you can trigger it manually here.
+    """
+    try:
+        from .tasks import disconnect_expired_users
+        
+        logger.info('Manual cleanup of expired users triggered by admin')
+        
+        result = disconnect_expired_users()
+        
+        if result.get('success'):
+            message = f"Successfully processed expired users: {result.get('disconnected', 0)} disconnected, {result.get('devices_deactivated', 0)} devices deactivated"
+            if result.get('failed', 0) > 0:
+                message += f", {result['failed']} failures"
+            
+            logger.info(message)
+            
+            return Response({
+                'success': True,
+                'message': message,
+                'details': {
+                    'users_disconnected': result.get('disconnected', 0),
+                    'devices_deactivated': result.get('devices_deactivated', 0),
+                    'failed': result.get('failed', 0),
+                    'total_checked': result.get('total_checked', 0)
+                },
+                'timestamp': timezone.now().isoformat()
+            })
+        else:
+            return Response({
+                'success': False,
+                'message': f"Cleanup failed: {result.get('error', 'Unknown error')}",
+                'timestamp': timezone.now().isoformat()
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+    except Exception as e:
+        logger.error(f'Error in cleanup_expired_users: {str(e)}')
+        return Response({
+            'success': False,
+            'message': f'Error during cleanup: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

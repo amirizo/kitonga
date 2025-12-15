@@ -238,6 +238,12 @@ else:
     CORS_ALLOW_ALL_ORIGINS = False
     CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='https://kitonga.klikcell.com,https://api.kitonga.klikcell.com,http://localhost:3000', cast=Csv())
 
+# CORS preflight settings
+CORS_PREFLIGHT_MAX_AGE = 86400  # 24 hours
+
+# Allow cookies and authorization headers
+CORS_ALLOW_CREDENTIALS = True
+
 # CSRF settings - Environment Aware
 if DEBUG:
     # Development: More permissive CSRF settings
@@ -279,9 +285,6 @@ CORS_ALLOW_METHODS = [
     'POST',
     'PUT',
 ]
-
-# Allow credentials (if needed for authentication)
-CORS_ALLOW_CREDENTIALS = True
 
 # ClickPesa Configuration
 CLICKPESA_CLIENT_ID = config('CLICKPESA_CLIENT_ID', default='')

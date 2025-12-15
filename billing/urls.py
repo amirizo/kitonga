@@ -40,6 +40,7 @@ urlpatterns = [
     path('admin/users/<int:user_id>/', views.get_user_detail, name='get_user_detail'),
     path('admin/users/<int:user_id>/update/', views.update_user, name='update_user'),
     path('admin/users/<int:user_id>/delete/', views.delete_user, name='delete_user'),
+    path('admin/users/<int:user_id>/disconnect/', views.disconnect_user, name='disconnect_user'),
     
     # Alternative shorter endpoints for frontend compatibility
     path('users/', views.list_users, name='list_users_short'),
@@ -59,6 +60,7 @@ urlpatterns = [
     # System Settings and Status endpoints (Admin only)
     path('admin/settings/', views.system_settings, name='system_settings'),
     path('admin/status/', views.system_status, name='system_status'),
+    path('admin/cleanup-expired/', views.cleanup_expired_users, name='cleanup_expired_users'),
     
     # Mikrotik Integration endpoints
     path('mikrotik/auth/', views.mikrotik_auth, name='mikrotik_auth'),

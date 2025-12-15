@@ -2172,3 +2172,13 @@ INFO 2025-12-13 23:40:07,471 basehttp 17161 6200684544 code 400, message Bad HTT
 ERROR 2025-12-13 23:40:07,471 basehttp 17161 6200684544 You're accessing the development server over HTTPS, but it only supports HTTP.
 INFO 2025-12-13 23:40:07,473 basehttp 17161 6200684544 code 400, message Bad request version ('Kù6èÖ/\x1a±\x84¹\x02B\x84QªØÂ!J&XdÂ\x14ÞÖvi¹')
 ERROR 2025-12-13 23:40:07,473 basehttp 17161 6200684544 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-15 10:27:51,663 autoreload 38480 8443732096 Watching for file changes with StatReloader
+INFO 2025-12-15 10:28:01,564 basehttp 38480 6189527040 "GET /api/health/ HTTP/1.1" 301 0
+INFO 2025-12-15 10:28:01,582 basehttp 38480 6189527040 code 400, message Bad request version ('\x00\x02\x01\x00\x00')
+ERROR 2025-12-15 10:28:01,582 basehttp 38480 6189527040 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-15 10:28:12,698 basehttp 38480 6189527040 "GET /api/health/ HTTP/1.1" 301 0
+INFO 2025-12-15 10:28:19,553 basehttp 38480 6189527040 "GET /api/health/ HTTP/1.1" 301 0
+INFO 2025-12-15 10:28:19,556 basehttp 38480 6206353408 code 400, message Bad request version ("S\x15\x89ú¥A\x1b`\x8a\\\x13\x82'\\æñ~K-\x00b\x13\x03\x13\x02\x13\x01Ì©Ì¨ÌªÀ0À,À(À$À\x14À")
+ERROR 2025-12-15 10:28:19,556 basehttp 38480 6206353408 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2025-12-15 10:28:26,922 basehttp 38480 6189527040 "GET /api/health HTTP/1.1" 301 0
+INFO 2025-12-15 10:30:06,587 autoreload 40409 8443732096 Watching for file changes with StatReloader
