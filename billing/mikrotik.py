@@ -101,7 +101,11 @@ def get_mikrotik_api(retries: int = 3, timeout: int = 10):
 
 
 def allow_mac(mac_address: str, comment: str = 'Paid user') -> bool:
-    """Create/ensure bypass binding for a MAC in /ip/hotspot/ip-binding."""
+    """Create/ensure bypass binding for a MAC in /ip/hotspot/ip-binding.
+    
+    If binding already exists, it will be updated to 'bypassed' type.
+    This ensures that previously disabled/blocked MACs get re-enabled.
+    """
     if not mac_address:
         logger.warning('allow_mac called with empty mac_address')
         return False
@@ -112,9 +116,11 @@ def allow_mac(mac_address: str, comment: str = 'Paid user') -> bool:
         
         if existing:
             for item in existing:
-                if '.id' in item:
-                    # use set (routeros_api) not update
-                    bindings.set(id=item['.id'], type='bypassed', comment=comment, mac_address=mac_address)
+                # Use .get() for safety - MikroTik API can return '.id' or 'id'
+                binding_id = item.get('.id') or item.get('id')
+                if binding_id:
+                    # Update to bypassed type (re-enable if was blocked)
+                    bindings.set(id=binding_id, type='bypassed', comment=comment, mac_address=mac_address)
             logger.info(f'Updated bypass binding for {mac_address}')
             return True
         
@@ -213,8 +219,10 @@ def force_login_hotspot_user(username: str, mac_address: str, ip_address: str = 
             
             if existing:
                 for item in existing:
-                    if '.id' in item:
-                        bindings.set(id=item['.id'], type='bypassed', comment=f'Auto-login: {username}')
+                    # Use .get() for safety - MikroTik API can return '.id' or 'id'
+                    binding_id = item.get('.id') or item.get('id')
+                    if binding_id:
+                        bindings.set(id=binding_id, type='bypassed', comment=f'Auto-login: {username}')
                 logger.info(f'Updated bypass binding for {mac_address}')
             else:
                 bindings.add(type='bypassed', mac_address=mac_address, comment=f'Auto-login: {username}')
@@ -255,8 +263,10 @@ def revoke_mac(mac_address: str) -> bool:
         
         count = 0
         for item in items:
-            if '.id' in item:
-                bindings.remove(id=item['.id'])
+            # Use .get() for safety - MikroTik API can return '.id' or 'id'
+            binding_id = item.get('.id') or item.get('id')
+            if binding_id:
+                bindings.remove(id=binding_id)
                 count += 1
         
         logger.info(f'Revoked {count} binding(s) for {mac_address}')
@@ -269,7 +279,15 @@ def revoke_mac(mac_address: str) -> bool:
 
 
 def create_hotspot_user(username: str, password: str, profile: Optional[str] = None) -> bool:
-    """Create or update /ip/hotspot/user entry (no usage limits applied)."""
+    """Create or update /ip/hotspot/user entry (no usage limits applied).
+    
+    IMPORTANT: If user already exists (even if disabled), this function will:
+    - Update password and profile
+    - RE-ENABLE the user (set disabled='no')
+    
+    This ensures that when a user pays again or uses a voucher after their
+    access expired (and they were disabled), they get re-enabled automatically.
+    """
     if not username:
         return False
     api = get_mikrotik_api()
@@ -280,9 +298,12 @@ def create_hotspot_user(username: str, password: str, profile: Optional[str] = N
         
         if exist:
             for item in exist:
-                if '.id' in item:
-                    users.set(id=item['.id'], password=password, profile=profile, disabled='no')
-            logger.info(f'Updated hotspot user {username}')
+                # Use .get() for safety - MikroTik API can return '.id' or 'id'
+                user_id = item.get('.id') or item.get('id')
+                if user_id:
+                    # Update password, profile AND re-enable the user
+                    users.set(id=user_id, password=password, profile=profile, disabled='no')
+                    logger.info(f'Updated and RE-ENABLED hotspot user {username} (was possibly disabled)')
             return True
         
         users.add(name=username, password=password, profile=profile, disabled='no')
