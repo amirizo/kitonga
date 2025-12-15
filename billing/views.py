@@ -1003,7 +1003,7 @@ def disconnect_user(request, user_id):
         # Create access log
         AccessLog.objects.create(
             user=user,
-            phone_number=phone_number,
+            device=None,
             access_granted=False,
             denial_reason=f'Admin forced disconnect',
             ip_address=get_client_ip(request),
@@ -2764,56 +2764,122 @@ def clickpesa_webhook(request):
                 )
                 logger.info(f'Payment completed: {order_reference} - {transaction_id}')
                 
-                # AUTOMATIC CONNECTION: Immediately grant internet access after successful payment
+                # ============================================================
+                # AUTOMATIC CONNECTION (Same logic as voucher redemption)
+                # 1. Register/update device
+                # 2. Grant MikroTik access (hotspot user + IP binding)
+                # 3. Create access log
+                # 4. Send SMS confirmation
+                # ============================================================
+                
                 mikrotik_auth_result = None
                 connection_success = False
+                immediate_login_success = False
+                auto_access_result = {}
+                device = None
+                
                 try:
                     # Get user and their devices
                     user = payment.user
+                    phone_number = payment.phone_number
                     devices = user.devices.filter(is_active=True)
                     
                     if devices.exists():
-                        # Grant access for all active user devices
+                        # Grant access for all active user devices (same as voucher)
                         for device in devices:
                             try:
-                                # Enhanced device tracking for payment users
+                                mac_address = device.mac_address
+                                ip_address = device.ip_address
+                                
+                                # Enhanced device tracking for payment users (same as voucher)
                                 device_tracking_result = enhance_device_tracking_for_payment(
                                     payment_user=user,
-                                    mac_address=device.mac_address,
-                                    ip_address=device.ip_address
+                                    mac_address=mac_address,
+                                    ip_address=ip_address
                                 )
                                 
+                                if device_tracking_result.get('success'):
+                                    logger.info(f'Enhanced device tracking successful for payment user {phone_number}: {mac_address}')
+                                else:
+                                    logger.warning(f'Enhanced device tracking failed for {phone_number}: {device_tracking_result.get("message")}')
+                                
                                 # Grant immediate access via MikroTik (creates hotspot user + IP binding)
+                                # Same function used in voucher redemption
                                 auto_access_result = force_immediate_internet_access(
-                                    username=payment.phone_number,
-                                    mac_address=device.mac_address,
-                                    ip_address=device.ip_address,
+                                    username=phone_number,
+                                    mac_address=mac_address,
+                                    ip_address=ip_address,
                                     access_type='payment'
                                 )
                                 
                                 if auto_access_result.get('success'):
                                     connection_success = True
-                                    logger.info(f'✓ Auto-login successful for {payment.phone_number} via device {device.mac_address}')
+                                    immediate_login_success = True
+                                    logger.info(f'✓ Auto-login successful for payment user {phone_number} - device: {mac_address}')
                                 else:
-                                    logger.warning(f'Auto-login failed for device {device.mac_address} for {payment.phone_number}: {auto_access_result}')
+                                    logger.warning(f'Auto-login failed for device {mac_address} for {phone_number}: {auto_access_result.get("message")}')
+                                
+                                # Create access log for this device (same as voucher)
+                                AccessLog.objects.create(
+                                    user=user,
+                                    device=device,
+                                    ip_address=ip_address or '127.0.0.1',
+                                    mac_address=mac_address,
+                                    access_granted=True,
+                                    denial_reason=f'Payment completed: {order_reference} - Access granted for {payment.bundle.duration_hours if payment.bundle else 24} hours'
+                                )
                                     
                             except Exception as device_error:
-                                logger.error(f'Error during auto-login for device {device.mac_address} for {payment.phone_number}: {str(device_error)}')
+                                logger.error(f'Error during auto-login for device {device.mac_address} for {phone_number}: {str(device_error)}')
                         
-                        mikrotik_auth_result = {'success': connection_success}
+                        mikrotik_auth_result = {
+                            'success': connection_success,
+                            'immediate_login_success': immediate_login_success,
+                            'devices_processed': devices.count()
+                        }
                     else:
-                        # No devices yet, create hotspot user so they can connect immediately when they join WiFi
+                        # No devices yet - create hotspot user so they can connect immediately when they join WiFi
+                        # Same as voucher when no MAC provided
                         auto_access_result = create_hotspot_user_and_login(
-                            username=payment.phone_number,
-                            password=payment.phone_number
+                            username=phone_number,
+                            password=phone_number
                         )
-                        mikrotik_auth_result = auto_access_result
-                        logger.info(f'No active devices for {payment.phone_number} - created hotspot user for immediate connection')
+                        mikrotik_auth_result = {
+                            'success': auto_access_result.get('success', False),
+                            'hotspot_user_created': True,
+                            'immediate_login_success': False,
+                            'message': 'Hotspot user created - will connect when user joins WiFi'
+                        }
+                        logger.info(f'No active devices for {phone_number} - created hotspot user for immediate connection')
+                        
+                        # Create access log without device (same as voucher)
+                        AccessLog.objects.create(
+                            user=user,
+                            device=None,
+                            ip_address='127.0.0.1',
+                            mac_address='',
+                            access_granted=True,
+                            denial_reason=f'Payment completed: {order_reference} - Access granted for {payment.bundle.duration_hours if payment.bundle else 24} hours (no device registered yet)'
+                        )
                         
                 except Exception as e:
                     logger.error(f'MikroTik auto-login failed after payment for {payment.phone_number}: {str(e)}')
                     mikrotik_auth_result = {'success': False, 'error': str(e)}
+                    
+                    # Still create access log even if MikroTik fails
+                    try:
+                        AccessLog.objects.create(
+                            user=payment.user,
+                            device=None,
+                            ip_address='127.0.0.1',
+                            mac_address='',
+                            access_granted=True,
+                            denial_reason=f'Payment completed: {order_reference} - MikroTik sync failed but access granted in database'
+                        )
+                    except Exception:
+                        pass
                 
+                # Send SMS confirmation (with appropriate message based on connection status)
                 from .nextsms import NextSMSAPI
                 from .models import SMSLog
                 
