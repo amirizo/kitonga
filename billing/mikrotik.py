@@ -345,11 +345,14 @@ def revoke_user_access(mac_address: Optional[str] = None, username: Optional[str
         if username and api is not None:
             try:
                 users = api.get_resource('/ip/hotspot/user')
-                existing = users.get(name=username)
-                for item in existing:
-                    users.set(id=item['.id'], disabled='yes')
-                    result['user_revoked'] = True
-                    logger.info(f'Disabled hotspot user: {username}')
+                all_users = users.get()
+                for item in all_users:
+                    if item.get('name') == username:
+                        user_id = item.get('.id') or item.get('id')
+                        if user_id:
+                            users.set(id=user_id, disabled='yes')
+                            result['user_revoked'] = True
+                            logger.info(f'Disabled hotspot user: {username}')
             except Exception as e:
                 logger.error(f'revoke_user_access: disable user failed for {username}: {e}')
                 result['errors'].append(f'user:{e}')
@@ -374,9 +377,13 @@ def revoke_user_access(mac_address: Optional[str] = None, username: Optional[str
                     
                     if should_kick:
                         try:
-                            active.remove(id=session['.id'])
-                            result['session_kicked'] = True
-                            logger.info(f'Kicked active session: user={session_user}, mac={session_mac}')
+                            session_id = session.get('.id') or session.get('id')
+                            if session_id:
+                                active.remove(id=session_id)
+                                result['session_kicked'] = True
+                                logger.info(f'Kicked active session: user={session_user}, mac={session_mac}')
+                            else:
+                                logger.warning(f'No ID found for session: {session}')
                         except Exception as kick_err:
                             logger.error(f'Failed to kick session {session_user}: {kick_err}')
                             result['errors'].append(f'kick:{kick_err}')
@@ -1106,16 +1113,34 @@ def disconnect_user_from_mikrotik(username: str, mac_address: str = None) -> dic
         # Step 1: Remove active sessions
         try:
             active = api.get_resource('/ip/hotspot/active')
-            sessions = active.get(user=username)
+            # Get ALL sessions and filter manually (more reliable)
+            all_sessions = active.get()
             
-            for session in sessions:
-                try:
-                    active.remove(id=session['.id'])
-                    result['session_removed'] = True
-                    logger.info(f'Removed active session for {username}: {session.get("mac-address")}')
-                except Exception as rem_err:
-                    logger.warning(f'Failed to remove session {session.get(".id")}: {rem_err}')
-                    result['errors'].append(f'session_remove: {rem_err}')
+            for session in all_sessions:
+                session_user = session.get('user', '')
+                session_mac = session.get('mac-address', '')
+                
+                # Match by username OR MAC address
+                should_remove = False
+                if username and session_user == username:
+                    should_remove = True
+                if mac_address and session_mac.upper() == mac_address.upper():
+                    should_remove = True
+                
+                if should_remove:
+                    try:
+                        # Try different ID key formats
+                        session_id = session.get('.id') or session.get('id') or session.get('.id')
+                        if session_id:
+                            active.remove(id=session_id)
+                            result['session_removed'] = True
+                            logger.info(f'Removed active session for {username}: {session_mac}')
+                        else:
+                            logger.warning(f'No ID found for session: {session}')
+                            result['errors'].append(f'session_no_id: {session_user}')
+                    except Exception as rem_err:
+                        logger.warning(f'Failed to remove session for {session_user}: {rem_err}')
+                        result['errors'].append(f'session_remove: {rem_err}')
                     
         except Exception as e:
             logger.warning(f'Error removing active sessions for {username}: {e}')
@@ -1157,16 +1182,24 @@ def disconnect_user_from_mikrotik(username: str, mac_address: str = None) -> dic
         # Step 3: Disable hotspot user
         try:
             users = api.get_resource('/ip/hotspot/user')
-            user_list = users.get(name=username)
+            # Get all users and filter manually
+            all_users = users.get()
             
-            for user in user_list:
-                try:
-                    users.set(id=user['.id'], disabled='yes')
-                    result['user_disabled'] = True
-                    logger.info(f'Disabled hotspot user {username}')
-                except Exception as dis_err:
-                    logger.warning(f'Failed to disable user {username}: {dis_err}')
-                    result['errors'].append(f'user_disable: {dis_err}')
+            for user in all_users:
+                user_name = user.get('name', '')
+                if user_name == username:
+                    try:
+                        # Try different ID key formats
+                        user_id = user.get('.id') or user.get('id')
+                        if user_id:
+                            users.set(id=user_id, disabled='yes')
+                            result['user_disabled'] = True
+                            logger.info(f'Disabled hotspot user {username}')
+                        else:
+                            logger.warning(f'No ID found for user: {user}')
+                    except Exception as dis_err:
+                        logger.warning(f'Failed to disable user {username}: {dis_err}')
+                        result['errors'].append(f'user_disable: {dis_err}')
                     
         except Exception as e:
             logger.warning(f'Error disabling hotspot user {username}: {e}')
