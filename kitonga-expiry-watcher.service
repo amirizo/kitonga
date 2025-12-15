@@ -1,0 +1,23 @@
+[Unit]
+Description=Kitonga WiFi Access Expiry Watcher
+After=network.target postgresql.service mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/kitonga
+Environment="PATH=/var/www/kitonga/venv/bin"
+Environment="DJANGO_SETTINGS_MODULE=kitonga.settings"
+ExecStart=/var/www/kitonga/venv/bin/python manage.py run_expiry_watcher --interval 30
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/kitonga/expiry_watcher.log
+StandardError=append:/var/log/kitonga/expiry_watcher_error.log
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

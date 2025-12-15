@@ -61,6 +61,7 @@ urlpatterns = [
     path('admin/settings/', views.system_settings, name='system_settings'),
     path('admin/status/', views.system_status, name='system_status'),
     path('admin/cleanup-expired/', views.cleanup_expired_users, name='cleanup_expired_users'),
+    path('admin/expiry-watcher/', views.expiry_watcher_status, name='expiry_watcher_status'),
     
     # Mikrotik Integration endpoints
     path('mikrotik/auth/', views.mikrotik_auth, name='mikrotik_auth'),

@@ -1642,6 +1642,94 @@ def cleanup_expired_users(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['GET', 'POST'])
+@permission_classes([SimpleAdminTokenPermission])
+def expiry_watcher_status(request):
+    """
+    Get the status of the real-time expiry watcher or trigger a manual check (Admin only)
+    
+    GET: Returns the watcher status and users about to expire
+    POST: Triggers an immediate expiry check
+    """
+    try:
+        from .expiry_watcher import get_watcher, AccessExpiryWatcher
+        from datetime import timedelta
+        
+        now = timezone.now()
+        
+        if request.method == 'POST':
+            # Trigger immediate check
+            watcher = AccessExpiryWatcher()
+            watcher._check_and_disconnect_expired()
+            
+            return Response({
+                'success': True,
+                'message': 'Expiry check triggered successfully',
+                'timestamp': now.isoformat()
+            })
+        
+        # GET - Return status
+        watcher = get_watcher()
+        
+        # Get users about to expire
+        expiring_soon = User.objects.filter(
+            is_active=True,
+            paid_until__gt=now,
+            paid_until__lte=now + timedelta(minutes=30)
+        ).values('id', 'phone_number', 'paid_until')
+        
+        # Get recently expired (should be empty if watcher is working)
+        recently_expired = User.objects.filter(
+            is_active=True,
+            paid_until__lte=now
+        ).values('id', 'phone_number', 'paid_until')
+        
+        # Get stats
+        total_active = User.objects.filter(is_active=True, paid_until__gt=now).count()
+        
+        expiring_list = []
+        for user in expiring_soon:
+            remaining = user['paid_until'] - now
+            expiring_list.append({
+                'id': user['id'],
+                'phone_number': user['phone_number'],
+                'expires_at': user['paid_until'].isoformat(),
+                'remaining_minutes': int(remaining.total_seconds() / 60)
+            })
+        
+        expired_list = []
+        for user in recently_expired:
+            expired_list.append({
+                'id': user['id'],
+                'phone_number': user['phone_number'],
+                'expired_at': user['paid_until'].isoformat()
+            })
+        
+        return Response({
+            'success': True,
+            'watcher': {
+                'running': watcher._running if watcher else False,
+                'check_interval_seconds': watcher._check_interval if watcher else 30,
+            },
+            'statistics': {
+                'total_active_users': total_active,
+                'expiring_in_30_min': len(expiring_list),
+                'expired_but_still_active': len(expired_list)
+            },
+            'expiring_soon': expiring_list,
+            'expired_not_disconnected': expired_list,
+            'health': 'healthy' if len(expired_list) == 0 else 'needs_attention',
+            'timestamp': now.isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f'Error getting watcher status: {str(e)}')
+        return Response({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # MikroTik Router Configuration and Management APIs
 
 @api_view(['GET', 'POST'])
