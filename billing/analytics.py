@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Any
 from django.utils import timezone
 from django.db.models import Count, Sum, Avg, F, Q
-from django.db.models.functions import TruncDate, TruncHour, TruncWeek, TruncMonth
+from django.db.models.functions import TruncDate, TruncHour, TruncWeek, TruncMonth, ExtractHour
 
 from .models import (
     Tenant, User, Payment, Voucher, Device, AccessLog, 
@@ -199,9 +199,7 @@ class TenantAnalytics:
             status='completed',
             completed_at__gte=start_date
         ).annotate(
-            hour=TruncHour('completed_at')
-        ).extra(
-            select={'hour_of_day': 'EXTRACT(HOUR FROM completed_at)'}
+            hour_of_day=ExtractHour('completed_at')
         ).values('hour_of_day').annotate(
             count=Count('id'),
             revenue=Sum('amount')
