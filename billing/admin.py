@@ -1,5 +1,6 @@
 """
-Django admin configuration for Kitonga Wi-Fi with Jazzmin
+Django admin configuration for Kitonga Wi-Fi SaaS Platform with Jazzmin
+Includes multi-tenant management and existing WiFi billing models
 """
 from django.contrib import admin
 from django.urls import path
@@ -8,8 +9,220 @@ from django.http import HttpResponse
 from django.utils.html import format_html
 from django.utils import timezone
 import csv
-from .models import User, Payment, AccessLog, Voucher, Bundle, Device, SMSLog, PaymentWebhook
+from .models import (
+    # SaaS Models
+    SubscriptionPlan, Tenant, TenantStaff, Location, Router, TenantSubscriptionPayment,
+    # WiFi Billing Models (now multi-tenant)
+    User, Payment, AccessLog, Voucher, Bundle, Device, SMSLog, PaymentWebhook
+)
 from .views import dashboard_stats
+
+
+# =============================================================================
+# SAAS PLATFORM ADMIN (Super Admin Only)
+# =============================================================================
+
+@admin.register(SubscriptionPlan)
+class SubscriptionPlanAdmin(admin.ModelAdmin):
+    """Manage SaaS subscription plans"""
+    list_display = ['display_name', 'monthly_price_formatted', 'yearly_price_formatted', 'max_routers', 'max_vouchers_display', 'features_summary', 'is_active']
+    list_filter = ['is_active']
+    ordering = ['display_order']
+    
+    fieldsets = (
+        ('Plan Info', {
+            'fields': ('name', 'display_name', 'description', 'is_active', 'display_order')
+        }),
+        ('Pricing (TZS)', {
+            'fields': ('monthly_price', 'yearly_price', 'currency', 'revenue_share_percentage')
+        }),
+        ('Limits', {
+            'fields': ('max_routers', 'max_wifi_users', 'max_vouchers_per_month', 'max_locations', 'max_staff_accounts')
+        }),
+        ('Features', {
+            'fields': ('custom_branding', 'custom_domain', 'api_access', 'white_label', 'priority_support', 'analytics_dashboard', 'sms_notifications')
+        }),
+    )
+    
+    def monthly_price_formatted(self, obj):
+        return f"TZS {obj.monthly_price:,.0f}"
+    monthly_price_formatted.short_description = 'Monthly'
+    
+    def yearly_price_formatted(self, obj):
+        return f"TZS {obj.yearly_price:,.0f}"
+    yearly_price_formatted.short_description = 'Yearly'
+    
+    def max_vouchers_display(self, obj):
+        if obj.max_vouchers_per_month >= 999999:
+            return 'Unlimited'
+        return f"{obj.max_vouchers_per_month:,}"
+    max_vouchers_display.short_description = 'Vouchers/Month'
+    
+    def features_summary(self, obj):
+        features = []
+        if obj.custom_branding:
+            features.append('Branding')
+        if obj.custom_domain:
+            features.append('Custom Domain')
+        if obj.api_access:
+            features.append('API')
+        if obj.white_label:
+            features.append('White Label')
+        return ', '.join(features) if features else 'Basic'
+    features_summary.short_description = 'Features'
+
+
+@admin.register(Tenant)
+class TenantAdmin(admin.ModelAdmin):
+    """Manage tenant businesses"""
+    list_display = ['business_name', 'slug', 'owner_email', 'subscription_plan', 'subscription_status_badge', 'router_count', 'user_count', 'created_at']
+    list_filter = ['subscription_status', 'subscription_plan', 'country', 'is_active', 'created_at']
+    search_fields = ['business_name', 'slug', 'business_email', 'owner__email']
+    readonly_fields = ['id', 'api_key', 'api_secret', 'created_at', 'updated_at']
+    ordering = ['-created_at']
+    
+    fieldsets = (
+        ('Tenant Info', {
+            'fields': ('id', 'slug', 'business_name', 'business_email', 'business_phone', 'business_address', 'country', 'timezone')
+        }),
+        ('Owner', {
+            'fields': ('owner',)
+        }),
+        ('Subscription', {
+            'fields': ('subscription_plan', 'subscription_status', 'billing_cycle', 'trial_ends_at', 'subscription_started_at', 'subscription_ends_at')
+        }),
+        ('Branding', {
+            'fields': ('logo', 'primary_color', 'secondary_color', 'custom_domain'),
+            'classes': ('collapse',)
+        }),
+        ('Payment Gateway (Tenant\'s Own)', {
+            'fields': ('clickpesa_client_id', 'clickpesa_api_key', 'nextsms_username', 'nextsms_password', 'nextsms_sender_id'),
+            'classes': ('collapse',)
+        }),
+        ('API Access', {
+            'fields': ('api_key', 'api_secret'),
+            'classes': ('collapse',)
+        }),
+        ('Status', {
+            'fields': ('is_active', 'notes', 'created_at', 'updated_at')
+        }),
+    )
+    
+    def owner_email(self, obj):
+        return obj.owner.email
+    owner_email.short_description = 'Owner'
+    
+    def subscription_status_badge(self, obj):
+        colors = {
+            'trial': 'orange',
+            'active': 'green',
+            'suspended': 'red',
+            'cancelled': 'gray',
+        }
+        color = colors.get(obj.subscription_status, 'gray')
+        return format_html(f'<span style="background: {color}; color: white; padding: 2px 8px; border-radius: 4px;">{obj.subscription_status.upper()}</span>')
+    subscription_status_badge.short_description = 'Status'
+    
+    def router_count(self, obj):
+        return obj.routers.filter(is_active=True).count()
+    router_count.short_description = 'Routers'
+    
+    def user_count(self, obj):
+        return obj.wifi_users.count()
+    user_count.short_description = 'WiFi Users'
+
+
+@admin.register(TenantStaff)
+class TenantStaffAdmin(admin.ModelAdmin):
+    """Manage tenant staff members"""
+    list_display = ['user_email', 'tenant_name', 'role', 'is_active', 'invited_at']
+    list_filter = ['role', 'is_active', 'tenant']
+    search_fields = ['user__email', 'tenant__business_name']
+    
+    def user_email(self, obj):
+        return obj.user.email
+    user_email.short_description = 'User'
+    
+    def tenant_name(self, obj):
+        return obj.tenant.business_name
+    tenant_name.short_description = 'Tenant'
+
+
+@admin.register(Location)
+class LocationAdmin(admin.ModelAdmin):
+    """Manage tenant locations"""
+    list_display = ['name', 'tenant_name', 'city', 'manager_name', 'is_active']
+    list_filter = ['is_active', 'tenant']
+    search_fields = ['name', 'tenant__business_name', 'city']
+    
+    def tenant_name(self, obj):
+        return obj.tenant.business_name
+    tenant_name.short_description = 'Tenant'
+
+
+@admin.register(Router)
+class RouterAdmin(admin.ModelAdmin):
+    """Manage MikroTik routers"""
+    list_display = ['name', 'tenant_name', 'host', 'status_badge', 'router_model', 'last_seen', 'is_active']
+    list_filter = ['status', 'is_active', 'tenant']
+    search_fields = ['name', 'host', 'tenant__business_name', 'router_identity']
+    readonly_fields = ['router_model', 'router_version', 'router_identity', 'last_seen', 'last_error', 'created_at', 'updated_at']
+    
+    fieldsets = (
+        ('Router Info', {
+            'fields': ('tenant', 'location', 'name', 'description')
+        }),
+        ('Connection', {
+            'fields': ('host', 'port', 'username', 'password', 'use_ssl')
+        }),
+        ('Router Details (Auto-detected)', {
+            'fields': ('router_model', 'router_version', 'router_identity'),
+            'classes': ('collapse',)
+        }),
+        ('Hotspot Settings', {
+            'fields': ('hotspot_interface', 'hotspot_profile')
+        }),
+        ('Status', {
+            'fields': ('status', 'last_seen', 'last_error', 'is_active', 'created_at', 'updated_at')
+        }),
+    )
+    
+    def tenant_name(self, obj):
+        return obj.tenant.business_name
+    tenant_name.short_description = 'Tenant'
+    
+    def status_badge(self, obj):
+        colors = {
+            'online': 'green',
+            'offline': 'red',
+            'configuring': 'orange',
+            'error': 'red',
+        }
+        color = colors.get(obj.status, 'gray')
+        return format_html(f'<span style="background: {color}; color: white; padding: 2px 8px; border-radius: 4px;">{obj.status.upper()}</span>')
+    status_badge.short_description = 'Status'
+
+
+@admin.register(TenantSubscriptionPayment)
+class TenantSubscriptionPaymentAdmin(admin.ModelAdmin):
+    """Track subscription payments from tenants"""
+    list_display = ['tenant_name', 'plan_name', 'amount', 'billing_cycle', 'status', 'period_start', 'period_end', 'created_at']
+    list_filter = ['status', 'billing_cycle', 'plan', 'created_at']
+    search_fields = ['tenant__business_name', 'transaction_id']
+    readonly_fields = ['created_at', 'completed_at']
+    
+    def tenant_name(self, obj):
+        return obj.tenant.business_name
+    tenant_name.short_description = 'Tenant'
+    
+    def plan_name(self, obj):
+        return obj.plan.display_name
+    plan_name.short_description = 'Plan'
+
+
+# =============================================================================
+# WIFI BILLING ADMIN (Modified for Multi-Tenancy)
+# =============================================================================
 
 class KitongaAdminSite(admin.AdminSite):
     """Custom admin site with dashboard link"""
@@ -25,16 +238,20 @@ class KitongaAdminSite(admin.AdminSite):
         """Redirect to dashboard stats view"""
         return dashboard_stats(request)
 
-# Use default admin site for Jazzmin
-# admin_site = KitongaAdminSite()
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ['phone_number', 'is_active', 'access_status', 'paid_until', 'total_payments', 'device_count', 'created_at']
-    list_filter = ['is_active', 'created_at']
-    search_fields = ['phone_number']
-    readonly_fields = ['created_at', 'total_payments']
+    list_display = ['phone_number', 'tenant_name', 'is_active', 'access_status', 'paid_until', 'total_payments', 'device_count', 'created_at']
+    list_filter = ['is_active', 'tenant', 'created_at']
+    search_fields = ['phone_number', 'tenant__business_name']
+    readonly_fields = ['created_at', 'total_payments', 'total_amount_paid']
     ordering = ['-created_at']
+    
+    def tenant_name(self, obj):
+        if obj.tenant:
+            return obj.tenant.business_name
+        return '-'
+    tenant_name.short_description = 'Tenant'
     
     def access_status(self, obj):
         """Display access status with color coding"""
@@ -51,16 +268,20 @@ class UserAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.prefetch_related('devices')
+        return qs.prefetch_related('devices').select_related('tenant')
 
 
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
-    list_display = ['phone_number', 'amount_formatted', 'status_badge', 'payment_reference', 'payment_channel', 'bundle_name', 'created_at']
-    list_filter = ['status', 'payment_channel', 'created_at', 'bundle']
-    search_fields = ['phone_number', 'payment_reference', 'transaction_id', 'order_reference']
+    list_display = ['phone_number', 'tenant_name', 'amount_formatted', 'status_badge', 'payment_reference', 'payment_channel', 'bundle_name', 'created_at']
+    list_filter = ['status', 'payment_channel', 'tenant', 'created_at', 'bundle']
+    search_fields = ['phone_number', 'payment_reference', 'transaction_id', 'order_reference', 'tenant__business_name']
     readonly_fields = ['created_at', 'completed_at']
     ordering = ['-created_at']
+    
+    def tenant_name(self, obj):
+        return obj.tenant.business_name if obj.tenant else '-'
+    tenant_name.short_description = 'Tenant'
     
     def amount_formatted(self, obj):
         """Format amount with currency"""
@@ -69,14 +290,9 @@ class PaymentAdmin(admin.ModelAdmin):
     
     def status_badge(self, obj):
         """Display status with color badges"""
-        if obj.status == 'COMPLETED':
-            return format_html('<span style="background: green; color: white; padding: 2px 8px; border-radius: 4px;">COMPLETED</span>')
-        elif obj.status == 'PENDING':
-            return format_html('<span style="background: orange; color: white; padding: 2px 8px; border-radius: 4px;">PENDING</span>')
-        elif obj.status == 'FAILED':
-            return format_html('<span style="background: red; color: white; padding: 2px 8px; border-radius: 4px;">FAILED</span>')
-        else:
-            return obj.status
+        colors = {'completed': 'green', 'pending': 'orange', 'failed': 'red', 'cancelled': 'gray', 'refunded': 'purple'}
+        color = colors.get(obj.status, 'gray')
+        return format_html(f'<span style="background: {color}; color: white; padding: 2px 8px; border-radius: 4px;">{obj.status.upper()}</span>')
     status_badge.short_description = 'Status'
     
     def bundle_name(self, obj):
@@ -86,16 +302,20 @@ class PaymentAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related('user', 'bundle')
+        return qs.select_related('user', 'bundle', 'tenant')
 
 
 @admin.register(Device)
 class DeviceAdmin(admin.ModelAdmin):
-    list_display = ['user_phone', 'device_name', 'mac_address', 'ip_address', 'is_active', 'first_seen', 'last_seen']
-    list_filter = ['is_active', 'first_seen']
-    search_fields = ['user__phone_number', 'mac_address', 'ip_address', 'device_name']
+    list_display = ['user_phone', 'tenant_name', 'device_name', 'mac_address', 'ip_address', 'is_active', 'first_seen', 'last_seen']
+    list_filter = ['is_active', 'tenant', 'first_seen']
+    search_fields = ['user__phone_number', 'mac_address', 'ip_address', 'device_name', 'tenant__business_name']
     readonly_fields = ['first_seen', 'last_seen']
     ordering = ['-last_seen']
+    
+    def tenant_name(self, obj):
+        return obj.tenant.business_name if obj.tenant else '-'
+    tenant_name.short_description = 'Tenant'
     
     def user_phone(self, obj):
         """Display user phone number"""
@@ -104,16 +324,20 @@ class DeviceAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related('user')
+        return qs.select_related('user', 'tenant')
 
 
 @admin.register(AccessLog)
 class AccessLogAdmin(admin.ModelAdmin):
-    list_display = ['user_phone', 'ip_address', 'mac_address', 'access_granted_badge', 'denial_reason', 'timestamp']
-    list_filter = ['access_granted', 'timestamp', 'denial_reason']
-    search_fields = ['user__phone_number', 'ip_address', 'mac_address']
+    list_display = ['user_phone', 'tenant_name', 'ip_address', 'mac_address', 'access_granted_badge', 'denial_reason', 'timestamp']
+    list_filter = ['access_granted', 'tenant', 'timestamp', 'denial_reason']
+    search_fields = ['user__phone_number', 'ip_address', 'mac_address', 'tenant__business_name']
     readonly_fields = ['timestamp']
     ordering = ['-timestamp']
+    
+    def tenant_name(self, obj):
+        return obj.tenant.business_name if obj.tenant else '-'
+    tenant_name.short_description = 'Tenant'
     
     def user_phone(self, obj):
         """Display user phone number"""
@@ -130,16 +354,20 @@ class AccessLogAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related('user')
+        return qs.select_related('user', 'tenant')
 
 
 @admin.register(SMSLog)
 class SMSLogAdmin(admin.ModelAdmin):
-    list_display = ['phone_number', 'sms_type', 'success_badge', 'sent_at']
-    list_filter = ['sms_type', 'success', 'sent_at']
-    search_fields = ['phone_number', 'message']
+    list_display = ['phone_number', 'tenant_name', 'sms_type', 'success_badge', 'sent_at']
+    list_filter = ['sms_type', 'success', 'tenant', 'sent_at']
+    search_fields = ['phone_number', 'message', 'tenant__business_name']
     readonly_fields = ['sent_at']
     ordering = ['-sent_at']
+    
+    def tenant_name(self, obj):
+        return obj.tenant.business_name if obj.tenant else '-'
+    tenant_name.short_description = 'Tenant'
     
     def success_badge(self, obj):
         """Display success status with badges"""
@@ -152,19 +380,25 @@ class SMSLogAdmin(admin.ModelAdmin):
 
 @admin.register(Voucher)
 class VoucherAdmin(admin.ModelAdmin):
-    list_display = ['code', 'duration_days', 'status_badge', 'batch_id', 'created_at', 'used_at', 'used_by_phone']
-    list_filter = ['is_used', 'duration_hours', 'created_at', 'batch_id']
-    search_fields = ['code', 'batch_id', 'used_by__phone_number']
+    list_display = ['code', 'tenant_name', 'duration_display', 'status_badge', 'batch_id', 'created_at', 'used_at', 'used_by_phone']
+    list_filter = ['is_used', 'duration_hours', 'tenant', 'created_at', 'batch_id']
+    search_fields = ['code', 'batch_id', 'used_by__phone_number', 'tenant__business_name']
     readonly_fields = ['code', 'created_at', 'used_at', 'is_used']
     ordering = ['-created_at']
     
     actions = ['export_vouchers_csv', 'mark_as_used', 'mark_as_unused']
     
-    def duration_days(self, obj):
-        """Display duration in days"""
-        days = obj.duration_hours // 24
-        return f"{days} days ({obj.duration_hours}h)"
-    duration_days.short_description = 'Duration'
+    def tenant_name(self, obj):
+        return obj.tenant.business_name if obj.tenant else '-'
+    tenant_name.short_description = 'Tenant'
+    
+    def duration_display(self, obj):
+        """Display duration in human-readable format"""
+        if obj.duration_hours >= 24:
+            days = obj.duration_hours // 24
+            return f"{days} day{'s' if days > 1 else ''}"
+        return f"{obj.duration_hours}h"
+    duration_display.short_description = 'Duration'
     
     def status_badge(self, obj):
         """Display voucher status with badges"""
@@ -185,10 +419,11 @@ class VoucherAdmin(admin.ModelAdmin):
         response['Content-Disposition'] = 'attachment; filename="vouchers.csv"'
         
         writer = csv.writer(response)
-        writer.writerow(['Code', 'Duration (Hours)', 'Status', 'Batch ID', 'Created At', 'Used At', 'Used By'])
+        writer.writerow(['Tenant', 'Code', 'Duration (Hours)', 'Status', 'Batch ID', 'Created At', 'Used At', 'Used By'])
         
         for voucher in queryset:
             writer.writerow([
+                voucher.tenant.business_name if voucher.tenant else '-',
                 voucher.code,
                 voucher.duration_hours,
                 'Used' if voucher.is_used else 'Available',
@@ -215,7 +450,7 @@ class VoucherAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related('used_by')
+        return qs.select_related('used_by', 'tenant')
 
 
 @admin.register(PaymentWebhook)
@@ -267,26 +502,32 @@ class PaymentWebhookAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related('payment')
+        return qs.select_related('payment', 'tenant')
 
 
 @admin.register(Bundle)
 class BundleAdmin(admin.ModelAdmin):
-    list_display = ['name', 'duration_days_formatted', 'price_formatted', 'price', 'is_active_badge', 'is_active', 'display_order', 'payment_count']
-    list_filter = ['is_active']
-    search_fields = ['name', 'description']
-    list_editable = ['price', 'is_active', 'display_order']
-    ordering = ['display_order']
+    list_display = ['name', 'tenant_name', 'duration_display', 'price_formatted', 'currency', 'is_active_badge', 'display_order', 'payment_count']
+    list_filter = ['is_active', 'tenant', 'currency']
+    search_fields = ['name', 'description', 'tenant__business_name']
+    list_editable = ['display_order']
+    ordering = ['tenant', 'display_order']
     
-    def duration_days_formatted(self, obj):
-        """Display duration in days"""
-        days = obj.duration_hours // 24
-        return f"{days} days"
-    duration_days_formatted.short_description = 'Duration'
+    def tenant_name(self, obj):
+        return obj.tenant.business_name if obj.tenant else '-'
+    tenant_name.short_description = 'Tenant'
+    
+    def duration_display(self, obj):
+        """Display duration in human-readable format"""
+        if obj.duration_hours >= 24:
+            days = obj.duration_hours // 24
+            return f"{days} day{'s' if days > 1 else ''}"
+        return f"{obj.duration_hours} hour{'s' if obj.duration_hours > 1 else ''}"
+    duration_display.short_description = 'Duration'
     
     def price_formatted(self, obj):
         """Format price with currency"""
-        return f"TSh {obj.price:,}"
+        return f"{obj.currency} {obj.price:,}"
     price_formatted.short_description = 'Price'
     
     def is_active_badge(self, obj):
@@ -299,10 +540,15 @@ class BundleAdmin(admin.ModelAdmin):
     
     def payment_count(self, obj):
         """Count of payments for this bundle"""
-        return obj.payments.filter(status='COMPLETED').count()
-    payment_count.short_description = 'Sales Count'
+        return obj.payments.filter(status='completed').count()
+    payment_count.short_description = 'Sales'
+    
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related('tenant')
+
 
 # Set admin site properties
-admin.site.site_header = "Kitonga Wi-Fi Administration"
-admin.site.site_title = "Kitonga Admin"
-admin.site.index_title = "Welcome to Kitonga Wi-Fi Management"
+admin.site.site_header = "Kitonga SaaS Platform - Super Admin"
+admin.site.site_title = "Kitonga SaaS Admin"
+admin.site.index_title = "Kitonga Multi-Tenant WiFi Billing Platform"

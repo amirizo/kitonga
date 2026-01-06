@@ -33,7 +33,6 @@ urlpatterns = [
     path('webhook-logs/', views.webhook_logs, name='webhook_logs'),
     path('dashboard-stats/', views.dashboard_stats, name='dashboard_stats'),
     path('force-logout/', views.force_user_logout, name='force_user_logout'),
-    # path('debug-user-access/', views.debug_user_access, name='debug_user_access'),  # Commented out - function not implemented
     
     # User Management endpoints (Admin only)
     path('admin/users/', views.list_users, name='list_users'),
@@ -68,7 +67,6 @@ urlpatterns = [
     path('mikrotik/logout/', views.mikrotik_logout, name='mikrotik_logout'),
     path('mikrotik/status/', views.mikrotik_status_check, name='mikrotik_status_check'),
     path('mikrotik/user-status/', views.mikrotik_user_status, name='mikrotik_user_status'),
-    # path('mikrotik/debug-user/', views.debug_user_access, name='debug_user_access'),  # Function not implemented
     
     # MikroTik Configuration and Management endpoints (Admin only)
     path('admin/mikrotik/config/', views.mikrotik_configuration, name='mikrotik_configuration'),
@@ -81,6 +79,35 @@ urlpatterns = [
     path('admin/mikrotik/profiles/', views.mikrotik_hotspot_profiles, name='mikrotik_hotspot_profiles'),
     path('admin/mikrotik/profiles/create/', views.mikrotik_create_hotspot_profile, name='mikrotik_create_hotspot_profile'),
     path('admin/mikrotik/resources/', views.mikrotik_system_resources, name='mikrotik_system_resources'),
+    
+    # =========================================================================
+    # SAAS SUBSCRIPTION ENDPOINTS
+    # =========================================================================
+    
+    # Public endpoints (pricing page, registration)
+    path('saas/plans/', views.list_subscription_plans, name='list_subscription_plans'),
+    path('saas/register/', views.register_tenant, name='register_tenant'),
+    
+    # Tenant endpoints (requires API key)
+    path('saas/dashboard/', views.tenant_dashboard, name='tenant_dashboard'),
+    path('saas/usage/', views.tenant_usage, name='tenant_usage'),
+    path('saas/subscribe/', views.create_subscription_payment, name='create_subscription_payment'),
+    path('saas/subscription-history/', views.tenant_subscription_history, name='tenant_subscription_history'),
+    path('saas/revenue/', views.tenant_revenue_report, name='tenant_revenue_report'),
+    
+    # Subscription webhook (ClickPesa callback)
+    path('saas/webhook/', views.subscription_payment_webhook, name='subscription_payment_webhook'),
+    
+    # Tenant router management
+    path('saas/routers/', views.tenant_routers, name='tenant_routers'),
+    path('saas/routers/<int:router_id>/', views.tenant_router_detail, name='tenant_router_detail'),
+    path('saas/routers/<int:router_id>/test/', views.test_router_connection, name='test_router_connection'),
+    
+    # Platform admin endpoints (super admin only)
+    path('platform/dashboard/', views.platform_dashboard, name='platform_dashboard'),
+    path('platform/tenants/', views.list_all_tenants, name='list_all_tenants'),
+    path('platform/tenants/<uuid:tenant_id>/', views.manage_tenant, name='manage_tenant'),
+    path('platform/revenue/', views.platform_revenue_report, name='platform_revenue_report'),
     
     # System endpoints
     path('health/', views.health_check, name='health_check'),

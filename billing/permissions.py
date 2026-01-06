@@ -119,3 +119,71 @@ class SimpleAdminTokenPermission(permissions.BasePermission):
             return admin_token == expected_token
         
         return False
+
+
+class TenantAPIKeyPermission(permissions.BasePermission):
+    """
+    Permission class that allows access for valid tenant API keys
+    Also allows Django admin users
+    """
+    
+    def has_permission(self, request, view):
+        # Check if user is authenticated Django admin (session-based)
+        if request.user and request.user.is_authenticated and request.user.is_staff:
+            return True
+        
+        # Check for token authentication (for Django admin users)
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if auth_header.startswith('Token '):
+            token_key = auth_header.split(' ')[1]
+            try:
+                token = Token.objects.get(key=token_key)
+                if token.user.is_staff or token.user.is_active:
+                    return True
+            except Token.DoesNotExist:
+                pass
+        
+        # Check for tenant API key (set by TenantMiddleware)
+        tenant = getattr(request, 'tenant', None)
+        if tenant and tenant.is_active:
+            # Verify subscription is valid for non-public endpoints
+            if tenant.is_subscription_valid():
+                return True
+            # Allow access to subscription-related endpoints even if expired
+            if any(x in request.path for x in ['/subscribe', '/plans', '/dashboard', '/usage']):
+                return True
+        
+        return False
+
+
+class TenantOrAdminPermission(permissions.BasePermission):
+    """
+    Permission for endpoints that can be accessed by:
+    - Platform admin (super admin)
+    - Tenant via API key
+    - Tenant staff via token
+    """
+    
+    def has_permission(self, request, view):
+        # Platform admin check
+        if request.user and request.user.is_authenticated:
+            if request.user.is_staff or request.user.is_superuser:
+                return True
+        
+        # Token authentication
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if auth_header.startswith('Token '):
+            token_key = auth_header.split(' ')[1]
+            try:
+                token = Token.objects.get(key=token_key)
+                if token.user.is_active:
+                    return True
+            except Token.DoesNotExist:
+                pass
+        
+        # Tenant API key
+        tenant = getattr(request, 'tenant', None)
+        if tenant and tenant.is_active:
+            return True
+        
+        return False

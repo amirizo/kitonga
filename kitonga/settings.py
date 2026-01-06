@@ -50,6 +50,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Multi-tenant middleware
+    'billing.middleware.TenantMiddleware',
 ]
 
 # Add debugging middleware in development
@@ -346,14 +348,14 @@ except Exception:
 
 # Jazzmin Configuration
 JAZZMIN_SETTINGS = {
-    # Title of the window (Will default to current_admin_site.site_title if absent or None)
-    "site_title": "Kitonga Wi-Fi Admin",
+    # Title of the window
+    "site_title": "Kitonga SaaS Admin",
 
-    # Title on the login screen (19 chars max) (defaults to current_admin_site.site_header if absent or None)
-    "site_header": "Kitonga Wi-Fi",
+    # Title on the login screen (19 chars max)
+    "site_header": "Kitonga SaaS",
 
-    # Title on the brand (19 chars max) (defaults to current_admin_site.site_header if absent or None)
-    "site_brand": "Kitonga Wi-Fi",
+    # Title on the brand (19 chars max)
+    "site_brand": "Kitonga SaaS",
 
     # Logo to use for your site, must be present in static files, used for brand on top left
     "site_logo": None,
@@ -371,15 +373,15 @@ JAZZMIN_SETTINGS = {
     "site_icon": None,
 
     # Welcome text on the login screen
-    "welcome_sign": "Welcome to Kitonga Wi-Fi Administration",
+    "welcome_sign": "Welcome to Kitonga SaaS Platform",
 
     # Copyright on the footer
-    "copyright": "Kitonga Wi-Fi Management System",
+    "copyright": "Kitonga WiFi SaaS Platform",
 
-    # List of model admins to search from the search bar, search bar omitted if excluded
-    "search_model": ["auth.User", "billing.User", "billing.Payment"],
+    # List of model admins to search from the search bar
+    "search_model": ["auth.User", "billing.Tenant", "billing.User", "billing.Payment", "billing.Router"],
 
-    # Field name on user model that contains avatar ImageField/URLField/Charfield or a callable that receives the user
+    # Field name on user model that contains avatar
     "user_avatar": None,
 
     ############
@@ -442,11 +444,19 @@ JAZZMIN_SETTINGS = {
         ]
     },
 
-    # Custom icons for side menu apps/models See https://fontawesome.com/icons?d=gallery&m=free&v=5.0.0,5.0.1,5.0.10,5.0.11,5.0.12,5.0.13,5.0.2,5.0.3,5.0.4,5.0.5,5.0.6,5.0.7,5.0.8,5.0.9,5.1.0,5.1.1,5.2.0,5.3.0,5.3.1,5.4.0,5.4.1,5.4.2,5.5.0,5.6.0,5.6.1,5.6.3,5.7.0,5.7.1,5.7.2,5.8.0,5.8.1,5.8.2,5.9.0,5.10.0,5.10.1,5.10.2,5.11.0,5.11.1,5.11.2,5.12.0,5.12.1,5.13.0,5.13.1,5.14.0,5.15.0,5.15.1,5.15.2,5.15.3,5.15.4&s=solid
+    # Custom icons for side menu apps/models
     "icons": {
         "auth": "fas fa-users-cog",
         "auth.user": "fas fa-user",
         "auth.Group": "fas fa-users",
+        # SaaS Platform Models
+        "billing.SubscriptionPlan": "fas fa-layer-group",
+        "billing.Tenant": "fas fa-building",
+        "billing.TenantStaff": "fas fa-user-tie",
+        "billing.Location": "fas fa-map-marker-alt",
+        "billing.Router": "fas fa-network-wired",
+        "billing.TenantSubscriptionPayment": "fas fa-file-invoice-dollar",
+        # WiFi Billing Models
         "billing.User": "fas fa-wifi",
         "billing.Bundle": "fas fa-boxes",
         "billing.Payment": "fas fa-credit-card",
@@ -454,6 +464,7 @@ JAZZMIN_SETTINGS = {
         "billing.Device": "fas fa-mobile-alt",
         "billing.AccessLog": "fas fa-history",
         "billing.SMSLog": "fas fa-sms",
+        "billing.PaymentWebhook": "fas fa-plug",
     },
 
     # Icons that are used when one is not manually specified

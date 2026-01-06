@@ -2183,3 +2183,106 @@ ERROR 2025-12-15 10:28:19,556 basehttp 38480 6206353408 You're accessing the dev
 INFO 2025-12-15 10:28:26,922 basehttp 38480 6189527040 "GET /api/health HTTP/1.1" 301 0
 INFO 2025-12-15 10:30:06,587 autoreload 40409 8443732096 Watching for file changes with StatReloader
 INFO 2025-12-15 10:39:20,156 autoreload 41218 8443732096 Watching for file changes with StatReloader
+INFO 2026-01-06 03:17:32,852 autoreload 8182 8599265408 Watching for file changes with StatReloader
+INFO 2026-01-06 03:17:41,739 basehttp 8182 6158626816 "GET /admin/teachers/teacherprofile/ HTTP/1.1" 301 0
+INFO 2026-01-06 03:17:41,742 basehttp 8182 6158626816 code 400, message Bad request version ('J\x8aTÔ0')
+ERROR 2026-01-06 03:17:41,742 basehttp 8182 6158626816 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:17:41,743 basehttp 8182 6158626816 code 400, message Bad request version ('\x02h2\x08http/1.1\x00+\x00\x07\x06')
+ERROR 2026-01-06 03:17:41,743 basehttp 8182 6158626816 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:17:45,934 basehttp 8182 6158626816 code 400, message Bad request version ('\x9bè\x06\x17aºZ2öUõ\x00\x1b\x00\x03\x02\x00\x02\x00')
+ERROR 2026-01-06 03:17:45,934 basehttp 8182 6158626816 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:17:45,935 basehttp 8182 6192279552 code 400, message Bad request version ('\x8a\x8a\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x06S\x8a\x8a\x00\x00\x00\x12\x00\x00\x00\x05\x00\x05\x01\x00\x00\x00\x00\x00')
+ERROR 2026-01-06 03:17:45,935 basehttp 8182 6192279552 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:17:45,935 basehttp 8182 6158626816 code 400, message Bad request version ('lgÚÉÓíÙ8×\x9b\x10=i\x83\x05xg5íÐN$\x95')
+ERROR 2026-01-06 03:17:45,936 basehttp 8182 6158626816 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:17:45,936 basehttp 8182 6192279552 code 400, message Bad request version ('!ä\x16áLÅÀK=/J\x1aw6\x93®g')
+ERROR 2026-01-06 03:17:45,936 basehttp 8182 6192279552 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:18:11,622 basehttp 8182 6158626816 "GET /admin/?id=afff7bef-67df-42f6-b120-782d392fc61f&vscodeBrowserReqId=1767658691616 HTTP/1.1" 301 0
+INFO 2026-01-06 03:18:11,624 basehttp 8182 6158626816 code 400, message Bad request version ('\x069\x9cå¶')
+ERROR 2026-01-06 03:18:11,624 basehttp 8182 6158626816 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:18:11,625 basehttp 8182 6158626816 code 400, message Bad request version ('Ô\x8eô\x8bÊ\x05<å\x8dê{3¦\x05ô\x0f\x12ù\x08\x80r°À\x03K')
+ERROR 2026-01-06 03:18:11,625 basehttp 8182 6158626816 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:18:31,753 autoreload 8182 8599265408 /Users/macbookair/Desktop/kitonga/billing/admin.py changed, reloading.
+INFO 2026-01-06 03:18:32,316 autoreload 8221 8599265408 Watching for file changes with StatReloader
+INFO 2026-01-06 03:18:43,833 basehttp 8221 6164983808 "GET /admin/ HTTP/1.1" 301 0
+INFO 2026-01-06 03:18:43,836 basehttp 8221 6164983808 code 400, message Bad request version ("V\x03]VR§®'\x00")
+ERROR 2026-01-06 03:18:43,836 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:18:43,837 basehttp 8221 6164983808 code 400, message Bad request version ('\x02h2\x08http/1.1ÿ\x01\x00\x01\x00\x00')
+ERROR 2026-01-06 03:18:43,837 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:00,712 basehttp 8221 6198636544 code 400, message Bad request version ('\x00\x02\x01\x00\x003\x04ï\x04íZZ\x00\x01\x00\x11ì\x04À¿°RÎX&xk³b7\x8aLJ\x16Ú4~®¢g\x8aK\x82Ø¥\x11\x07K\x82u2´Ö')
+ERROR 2026-01-06 03:19:00,713 basehttp 8221 6198636544 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:00,713 basehttp 8221 6198636544 code 400, message Bad request version ('5\x8a¸p×\x97¯0aB\x04K[2')
+ERROR 2026-01-06 03:19:00,714 basehttp 8221 6198636544 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:53,954 basehttp 8221 6164983808 code 400, message Bad request version ('\x02h2\x08http/1.1\x00')
+ERROR 2026-01-06 03:19:53,961 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:53,964 basehttp 8221 6198636544 code 400, message Bad request version ('\x00\x02\x01\x00\x00')
+ERROR 2026-01-06 03:19:53,966 basehttp 8221 6198636544 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:53,967 basehttp 8221 6164983808 code 400, message Bad request version ('à\x17')
+ERROR 2026-01-06 03:19:53,967 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:53,968 basehttp 8221 6164983808 code 400, message Bad request version ('³çy#Bí%\x7fè.HX\x16Í:p')
+ERROR 2026-01-06 03:19:53,968 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:54,590 basehttp 8221 6164983808 code 400, message Bad request version ('\x88h(ó\x8eÍ\x86I>@\x16\x16²t¢irMaUÛÑ\x15J\x03T')
+ERROR 2026-01-06 03:19:54,590 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:54,591 basehttp 8221 6164983808 code 400, message Bad HTTP/0.9 request type ('\x16\x03\x01\x06')
+ERROR 2026-01-06 03:19:54,591 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:54,592 basehttp 8221 6198636544 code 400, message Bad request version ('£')
+ERROR 2026-01-06 03:19:54,592 basehttp 8221 6198636544 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:54,593 basehttp 8221 6164983808 code 400, message Bad request version ('ZZ\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x063\x9a\x9a\x00\x00\x00\x17\x00\x00\x00\x05\x00\x05\x01\x00\x00\x00\x00\x00')
+ERROR 2026-01-06 03:19:54,594 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:54,788 basehttp 8221 6164983808 code 400, message Bad request version ('\x99¸¦\x81¬IE"ÖÒ\x18ð©Nvq\x9f=\x08\x95G;')
+ERROR 2026-01-06 03:19:54,788 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:54,789 basehttp 8221 6164983808 code 400, message Bad request version ('\x8a\x8a\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x063')
+ERROR 2026-01-06 03:19:54,790 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:54,790 basehttp 8221 6198636544 code 400, message Bad request version ('**\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x06\x93ÊÊ\x00\x00\x00-\x00\x02\x01\x01\x003\x04ï\x04íºº\x00\x01\x00\x11ì\x04Àíú«\x81F\x02\x1a³µU\x12ZÑ\x81Ç7z!^Ì¬Æ¥\x1a\x10\x08´\x9fF;\x93uUÎÉAä\x9aG\x93Ê')
+ERROR 2026-01-06 03:19:54,790 basehttp 8221 6198636544 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:54,792 basehttp 8221 6164983808 code 400, message Bad request version ('^')
+ERROR 2026-01-06 03:19:54,792 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:54,973 basehttp 8221 6164983808 code 400, message Bad request version ('\x00\x02\x01\x00\x00')
+ERROR 2026-01-06 03:19:54,973 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:54,974 basehttp 8221 6164983808 code 400, message Bad request version ('c®éS\x16/\x82¡Z\x88s\x8aúM\x88û')
+ERROR 2026-01-06 03:19:54,974 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:54,975 basehttp 8221 6164983808 code 400, message Bad request version ('»¶þ\x00')
+ERROR 2026-01-06 03:19:54,976 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:19:54,977 basehttp 8221 6164983808 code 400, message Bad request syntax ('\x16\x03\x01\x07\x00\x01\x00\x06ü\x03\x03')
+ERROR 2026-01-06 03:19:54,978 basehttp 8221 6164983808 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:20:04,677 basehttp 8221 6164983808 "GET /admin/dashboard/ HTTP/1.1" 301 0
+INFO 2026-01-06 03:20:05,494 basehttp 8221 6198636544 code 400, message Bad request version ('\x80Fu{')
+ERROR 2026-01-06 03:20:05,494 basehttp 8221 6198636544 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:20:05,496 basehttp 8221 6198636544 code 400, message Bad HTTP/0.9 request type ('\x16\x03\x01\x06')
+ERROR 2026-01-06 03:20:05,496 basehttp 8221 6198636544 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:20:15,732 autoreload 8221 8599265408 /Users/macbookair/Desktop/kitonga/billing/models.py changed, reloading.
+INFO 2026-01-06 03:20:16,322 autoreload 8372 8599265408 Watching for file changes with StatReloader
+INFO 2026-01-06 03:21:23,685 autoreload 8372 8599265408 /Users/macbookair/Desktop/kitonga/billing/models.py changed, reloading.
+INFO 2026-01-06 03:21:24,271 autoreload 8440 8599265408 Watching for file changes with StatReloader
+INFO 2026-01-06 03:23:08,790 autoreload 8440 8599265408 /Users/macbookair/Desktop/kitonga/billing/admin.py changed, reloading.
+INFO 2026-01-06 03:23:09,330 autoreload 8497 8599265408 Watching for file changes with StatReloader
+INFO 2026-01-06 03:25:27,164 autoreload 8497 8599265408 /Users/macbookair/Desktop/kitonga/billing/admin.py changed, reloading.
+INFO 2026-01-06 03:25:27,709 autoreload 9198 8599265408 Watching for file changes with StatReloader
+INFO 2026-01-06 03:25:32,263 basehttp 9198 6127824896 code 400, message Bad request version ('\x00\x02\x01\x00\x00\x17\x00\x00\x00')
+INFO 2026-01-06 03:25:32,264 basehttp 9198 6144651264 code 400, message Bad request version ('\x00\x12\x00\x10\x04\x03\x08\x04\x04\x01\x05\x03\x08\x05\x05\x01\x08\x06\x06\x01DÍ\x00\x05\x00\x03\x02h2\x00+\x00\x07\x06ÚÚ\x03\x04\x03\x03\x00\x1b\x00\x03\x02\x00\x02\x00\x05\x00\x05\x01\x00\x00\x00\x00\x00')
+ERROR 2026-01-06 03:25:32,269 basehttp 9198 6127824896 You're accessing the development server over HTTPS, but it only supports HTTP.
+ERROR 2026-01-06 03:25:32,269 basehttp 9198 6144651264 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:25:32,270 basehttp 9198 6127824896 code 400, message Bad request version ('\x8b')
+ERROR 2026-01-06 03:25:32,270 basehttp 9198 6127824896 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:25:32,271 basehttp 9198 6144651264 code 400, message Bad request version ('ÊÊ\x13\x01\x13\x02\x13\x03À+À/À,À0Ì©Ì¨À\x13À\x14\x00\x9c\x00\x9d\x00/\x005\x01\x00\x06SÚÚ\x00\x00\x00')
+ERROR 2026-01-06 03:25:32,271 basehttp 9198 6144651264 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:25:55,636 autoreload 9198 8599265408 /Users/macbookair/Desktop/kitonga/billing/models.py changed, reloading.
+INFO 2026-01-06 03:25:56,162 autoreload 9251 8599265408 Watching for file changes with StatReloader
+INFO 2026-01-06 03:26:39,207 basehttp 9251 6193459200 "GET /admin/?id=868de085-8fce-4af4-929a-f76ed0465b1c&vscodeBrowserReqId=1767659199199 HTTP/1.1" 301 0
+INFO 2026-01-06 03:26:39,209 basehttp 9251 6210285568 code 400, message Bad request version ('ñâ')
+ERROR 2026-01-06 03:26:39,209 basehttp 9251 6210285568 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:26:39,210 basehttp 9251 6193459200 code 400, message Bad request version ('õJVÖÀð')
+ERROR 2026-01-06 03:26:39,210 basehttp 9251 6193459200 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:27:01,471 basehttp 9251 6193459200 "GET /admin/ HTTP/1.1" 301 0
+INFO 2026-01-06 03:27:01,474 basehttp 9251 6193459200 code 400, message Bad request version ('\\<¹\x16D-3\x84\x06\x04\x89;Õ')
+ERROR 2026-01-06 03:27:01,474 basehttp 9251 6193459200 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:27:01,475 basehttp 9251 6193459200 code 400, message Bad HTTP/0.9 request type ('\x16\x03\x01\x06à\x01\x00\x06Ü\x03\x03ÉÃF')
+ERROR 2026-01-06 03:27:01,475 basehttp 9251 6193459200 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:27:14,062 basehttp 9251 6210285568 "GET /admve HTTP/1.1" 301 0
+INFO 2026-01-06 03:27:14,065 basehttp 9251 6193459200 code 400, message Bad request version ('\x8c\x90q-qn@×\x86ÚT\x87L,')
+ERROR 2026-01-06 03:27:14,065 basehttp 9251 6193459200 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:27:14,066 basehttp 9251 6193459200 code 400, message Bad request version ('}[i\x16\x97Zh\x15\x83')
+ERROR 2026-01-06 03:27:14,066 basehttp 9251 6193459200 You're accessing the development server over HTTPS, but it only supports HTTP.
+INFO 2026-01-06 03:27:23,233 autoreload 9251 8599265408 /Users/macbookair/Desktop/kitonga/billing/models.py changed, reloading.
+INFO 2026-01-06 03:27:23,825 autoreload 9445 8599265408 Watching for file changes with StatReloader
+INFO 2026-01-06 03:30:20,717 autoreload 9445 8599265408 /Users/macbookair/Desktop/kitonga/kitonga/settings.py changed, reloading.

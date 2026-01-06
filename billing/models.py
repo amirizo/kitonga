@@ -1,20 +1,369 @@
 """
 Database models for Kitonga Wi-Fi Billing System
+Multi-tenant SaaS Platform for Hotspot Operators
 """
 from django.db import models
 from django.utils import timezone
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.contrib.auth.models import User as DjangoUser
 from datetime import timedelta
+import uuid
+import secrets
 
+
+# =============================================================================
+# MULTI-TENANT SAAS MODELS
+# =============================================================================
+
+class SubscriptionPlan(models.Model):
+    """
+    SaaS subscription plans for hotspot operators (tenants)
+    """
+    PLAN_CHOICES = [
+        ('starter', 'Starter'),
+        ('business', 'Business'),
+        ('enterprise', 'Enterprise'),
+    ]
+    
+    BILLING_CYCLE_CHOICES = [
+        ('monthly', 'Monthly'),
+        ('yearly', 'Yearly'),
+    ]
+    
+    name = models.CharField(max_length=50, choices=PLAN_CHOICES, unique=True)
+    display_name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    
+    # Pricing
+    monthly_price = models.DecimalField(max_digits=12, decimal_places=2)
+    yearly_price = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=3, default='TZS')
+    
+    # Limits
+    max_routers = models.IntegerField(default=1)
+    max_wifi_users = models.IntegerField(default=100)  # WiFi end-users
+    max_vouchers_per_month = models.IntegerField(default=500)
+    max_locations = models.IntegerField(default=1)
+    max_staff_accounts = models.IntegerField(default=2)
+    
+    # Features
+    custom_branding = models.BooleanField(default=False)
+    custom_domain = models.BooleanField(default=False)
+    api_access = models.BooleanField(default=False)
+    white_label = models.BooleanField(default=False)
+    priority_support = models.BooleanField(default=False)
+    analytics_dashboard = models.BooleanField(default=True)
+    sms_notifications = models.BooleanField(default=True)
+    
+    # Revenue sharing (platform takes percentage of WiFi payments)
+    revenue_share_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    
+    is_active = models.BooleanField(default=True)
+    display_order = models.IntegerField(default=0)
+    
+    class Meta:
+        ordering = ['display_order']
+    
+    def __str__(self):
+        return f"{self.display_name} - TZS {self.monthly_price:,.0f}/mo"
+
+
+class Tenant(models.Model):
+    """
+    Tenant model - represents a hotspot business/operator (your customer)
+    Each tenant has their own routers, users, bundles, payments, etc.
+    """
+    STATUS_CHOICES = [
+        ('trial', 'Trial'),
+        ('active', 'Active'),
+        ('suspended', 'Suspended'),
+        ('cancelled', 'Cancelled'),
+    ]
+    
+    # Unique identifier
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    slug = models.SlugField(max_length=50, unique=True, db_index=True)  # Used for subdomain: {slug}.kitonga.com
+    
+    # Business Information
+    business_name = models.CharField(max_length=200)
+    business_email = models.EmailField()
+    business_phone = models.CharField(max_length=20)
+    business_address = models.TextField(blank=True)
+    country = models.CharField(max_length=2, default='TZ')  # ISO country code
+    timezone = models.CharField(max_length=50, default='Africa/Dar_es_Salaam')
+    
+    # Owner (Django User who created this tenant)
+    owner = models.ForeignKey(DjangoUser, on_delete=models.PROTECT, related_name='owned_tenants')
+    
+    # Subscription
+    subscription_plan = models.ForeignKey(SubscriptionPlan, on_delete=models.PROTECT, null=True, blank=True)
+    subscription_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='trial')
+    trial_ends_at = models.DateTimeField(null=True, blank=True)
+    subscription_started_at = models.DateTimeField(null=True, blank=True)
+    subscription_ends_at = models.DateTimeField(null=True, blank=True)
+    billing_cycle = models.CharField(max_length=10, default='monthly')
+    
+    # Branding
+    logo = models.ImageField(upload_to='tenant_logos/', null=True, blank=True)
+    primary_color = models.CharField(max_length=7, default='#3B82F6')  # Hex color
+    secondary_color = models.CharField(max_length=7, default='#1E40AF')
+    custom_domain = models.CharField(max_length=255, blank=True, null=True, unique=True)
+    
+    # Payment Configuration (tenant's own payment gateway credentials)
+    clickpesa_client_id = models.CharField(max_length=255, blank=True)
+    clickpesa_api_key = models.CharField(max_length=255, blank=True)
+    nextsms_username = models.CharField(max_length=255, blank=True)
+    nextsms_password = models.CharField(max_length=255, blank=True)
+    nextsms_sender_id = models.CharField(max_length=20, blank=True)
+    
+    # API Access
+    api_key = models.CharField(max_length=64, unique=True, blank=True)
+    api_secret = models.CharField(max_length=128, blank=True)
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)  # Internal notes for super admin
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.business_name} ({self.slug})"
+    
+    def save(self, *args, **kwargs):
+        # Generate API key if not exists
+        if not self.api_key:
+            self.api_key = secrets.token_hex(32)
+        if not self.api_secret:
+            self.api_secret = secrets.token_hex(64)
+        
+        # Set trial end date for new tenants
+        if not self.pk and not self.trial_ends_at:
+            self.trial_ends_at = timezone.now() + timedelta(days=14)
+        
+        super().save(*args, **kwargs)
+    
+    def is_subscription_valid(self):
+        """Check if tenant has valid subscription"""
+        now = timezone.now()
+        
+        if self.subscription_status == 'active':
+            if self.subscription_ends_at and self.subscription_ends_at > now:
+                return True
+        
+        if self.subscription_status == 'trial':
+            if self.trial_ends_at and self.trial_ends_at > now:
+                return True
+        
+        return False
+    
+    def get_usage_stats(self):
+        """Get current usage vs limits"""
+        plan = self.subscription_plan
+        if not plan:
+            return None
+        
+        return {
+            'routers': {
+                'used': self.routers.filter(is_active=True).count(),
+                'limit': plan.max_routers,
+            },
+            'wifi_users': {
+                'used': self.wifi_users.count(),
+                'limit': plan.max_wifi_users,
+            },
+            'locations': {
+                'used': self.locations.count(),
+                'limit': plan.max_locations,
+            },
+            'staff': {
+                'used': self.staff_members.filter(is_active=True).count(),
+                'limit': plan.max_staff_accounts,
+            },
+        }
+    
+    def can_add_router(self):
+        """Check if tenant can add another router"""
+        if not self.subscription_plan:
+            return False
+        return self.routers.filter(is_active=True).count() < self.subscription_plan.max_routers
+    
+    def can_add_wifi_user(self):
+        """Check if tenant can add another WiFi user"""
+        if not self.subscription_plan:
+            return False
+        return self.wifi_users.count() < self.subscription_plan.max_wifi_users
+
+
+class TenantStaff(models.Model):
+    """
+    Staff members for a tenant (additional admin accounts)
+    """
+    ROLE_CHOICES = [
+        ('owner', 'Owner'),
+        ('admin', 'Administrator'),
+        ('manager', 'Manager'),
+        ('support', 'Support Staff'),
+        ('viewer', 'View Only'),
+    ]
+    
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='staff_members')
+    user = models.ForeignKey(DjangoUser, on_delete=models.CASCADE, related_name='tenant_memberships')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='admin')
+    
+    # Permissions
+    can_manage_routers = models.BooleanField(default=False)
+    can_manage_users = models.BooleanField(default=True)
+    can_manage_payments = models.BooleanField(default=True)
+    can_manage_vouchers = models.BooleanField(default=True)
+    can_view_reports = models.BooleanField(default=True)
+    can_manage_staff = models.BooleanField(default=False)
+    can_manage_settings = models.BooleanField(default=False)
+    
+    is_active = models.BooleanField(default=True)
+    invited_at = models.DateTimeField(auto_now_add=True)
+    joined_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        unique_together = ['tenant', 'user']
+        ordering = ['role', 'user__email']
+    
+    def __str__(self):
+        return f"{self.user.email} - {self.tenant.business_name} ({self.role})"
+
+
+class Location(models.Model):
+    """
+    Physical locations for a tenant (optional, for multi-location businesses)
+    """
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='locations')
+    name = models.CharField(max_length=100)
+    address = models.TextField(blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    
+    # Contact
+    manager_name = models.CharField(max_length=100, blank=True)
+    manager_phone = models.CharField(max_length=20, blank=True)
+    
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['name']
+        unique_together = ['tenant', 'name']
+    
+    def __str__(self):
+        return f"{self.tenant.business_name} - {self.name}"
+
+
+class Router(models.Model):
+    """
+    MikroTik router configuration per tenant
+    Each tenant can have multiple routers
+    """
+    STATUS_CHOICES = [
+        ('online', 'Online'),
+        ('offline', 'Offline'),
+        ('configuring', 'Configuring'),
+        ('error', 'Error'),
+    ]
+    
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='routers')
+    location = models.ForeignKey(Location, on_delete=models.SET_NULL, null=True, blank=True, related_name='routers')
+    
+    # Router identification
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    
+    # Connection settings
+    host = models.CharField(max_length=255)  # IP or hostname
+    port = models.IntegerField(default=8728)
+    username = models.CharField(max_length=100)
+    password = models.CharField(max_length=255)  # Should be encrypted in production
+    use_ssl = models.BooleanField(default=False)
+    
+    # Router info (populated from router)
+    router_model = models.CharField(max_length=100, blank=True)
+    router_version = models.CharField(max_length=50, blank=True)
+    router_identity = models.CharField(max_length=100, blank=True)
+    
+    # Status
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='configuring')
+    last_seen = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    
+    # Hotspot settings
+    hotspot_interface = models.CharField(max_length=50, default='bridge')
+    hotspot_profile = models.CharField(max_length=50, default='default')
+    
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['tenant', 'name']
+        unique_together = ['tenant', 'name']
+    
+    def __str__(self):
+        return f"{self.tenant.business_name} - {self.name} ({self.host})"
+
+
+class TenantSubscriptionPayment(models.Model):
+    """
+    Track subscription payments from tenants to the platform
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('refunded', 'Refunded'),
+    ]
+    
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='subscription_payments')
+    plan = models.ForeignKey(SubscriptionPlan, on_delete=models.PROTECT)
+    
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=3, default='TZS')
+    billing_cycle = models.CharField(max_length=10)  # monthly/yearly
+    
+    # Payment details
+    payment_method = models.CharField(max_length=50, blank=True)  # clickpesa, mpesa, tigopesa
+    payment_reference = models.CharField(max_length=255, blank=True)
+    transaction_id = models.CharField(max_length=255, unique=True)
+    
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    
+    # Period this payment covers
+    period_start = models.DateTimeField()
+    period_end = models.DateTimeField()
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.tenant.business_name} - {self.plan.display_name} - {self.status}"
+
+
+# =============================================================================
+# EXISTING MODELS (MODIFIED FOR MULTI-TENANCY)
+# =============================================================================
 
 class Bundle(models.Model):
     """
     Bundle packages for different access durations
+    Now tenant-specific: each tenant has their own bundles/pricing
     """
-    name = models.CharField(max_length=50, unique=True)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='bundles', null=True)
+    name = models.CharField(max_length=50)
     duration_hours = models.IntegerField()
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=3, default='TZS')
     is_active = models.BooleanField(default=True)
     description = models.TextField(blank=True)
     display_order = models.IntegerField(default=0)
@@ -23,7 +372,9 @@ class Bundle(models.Model):
         ordering = ['display_order', 'duration_hours']
     
     def __str__(self):
-        return f"{self.name} - {self.duration_hours}hrs - TSh {self.price}"
+        if self.tenant:
+            return f"{self.tenant.slug} - {self.name} - {self.duration_hours}hrs - {self.currency} {self.price}"
+        return f"{self.name} - {self.duration_hours}hrs - {self.currency} {self.price}"
     
     @property
     def duration_days(self):
@@ -33,21 +384,32 @@ class Bundle(models.Model):
 
 class User(models.Model):
     """
-    User model - identified by phone number
-    Phone numbers are automatically normalized to 255XXXXXXXXX format
+    WiFi end-user model - identified by phone number
+    Phone numbers are automatically normalized to international format
+    Now tenant-specific: each tenant has their own WiFi users
     """
-    phone_number = models.CharField(max_length=15, unique=True, db_index=True)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='wifi_users', null=True)
+    phone_number = models.CharField(max_length=15, db_index=True)
+    name = models.CharField(max_length=100, blank=True)  # Optional user name
+    email = models.EmailField(blank=True)  # Optional email
+    
     created_at = models.DateTimeField(auto_now_add=True)
     paid_until = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=False)
     total_payments = models.IntegerField(default=0)
+    total_amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     expiry_notification_sent = models.BooleanField(default=False)
     max_devices = models.IntegerField(default=1)
+    
+    # Optional: link to router (for multi-router setups)
+    primary_router = models.ForeignKey(Router, on_delete=models.SET_NULL, null=True, blank=True, related_name='wifi_users')
     
     class Meta:
         ordering = ['-created_at']
     
     def __str__(self):
+        if self.tenant:
+            return f"{self.tenant.slug} - {self.phone_number} - Active: {self.is_active}"
         return f"{self.phone_number} - Active: {self.is_active}"
     
     def clean(self):
@@ -58,15 +420,18 @@ class User(models.Model):
                 # Normalize the phone number
                 normalized = normalize_phone_number(self.phone_number)
                 
-                # Validate it's a Tanzania number
+                # Validate it's a valid phone number (Tanzania or international)
                 is_valid, network, normalized = validate_tanzania_phone_number(self.phone_number)
                 if not is_valid:
-                    raise ValidationError(f"Invalid Tanzania phone number: {self.phone_number}")
+                    raise ValidationError(f"Invalid phone number: {self.phone_number}")
                 
-                # Check for existing user with same normalized number (excluding self)
-                existing_user = User.objects.filter(phone_number=normalized).exclude(pk=self.pk).first()
+                # Check for existing user with same normalized number within same tenant (excluding self)
+                existing_user = User.objects.filter(
+                    tenant=self.tenant,
+                    phone_number=normalized
+                ).exclude(pk=self.pk).first()
                 if existing_user:
-                    raise ValidationError(f"User with phone number {normalized} already exists (ID: {existing_user.id})")
+                    raise ValidationError(f"User with phone number {normalized} already exists for this tenant")
                 
                 self.phone_number = normalized
                 
@@ -138,39 +503,58 @@ class User(models.Model):
         return self.get_active_devices().count() < self.max_devices
 
 
+# Backwards compatibility alias
+WifiUser = User
+
+
 class Device(models.Model):
     """
     Device model to track user devices
+    Now includes tenant reference for easier querying
     """
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='devices')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='devices', null=True)
+    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='devices')
+    router = models.ForeignKey(Router, on_delete=models.SET_NULL, null=True, blank=True, related_name='devices')
+    
     mac_address = models.CharField(max_length=17, db_index=True)
     ip_address = models.GenericIPAddressField()
     device_name = models.CharField(max_length=100, blank=True)
+    device_type = models.CharField(max_length=50, blank=True)  # phone, laptop, tablet, etc.
     is_active = models.BooleanField(default=True)
     first_seen = models.DateTimeField(auto_now_add=True)
     last_seen = models.DateTimeField(auto_now=True)
     
     class Meta:
         ordering = ['-last_seen']
-        unique_together = ['user', 'mac_address']
+        unique_together = ['tenant', 'mac_address']  # MAC unique per tenant
     
     def __str__(self):
         return f"{self.user.phone_number} - {self.mac_address} - {'Active' if self.is_active else 'Inactive'}"
+    
+    def save(self, *args, **kwargs):
+        # Auto-set tenant from user if not set
+        if not self.tenant_id and self.user_id:
+            self.tenant = self.user.tenant
+        super().save(*args, **kwargs)
 
 
 class Payment(models.Model):
     """
-    Payment transaction model
+    Payment transaction model for WiFi access purchases
+    Now includes tenant reference and tracks platform revenue share
     """
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('completed', 'Completed'),
         ('failed', 'Failed'),
         ('cancelled', 'Cancelled'),
+        ('refunded', 'Refunded'),
     ]
     
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payments')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='wifi_payments', null=True)
+    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='payments')
     bundle = models.ForeignKey(Bundle, on_delete=models.SET_NULL, null=True, blank=True, related_name='payments')
+    router = models.ForeignKey(Router, on_delete=models.SET_NULL, null=True, blank=True, related_name='payments')
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     phone_number = models.CharField(max_length=15)
     payment_reference = models.CharField(max_length=100, blank=True, null=True)
@@ -206,14 +590,24 @@ class Payment(models.Model):
         """Mark payment as failed"""
         self.status = 'failed'
         self.save()
+    
+    def save(self, *args, **kwargs):
+        # Auto-set tenant from user if not set
+        if not self.tenant_id and self.user_id:
+            self.tenant = self.user.tenant
+        super().save(*args, **kwargs)
 
 
 class AccessLog(models.Model):
     """
     Log of user access attempts and sessions
+    Now includes tenant reference for easier querying
     """
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='access_logs')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='access_logs', null=True)
+    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='access_logs')
     device = models.ForeignKey(Device, on_delete=models.SET_NULL, null=True, blank=True, related_name='access_logs')
+    router = models.ForeignKey(Router, on_delete=models.SET_NULL, null=True, blank=True, related_name='access_logs')
+    
     ip_address = models.GenericIPAddressField()
     mac_address = models.CharField(max_length=17, blank=True)
     access_granted = models.BooleanField(default=False)
@@ -225,39 +619,65 @@ class AccessLog(models.Model):
     
     def __str__(self):
         return f"{self.user.phone_number} - {self.ip_address} - {'Granted' if self.access_granted else 'Denied'}"
+    
+    def save(self, *args, **kwargs):
+        # Auto-set tenant from user if not set
+        if not self.tenant_id and self.user_id:
+            self.tenant = self.user.tenant
+        super().save(*args, **kwargs)
 
 
 class Voucher(models.Model):
     """
     Voucher code model for offline access
     Allows users to redeem codes for Wi-Fi access without online payment
+    Now tenant-specific: each tenant has their own vouchers
     """
     DURATION_CHOICES = [
+        (1, '1 Hour'),
+        (3, '3 Hours'),
+        (6, '6 Hours'),
+        (12, '12 Hours'),
         (24, '24 Hours (1 Day)'),
+        (72, '72 Hours (3 Days)'),
         (168, '168 Hours (7 Days)'),
         (720, '720 Hours (30 Days)'),
     ]
     
-    code = models.CharField(max_length=16, unique=True, db_index=True)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='vouchers', null=True)
+    code = models.CharField(max_length=16, db_index=True)
     duration_hours = models.IntegerField(choices=DURATION_CHOICES, default=24)
+    
+    # Optional: link to specific bundle for pricing
+    bundle = models.ForeignKey(Bundle, on_delete=models.SET_NULL, null=True, blank=True, related_name='vouchers')
+    
     is_used = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.CharField(max_length=100, blank=True)
     used_at = models.DateTimeField(null=True, blank=True)
-    used_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='vouchers_used')
+    used_by = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='vouchers_used')
     batch_id = models.CharField(max_length=50, blank=True, db_index=True)
     notes = models.TextField(blank=True)
+    
+    # Track which router this voucher was used on
+    used_on_router = models.ForeignKey(Router, on_delete=models.SET_NULL, null=True, blank=True, related_name='redeemed_vouchers')
     
     class Meta:
         ordering = ['-created_at']
     
     def __str__(self):
+        if self.tenant:
+            return f"{self.tenant.slug} - {self.code} - {self.duration_hours}hrs - {'Used' if self.is_used else 'Available'}"
         return f"{self.code} - {self.duration_hours}hrs - {'Used' if self.is_used else 'Available'}"
     
     def redeem(self, user):
         """Redeem voucher for a user and extend their access"""
         if self.is_used:
             return False, "Voucher has already been used"
+        
+        # Ensure user belongs to same tenant as voucher (if tenant is set)
+        if self.tenant_id and user.tenant_id != self.tenant_id:
+            return False, "Voucher not valid for this network"
         
         self.is_used = True
         self.used_at = timezone.now()
@@ -270,8 +690,8 @@ class Voucher(models.Model):
         return True, f"Voucher redeemed successfully. Access granted for {self.duration_hours} hours."
     
     @staticmethod
-    def generate_code():
-        """Generate a unique voucher code"""
+    def generate_code(tenant=None):
+        """Generate a unique voucher code for a tenant"""
         import random
         import string
         
@@ -282,23 +702,32 @@ class Voucher(models.Model):
                 for _ in range(3)
             ])
             
-            # Check if code already exists
-            if not Voucher.objects.filter(code=code).exists():
-                return code
+            # Check if code already exists for this tenant
+            if tenant:
+                if not Voucher.objects.filter(tenant=tenant, code=code).exists():
+                    return code
+            else:
+                # Global check if no tenant specified
+                if not Voucher.objects.filter(code=code).exists():
+                    return code
 
 
 class SMSLog(models.Model):
     """
     Log of SMS notifications sent
+    Now tenant-specific
     """
     SMS_TYPE_CHOICES = [
         ('payment', 'Payment Confirmation'),
         ('expiry_warning', 'Expiry Warning'),
         ('expired', 'Access Expired'),
         ('voucher', 'Voucher Redemption'),
+        ('welcome', 'Welcome Message'),
+        ('admin', 'Admin Notification'),
         ('other', 'Other'),
     ]
     
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='sms_logs', null=True)
     phone_number = models.CharField(max_length=15, db_index=True)
     message = models.TextField()
     sms_type = models.CharField(max_length=20, choices=SMS_TYPE_CHOICES, default='other')
@@ -310,6 +739,8 @@ class SMSLog(models.Model):
         ordering = ['-sent_at']
     
     def __str__(self):
+        if self.tenant:
+            return f"{self.tenant.slug} - {self.phone_number} - {self.sms_type} - {'Sent' if self.success else 'Failed'}"
         return f"{self.phone_number} - {self.sms_type} - {'Sent' if self.success else 'Failed'}"
 
 
@@ -317,6 +748,7 @@ class PaymentWebhook(models.Model):
     """
     Log of payment webhooks received from ClickPesa
     Tracks all webhook events for debugging and audit purposes
+    Now tenant-specific
     """
     WEBHOOK_EVENT_CHOICES = [
         ('PAYMENT RECEIVED', 'Payment Received'),
@@ -332,6 +764,8 @@ class PaymentWebhook(models.Model):
         ('failed', 'Processing Failed'),
         ('ignored', 'Ignored'),
     ]
+    
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='payment_webhooks', null=True, blank=True)
     
     # Webhook metadata
     received_at = models.DateTimeField(auto_now_add=True)

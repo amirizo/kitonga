@@ -21,17 +21,23 @@ from datetime import timedelta
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User as DjangoUser
 from .models import User, Bundle, Payment, Device, PaymentWebhook, Voucher, AccessLog
+from .models import SubscriptionPlan, Tenant, TenantStaff, TenantSubscriptionPayment, Router, Location
 from django.views.decorators.http import require_http_methods
 from rest_framework.authtoken.models import Token
 from .serializers import (
     UserSerializer, PaymentSerializer, 
     InitiatePaymentSerializer, VerifyAccessSerializer,
     VoucherSerializer, GenerateVouchersSerializer, RedeemVoucherSerializer,
-    BundleSerializer, DeviceSerializer
+    BundleSerializer, DeviceSerializer,
+    # SaaS serializers
+    SubscriptionPlanSerializer, TenantSerializer, TenantRegistrationSerializer,
+    SubscriptionPaymentSerializer, CreateSubscriptionPaymentSerializer,
+    RouterSerializer, LocationSerializer, TenantStaffSerializer,
+    UsageSummarySerializer, RevenueReportSerializer
 )
 from .clickpesa import ClickPesaAPI
 from .utils import get_active_users_count, get_revenue_statistics
-from .permissions import SimpleAdminTokenPermission
+from .permissions import SimpleAdminTokenPermission, TenantAPIKeyPermission, TenantOrAdminPermission
 from .mikrotik import (
     authenticate_user_with_mikrotik, 
     logout_user_from_mikrotik, 
@@ -4811,3 +4817,814 @@ def trigger_device_authentication(request):
             'success': False,
             'message': 'Authentication trigger failed due to system error'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# =============================================================================
+# SAAS SUBSCRIPTION API ENDPOINTS
+# =============================================================================
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def list_subscription_plans(request):
+    """
+    List all available subscription plans
+    Public endpoint for pricing page
+    """
+    plans = SubscriptionPlan.objects.filter(is_active=True).order_by('display_order')
+    serializer = SubscriptionPlanSerializer(plans, many=True)
+    return Response({
+        'success': True,
+        'plans': serializer.data,
+        'currency': 'TZS',
+        'payment_methods': ['M-Pesa', 'Tigo Pesa', 'Airtel Money', 'Bank Transfer']
+    })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_tenant(request):
+    """
+    Register a new tenant (hotspot business)
+    Creates tenant account with 14-day trial
+    """
+    serializer = TenantRegistrationSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    data = serializer.validated_data
+    
+    try:
+        # Create Django user for tenant owner
+        from django.contrib.auth.models import User as DjangoUser
+        import re
+        
+        # Generate slug from business name if not provided
+        slug = data.get('slug')
+        if not slug:
+            slug = re.sub(r'[^a-z0-9]', '', data['business_name'].lower().replace(' ', '-'))[:50]
+            # Ensure unique slug
+            base_slug = slug
+            counter = 1
+            while Tenant.objects.filter(slug=slug).exists():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+        
+        # Create admin user
+        admin_user = DjangoUser.objects.create_user(
+            username=data['admin_email'],
+            email=data['admin_email'],
+            password=data['admin_password'],
+            first_name=data.get('admin_first_name', ''),
+            last_name=data.get('admin_last_name', '')
+        )
+        
+        # Get subscription plan (default to Starter if none specified)
+        plan = None
+        if data.get('plan_id'):
+            try:
+                plan = SubscriptionPlan.objects.get(id=data['plan_id'], is_active=True)
+            except SubscriptionPlan.DoesNotExist:
+                pass
+        
+        if not plan:
+            plan = SubscriptionPlan.objects.filter(name='starter', is_active=True).first()
+        
+        # Create tenant
+        tenant = Tenant.objects.create(
+            slug=slug,
+            business_name=data['business_name'],
+            business_email=data['business_email'],
+            business_phone=data['business_phone'],
+            business_address=data.get('business_address', ''),
+            owner=admin_user,
+            subscription_plan=plan,
+            subscription_status='trial'  # 14-day trial is set automatically
+        )
+        
+        # Create owner staff entry
+        TenantStaff.objects.create(
+            tenant=tenant,
+            user=admin_user,
+            role='owner',
+            can_manage_routers=True,
+            can_manage_users=True,
+            can_manage_payments=True,
+            can_manage_vouchers=True,
+            can_view_reports=True,
+            can_manage_staff=True,
+            can_manage_settings=True,
+            is_active=True,
+            joined_at=timezone.now()
+        )
+        
+        # Send welcome SMS
+        try:
+            from .nextsms import send_sms
+            message = (
+                f"Welcome to Kitonga!\n"
+                f"Your business: {tenant.business_name}\n"
+                f"Trial ends: {tenant.trial_ends_at.strftime('%d/%m/%Y')}\n"
+                f"Login: https://app.kitonga.com\n"
+                f"API Key: {tenant.api_key[:16]}..."
+            )
+            send_sms(tenant.business_phone, message, sms_type='admin')
+        except Exception as e:
+            logger.warning(f"Failed to send welcome SMS: {e}")
+        
+        return Response({
+            'success': True,
+            'message': 'Registration successful! Your 14-day trial has started.',
+            'tenant': {
+                'id': str(tenant.id),
+                'slug': tenant.slug,
+                'business_name': tenant.business_name,
+                'api_key': tenant.api_key,
+                'trial_ends_at': tenant.trial_ends_at.isoformat(),
+            },
+            'admin': {
+                'email': admin_user.email,
+            },
+            'next_steps': [
+                'Log in to your dashboard',
+                'Add your first MikroTik router',
+                'Create WiFi bundles/packages',
+                'Generate vouchers or enable payments',
+            ]
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        logger.error(f"Tenant registration failed: {e}")
+        return Response({
+            'success': False,
+            'message': 'Registration failed. Please try again.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([TenantAPIKeyPermission])
+def tenant_dashboard(request):
+    """
+    Get tenant dashboard data including subscription status, usage, and stats
+    Requires tenant API key or authenticated staff user
+    """
+    # Get tenant from request (set by middleware)
+    tenant = getattr(request, 'tenant', None)
+    
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found. Use X-API-Key header.'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    from .subscription import SubscriptionManager, UsageMeter, RevenueCalculator
+    
+    subscription_mgr = SubscriptionManager(tenant)
+    usage_meter = UsageMeter(tenant)
+    revenue_calc = RevenueCalculator(tenant)
+    
+    # Get subscription status
+    subscription_status = subscription_mgr.check_subscription_status()
+    
+    # Get usage summary
+    usage_summary = usage_meter.get_usage_summary()
+    
+    # Get revenue for current month
+    revenue_report = revenue_calc.get_monthly_revenue_report()
+    
+    # Check for renewal reminders
+    renewal_reminder = subscription_mgr.get_renewal_reminder()
+    
+    return Response({
+        'success': True,
+        'tenant': TenantSerializer(tenant).data,
+        'subscription': subscription_status,
+        'usage': usage_summary,
+        'revenue_this_month': revenue_report,
+        'renewal_reminder': renewal_reminder,
+        'quick_stats': {
+            'total_wifi_users': tenant.wifi_users.count(),
+            'active_wifi_users': tenant.wifi_users.filter(is_active=True).count(),
+            'total_payments_today': Payment.objects.filter(
+                tenant=tenant,
+                status='completed',
+                completed_at__date=timezone.now().date()
+            ).count(),
+            'revenue_today': float(Payment.objects.filter(
+                tenant=tenant,
+                status='completed',
+                completed_at__date=timezone.now().date()
+            ).aggregate(total=Sum('amount'))['total'] or 0),
+        }
+    })
+
+
+@api_view(['GET'])
+@permission_classes([TenantAPIKeyPermission])
+def tenant_usage(request):
+    """
+    Get detailed usage stats for the tenant
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    from .subscription import UsageMeter
+    
+    meter = UsageMeter(tenant)
+    usage = meter.get_usage_summary()
+    
+    return Response({
+        'success': True,
+        'usage': usage,
+        'plan': tenant.subscription_plan.display_name if tenant.subscription_plan else None,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([TenantAPIKeyPermission])
+def create_subscription_payment(request):
+    """
+    Create a subscription payment request for the tenant
+    Returns ClickPesa checkout URL for payment
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    serializer = CreateSubscriptionPaymentSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        plan = SubscriptionPlan.objects.get(id=serializer.validated_data['plan_id'], is_active=True)
+    except SubscriptionPlan.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Invalid subscription plan'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    from .subscription import SubscriptionManager
+    
+    mgr = SubscriptionManager(tenant)
+    result = mgr.create_subscription_payment(
+        plan=plan,
+        billing_cycle=serializer.validated_data.get('billing_cycle', 'monthly')
+    )
+    
+    if result.get('success'):
+        return Response(result)
+    else:
+        return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@csrf_exempt
+def subscription_payment_webhook(request):
+    """
+    Webhook for subscription payment callbacks from ClickPesa
+    Similar to WiFi payment webhook but for subscription payments
+    """
+    try:
+        data = request.data
+        logger.info(f"Subscription payment webhook received: {data}")
+        
+        transaction_id = data.get('external_reference') or data.get('merchant_reference')
+        payment_status = data.get('payment_status', '')
+        payment_reference = data.get('order_reference', '')
+        channel = data.get('channel', '')
+        
+        if not transaction_id:
+            return Response({'error': 'Missing transaction_id'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check if this is a subscription payment (starts with SUB-)
+        if not transaction_id.startswith('SUB-'):
+            logger.info(f"Not a subscription payment: {transaction_id}")
+            return Response({'message': 'Not a subscription payment'}, status=status.HTTP_200_OK)
+        
+        # Extract tenant slug from transaction ID
+        parts = transaction_id.split('-')
+        if len(parts) < 2:
+            return Response({'error': 'Invalid transaction_id format'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        tenant_slug = parts[1]
+        
+        try:
+            tenant = Tenant.objects.get(slug=tenant_slug)
+        except Tenant.DoesNotExist:
+            return Response({'error': 'Tenant not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        from .subscription import SubscriptionManager
+        
+        mgr = SubscriptionManager(tenant)
+        success = mgr.process_payment_callback(
+            transaction_id=transaction_id,
+            status=payment_status,
+            payment_reference=payment_reference,
+            channel=channel
+        )
+        
+        if success:
+            return Response({
+                'success': True,
+                'message': 'Subscription activated successfully'
+            })
+        else:
+            return Response({
+                'success': False,
+                'message': 'Payment processing failed'
+            })
+            
+    except Exception as e:
+        logger.error(f"Subscription webhook error: {e}")
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([TenantAPIKeyPermission])
+def tenant_subscription_history(request):
+    """
+    Get subscription payment history for the tenant
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    payments = TenantSubscriptionPayment.objects.filter(
+        tenant=tenant
+    ).order_by('-created_at')[:50]
+    
+    serializer = SubscriptionPaymentSerializer(payments, many=True)
+    
+    return Response({
+        'success': True,
+        'payments': serializer.data,
+        'total_paid': float(sum(p.amount for p in payments.filter(status='completed')))
+    })
+
+
+@api_view(['GET'])
+@permission_classes([TenantAPIKeyPermission])
+def tenant_revenue_report(request):
+    """
+    Get WiFi payment revenue report for tenant
+    Shows platform share vs tenant share
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    from .subscription import RevenueCalculator
+    
+    year = request.query_params.get('year')
+    month = request.query_params.get('month')
+    
+    calc = RevenueCalculator(tenant)
+    report = calc.get_monthly_revenue_report(
+        year=int(year) if year else None,
+        month=int(month) if month else None
+    )
+    
+    return Response({
+        'success': True,
+        'report': report
+    })
+
+
+# =============================================================================
+# PLATFORM ADMIN ENDPOINTS (Super Admin)
+# =============================================================================
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def platform_dashboard(request):
+    """
+    Platform-wide dashboard for super admin
+    Shows all tenants, revenue, and system status
+    """
+    now = timezone.now()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    
+    # Tenant stats
+    total_tenants = Tenant.objects.count()
+    active_tenants = Tenant.objects.filter(subscription_status='active').count()
+    trial_tenants = Tenant.objects.filter(subscription_status='trial').count()
+    
+    # Revenue from subscription payments
+    subscription_revenue = TenantSubscriptionPayment.objects.filter(
+        status='completed',
+        completed_at__gte=month_start
+    ).aggregate(total=Sum('amount'))['total'] or 0
+    
+    # Revenue share from WiFi payments
+    wifi_payments_total = Payment.objects.filter(
+        status='completed',
+        completed_at__gte=month_start
+    ).aggregate(total=Sum('amount'))['total'] or 0
+    
+    # Calculate platform share (aggregate across all tenants)
+    platform_revenue_share = 0
+    for tenant in Tenant.objects.filter(subscription_plan__isnull=False):
+        if tenant.subscription_plan:
+            share_pct = tenant.subscription_plan.revenue_share_percentage
+            tenant_payments = Payment.objects.filter(
+                tenant=tenant,
+                status='completed',
+                completed_at__gte=month_start
+            ).aggregate(total=Sum('amount'))['total'] or 0
+            platform_revenue_share += float(tenant_payments * share_pct / 100)
+    
+    # Expiring subscriptions (next 7 days)
+    warning_date = now + timedelta(days=7)
+    expiring_soon = Tenant.objects.filter(
+        subscription_status='active',
+        subscription_ends_at__lte=warning_date,
+        subscription_ends_at__gt=now
+    ).count()
+    
+    return Response({
+        'success': True,
+        'tenants': {
+            'total': total_tenants,
+            'active': active_tenants,
+            'trial': trial_tenants,
+            'expiring_soon': expiring_soon,
+        },
+        'revenue_this_month': {
+            'subscription_payments': float(subscription_revenue),
+            'wifi_payments_total': float(wifi_payments_total),
+            'platform_revenue_share': round(platform_revenue_share, 2),
+            'total_platform_revenue': float(subscription_revenue) + round(platform_revenue_share, 2),
+        },
+        'system': {
+            'total_routers': Router.objects.filter(is_active=True).count(),
+            'total_wifi_users': User.objects.count(),
+            'total_payments': Payment.objects.filter(status='completed').count(),
+        }
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def list_all_tenants(request):
+    """
+    List all tenants for platform admin
+    """
+    status_filter = request.query_params.get('status')
+    
+    queryset = Tenant.objects.select_related('subscription_plan', 'owner').order_by('-created_at')
+    
+    if status_filter:
+        queryset = queryset.filter(subscription_status=status_filter)
+    
+    # Simple pagination
+    page = int(request.query_params.get('page', 1))
+    per_page = int(request.query_params.get('per_page', 20))
+    start = (page - 1) * per_page
+    end = start + per_page
+    
+    tenants = queryset[start:end]
+    total = queryset.count()
+    
+    data = []
+    for tenant in tenants:
+        data.append({
+            'id': str(tenant.id),
+            'slug': tenant.slug,
+            'business_name': tenant.business_name,
+            'business_email': tenant.business_email,
+            'subscription_plan': tenant.subscription_plan.display_name if tenant.subscription_plan else None,
+            'subscription_status': tenant.subscription_status,
+            'subscription_ends_at': tenant.subscription_ends_at.isoformat() if tenant.subscription_ends_at else None,
+            'is_active': tenant.is_active,
+            'created_at': tenant.created_at.isoformat(),
+            'routers_count': tenant.routers.filter(is_active=True).count(),
+            'wifi_users_count': tenant.wifi_users.count(),
+        })
+    
+    return Response({
+        'success': True,
+        'tenants': data,
+        'pagination': {
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'pages': (total + per_page - 1) // per_page,
+        }
+    })
+
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAdminUser])
+def manage_tenant(request, tenant_id):
+    """
+    Get or update a specific tenant (platform admin)
+    """
+    try:
+        tenant = Tenant.objects.get(id=tenant_id)
+    except Tenant.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    if request.method == 'GET':
+        return Response({
+            'success': True,
+            'tenant': TenantSerializer(tenant).data,
+            'subscription_payments': SubscriptionPaymentSerializer(
+                tenant.subscription_payments.order_by('-created_at')[:10],
+                many=True
+            ).data,
+        })
+    
+    elif request.method == 'PUT':
+        # Update tenant status, plan, etc.
+        data = request.data
+        
+        if 'subscription_status' in data:
+            tenant.subscription_status = data['subscription_status']
+        
+        if 'subscription_plan_id' in data:
+            try:
+                plan = SubscriptionPlan.objects.get(id=data['subscription_plan_id'])
+                tenant.subscription_plan = plan
+            except SubscriptionPlan.DoesNotExist:
+                pass
+        
+        if 'subscription_ends_at' in data:
+            from django.utils.dateparse import parse_datetime
+            tenant.subscription_ends_at = parse_datetime(data['subscription_ends_at'])
+        
+        if 'is_active' in data:
+            tenant.is_active = data['is_active']
+        
+        if 'notes' in data:
+            tenant.notes = data['notes']
+        
+        tenant.save()
+        
+        return Response({
+            'success': True,
+            'message': 'Tenant updated successfully',
+            'tenant': TenantSerializer(tenant).data
+        })
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def platform_revenue_report(request):
+    """
+    Generate platform-wide revenue report
+    """
+    year = int(request.query_params.get('year', timezone.now().year))
+    month = request.query_params.get('month')
+    
+    if month:
+        month = int(month)
+        month_start = timezone.datetime(year, month, 1, tzinfo=timezone.get_current_timezone())
+        if month == 12:
+            month_end = timezone.datetime(year + 1, 1, 1, tzinfo=timezone.get_current_timezone())
+        else:
+            month_end = timezone.datetime(year, month + 1, 1, tzinfo=timezone.get_current_timezone())
+    else:
+        # Full year
+        month_start = timezone.datetime(year, 1, 1, tzinfo=timezone.get_current_timezone())
+        month_end = timezone.datetime(year + 1, 1, 1, tzinfo=timezone.get_current_timezone())
+    
+    # Subscription revenue
+    subscription_revenue = TenantSubscriptionPayment.objects.filter(
+        status='completed',
+        completed_at__gte=month_start,
+        completed_at__lt=month_end
+    ).aggregate(
+        total=Sum('amount'),
+        count=Count('id')
+    )
+    
+    # WiFi payment revenue share
+    revenue_by_tenant = []
+    total_platform_share = 0
+    
+    for tenant in Tenant.objects.filter(subscription_plan__isnull=False):
+        tenant_payments = Payment.objects.filter(
+            tenant=tenant,
+            status='completed',
+            completed_at__gte=month_start,
+            completed_at__lt=month_end
+        ).aggregate(total=Sum('amount'))['total'] or 0
+        
+        if tenant_payments:
+            share_pct = tenant.subscription_plan.revenue_share_percentage
+            platform_share = float(tenant_payments * share_pct / 100)
+            total_platform_share += platform_share
+            
+            revenue_by_tenant.append({
+                'tenant': tenant.business_name,
+                'slug': tenant.slug,
+                'wifi_revenue': float(tenant_payments),
+                'share_percentage': float(share_pct),
+                'platform_share': round(platform_share, 2),
+            })
+    
+    # Sort by platform share
+    revenue_by_tenant.sort(key=lambda x: x['platform_share'], reverse=True)
+    
+    return Response({
+        'success': True,
+        'period': f"{year}-{month:02d}" if month else str(year),
+        'subscription_revenue': {
+            'total': float(subscription_revenue['total'] or 0),
+            'count': subscription_revenue['count'] or 0,
+        },
+        'revenue_share': {
+            'total_platform_share': round(total_platform_share, 2),
+            'by_tenant': revenue_by_tenant[:20],  # Top 20
+        },
+        'total_platform_revenue': float(subscription_revenue['total'] or 0) + round(total_platform_share, 2),
+        'currency': 'TZS',
+    })
+
+
+# =============================================================================
+# TENANT ROUTER MANAGEMENT
+# =============================================================================
+
+@api_view(['GET', 'POST'])
+@permission_classes([TenantAPIKeyPermission])
+def tenant_routers(request):
+    """
+    List or create routers for the tenant
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    if request.method == 'GET':
+        routers = Router.objects.filter(tenant=tenant).order_by('name')
+        return Response({
+            'success': True,
+            'routers': RouterSerializer(routers, many=True).data
+        })
+    
+    elif request.method == 'POST':
+        # Check limit
+        from .subscription import UsageMeter
+        meter = UsageMeter(tenant)
+        can_add, message = meter.can_add_router()
+        
+        if not can_add:
+            return Response({
+                'success': False,
+                'message': message
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        serializer = RouterSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'success': False,
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        router = serializer.save(tenant=tenant)
+        
+        return Response({
+            'success': True,
+            'message': 'Router added successfully',
+            'router': RouterSerializer(router).data
+        }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([TenantAPIKeyPermission])
+def tenant_router_detail(request, router_id):
+    """
+    Get, update, or delete a specific router
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        router = Router.objects.get(id=router_id, tenant=tenant)
+    except Router.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Router not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    if request.method == 'GET':
+        return Response({
+            'success': True,
+            'router': RouterSerializer(router).data
+        })
+    
+    elif request.method == 'PUT':
+        serializer = RouterSerializer(router, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                'success': True,
+                'message': 'Router updated',
+                'router': serializer.data
+            })
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    elif request.method == 'DELETE':
+        router.is_active = False  # Soft delete
+        router.save()
+        return Response({
+            'success': True,
+            'message': 'Router removed'
+        })
+
+
+@api_view(['POST'])
+@permission_classes([TenantAPIKeyPermission])
+def test_router_connection(request, router_id):
+    """
+    Test connection to a router
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        router = Router.objects.get(id=router_id, tenant=tenant)
+    except Router.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Router not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    try:
+        # Test connection
+        import routeros_api
+        
+        connection = routeros_api.RouterOsApiPool(
+            router.host,
+            username=router.username,
+            password=router.password,
+            port=router.api_port,
+            plaintext_login=True
+        )
+        api = connection.get_api()
+        
+        # Get router identity
+        identity = api.get_resource('/system/identity').get()[0]
+        
+        # Update last connected
+        router.last_connected = timezone.now()
+        router.last_error = None
+        router.save()
+        
+        connection.disconnect()
+        
+        return Response({
+            'success': True,
+            'message': f"Connected to {identity.get('name', 'Unknown')}",
+            'router_name': identity.get('name'),
+        })
+        
+    except Exception as e:
+        router.last_error = str(e)
+        router.save()
+        
+        return Response({
+            'success': False,
+            'message': f'Connection failed: {str(e)}'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
