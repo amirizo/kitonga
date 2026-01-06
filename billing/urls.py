@@ -3,6 +3,7 @@ URL routing for billing API
 """
 from django.urls import path
 from . import views
+from . import portal_views
 
 urlpatterns = [
     # Authentication endpoints
