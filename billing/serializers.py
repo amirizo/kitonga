@@ -365,3 +365,151 @@ class RevenueReportSerializer(serializers.Serializer):
     tenant_share = serializers.FloatField()
     currency = serializers.CharField()
 
+
+# =============================================================================
+# TENANT PORTAL SERIALIZERS (Phase 3)
+# =============================================================================
+
+class RouterWizardSerializer(serializers.Serializer):
+    """Serializer for router connection test"""
+    host = serializers.CharField(max_length=255)
+    port = serializers.IntegerField(default=8728, min_value=1, max_value=65535)
+    username = serializers.CharField(max_length=100, default='admin')
+    password = serializers.CharField(max_length=255, write_only=True, required=False, allow_blank=True)
+    use_ssl = serializers.BooleanField(default=False)
+
+
+class RouterConfigSerializer(serializers.Serializer):
+    """Serializer for saving router configuration"""
+    name = serializers.CharField(max_length=100)
+    host = serializers.CharField(max_length=255)
+    port = serializers.IntegerField(default=8728, min_value=1, max_value=65535)
+    username = serializers.CharField(max_length=100, default='admin')
+    password = serializers.CharField(max_length=255, write_only=True, required=False, allow_blank=True)
+    use_ssl = serializers.BooleanField(default=False)
+    location_id = serializers.IntegerField(required=False, allow_null=True)
+    hotspot_interface = serializers.CharField(max_length=50, default='bridge')
+    hotspot_profile = serializers.CharField(max_length=50, default='default')
+    description = serializers.CharField(required=False, allow_blank=True)
+
+
+class HotspotAutoConfigSerializer(serializers.Serializer):
+    """Serializer for hotspot auto-configuration"""
+    router_id = serializers.IntegerField()
+    interface = serializers.CharField(max_length=50, default='bridge')
+    server_name = serializers.CharField(max_length=50, default='kitonga-hotspot')
+    profile_name = serializers.CharField(max_length=50, default='kitonga-profile')
+
+
+class BrandingUpdateSerializer(serializers.Serializer):
+    """Serializer for updating tenant branding"""
+    primary_color = serializers.RegexField(
+        regex=r'^#[0-9A-Fa-f]{6}$',
+        required=False,
+        error_messages={'invalid': 'Color must be in hex format (e.g., #3B82F6)'}
+    )
+    secondary_color = serializers.RegexField(
+        regex=r'^#[0-9A-Fa-f]{6}$',
+        required=False,
+        error_messages={'invalid': 'Color must be in hex format (e.g., #1E40AF)'}
+    )
+    business_name = serializers.CharField(max_length=200, required=False)
+
+
+class CustomDomainSerializer(serializers.Serializer):
+    """Serializer for custom domain configuration"""
+    domain = serializers.RegexField(
+        regex=r'^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$',
+        error_messages={'invalid': 'Invalid domain format'}
+    )
+
+
+class AnalyticsQuerySerializer(serializers.Serializer):
+    """Serializer for analytics query parameters"""
+    start_date = serializers.DateTimeField(required=False)
+    end_date = serializers.DateTimeField(required=False)
+    group_by = serializers.ChoiceField(
+        choices=['hour', 'day', 'week', 'month'],
+        default='day',
+        required=False
+    )
+
+
+class ExportRequestSerializer(serializers.Serializer):
+    """Serializer for data export requests"""
+    export_type = serializers.ChoiceField(
+        choices=['payments', 'users', 'vouchers']
+    )
+    start_date = serializers.DateTimeField(required=False)
+    end_date = serializers.DateTimeField(required=False)
+    format = serializers.ChoiceField(
+        choices=['csv', 'json'],
+        default='csv',
+        required=False
+    )
+    batch_id = serializers.CharField(max_length=50, required=False, allow_blank=True)
+
+
+class TenantSettingsSerializer(serializers.ModelSerializer):
+    """Serializer for tenant settings update"""
+    
+    class Meta:
+        model = Tenant
+        fields = [
+            'business_name', 'business_email', 'business_phone',
+            'business_address', 'timezone',
+            'primary_color', 'secondary_color',
+            'nextsms_username', 'nextsms_password', 'nextsms_sender_id',
+            'clickpesa_client_id', 'clickpesa_api_key',
+        ]
+        extra_kwargs = {
+            'nextsms_password': {'write_only': True},
+            'clickpesa_api_key': {'write_only': True},
+        }
+
+
+class StaffInviteSerializer(serializers.Serializer):
+    """Serializer for inviting new staff members"""
+    email = serializers.EmailField()
+    first_name = serializers.CharField(max_length=100, required=False)
+    last_name = serializers.CharField(max_length=100, required=False)
+    role = serializers.ChoiceField(
+        choices=['admin', 'manager', 'support', 'viewer'],
+        default='support'
+    )
+    can_manage_routers = serializers.BooleanField(default=False)
+    can_manage_users = serializers.BooleanField(default=True)
+    can_manage_payments = serializers.BooleanField(default=True)
+    can_manage_vouchers = serializers.BooleanField(default=True)
+    can_view_reports = serializers.BooleanField(default=True)
+    can_manage_staff = serializers.BooleanField(default=False)
+    can_manage_settings = serializers.BooleanField(default=False)
+
+
+class StaffUpdateSerializer(serializers.Serializer):
+    """Serializer for updating staff permissions"""
+    role = serializers.ChoiceField(
+        choices=['admin', 'manager', 'support', 'viewer'],
+        required=False
+    )
+    can_manage_routers = serializers.BooleanField(required=False)
+    can_manage_users = serializers.BooleanField(required=False)
+    can_manage_payments = serializers.BooleanField(required=False)
+    can_manage_vouchers = serializers.BooleanField(required=False)
+    can_view_reports = serializers.BooleanField(required=False)
+    can_manage_staff = serializers.BooleanField(required=False)
+    can_manage_settings = serializers.BooleanField(required=False)
+    is_active = serializers.BooleanField(required=False)
+
+
+class DashboardSummarySerializer(serializers.Serializer):
+    """Serializer for dashboard summary response"""
+    overview = serializers.DictField()
+    today = serializers.DictField()
+    this_week = serializers.DictField()
+    this_month = serializers.DictField()
+    active_users = serializers.DictField()
+    revenue_trend = serializers.ListField()
+    top_bundles = serializers.ListField()
+    device_breakdown = serializers.DictField()
+    router_status = serializers.ListField()
