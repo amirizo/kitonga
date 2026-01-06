@@ -52,8 +52,8 @@ class SubscriptionManager:
             amount = plan.monthly_price
             period_days = 30
         
-        # Generate unique transaction ID
-        transaction_id = f"SUB-{self.tenant.slug}-{uuid.uuid4().hex[:8].upper()}"
+        # Generate unique transaction ID (alphanumeric only for ClickPesa)
+        transaction_id = f"SUB{self.tenant.slug.replace('-', '').upper()}{uuid.uuid4().hex[:8].upper()}"
         
         # Calculate subscription period
         now = timezone.now()
@@ -135,9 +135,11 @@ class SubscriptionManager:
             logger.error(f"Subscription payment not found: {transaction_id}")
             return False
         
-        if status == 'PAYMENT RECEIVED':
+        # Normalize status - ClickPesa may send different formats
+        status_upper = status.upper()
+        if status_upper in ['PAYMENT RECEIVED', 'COMPLETED', 'SUCCESS', 'SUCCESSFUL']:
             return self._activate_subscription(payment, payment_reference, channel)
-        elif status in ['PAYMENT FAILED', 'PAYMENT CANCELLED']:
+        elif status_upper in ['PAYMENT FAILED', 'PAYMENT CANCELLED', 'FAILED', 'CANCELLED']:
             payment.status = 'failed'
             payment.save()
             return False
@@ -175,7 +177,7 @@ class SubscriptionManager:
     def _send_subscription_confirmation(self, tenant: Tenant, payment: TenantSubscriptionPayment):
         """Send SMS confirmation for subscription payment"""
         try:
-            from .nextsms import send_sms
+            from .nextsms import NextSMSAPI
             
             message = (
                 f"Kitonga Subscription Confirmed!\n"
@@ -185,7 +187,8 @@ class SubscriptionManager:
                 f"Thank you for choosing Kitonga!"
             )
             
-            send_sms(tenant.business_phone, message, sms_type='payment')
+            sms_client = NextSMSAPI()
+            sms_client.send_sms(tenant.business_phone, message)
             
         except Exception as e:
             logger.error(f"Failed to send subscription confirmation SMS: {e}")
@@ -514,7 +517,7 @@ def check_expiring_subscriptions():
     Check for subscriptions expiring in 7 days and send reminders
     Called daily via cron
     """
-    from .nextsms import send_sms
+    from .nextsms import NextSMSAPI
     
     now = timezone.now()
     warning_date = now + timedelta(days=7)
@@ -525,6 +528,8 @@ def check_expiring_subscriptions():
         subscription_ends_at__gt=now,
         is_active=True
     )
+    
+    sms_client = NextSMSAPI()
     
     for tenant in expiring_tenants:
         days_left = (tenant.subscription_ends_at - now).days
@@ -537,7 +542,7 @@ def check_expiring_subscriptions():
                 f"Amount: TZS {tenant.subscription_plan.monthly_price:,.0f}/month"
             )
             
-            send_sms(tenant.business_phone, message, sms_type='admin')
+            sms_client.send_sms(tenant.business_phone, message)
             logger.info(f"Sent expiry reminder to {tenant.slug} ({days_left} days left)")
             
         except Exception as e:
@@ -551,6 +556,8 @@ def suspend_expired_subscriptions():
     Suspend subscriptions that have expired
     Called daily via cron
     """
+    from .nextsms import NextSMSAPI
+    
     now = timezone.now()
     
     expired_tenants = Tenant.objects.filter(
@@ -559,7 +566,9 @@ def suspend_expired_subscriptions():
         is_active=True
     )
     
+    sms_client = NextSMSAPI()
     suspended_count = 0
+    
     for tenant in expired_tenants:
         tenant.subscription_status = 'suspended'
         tenant.save()
@@ -567,8 +576,6 @@ def suspend_expired_subscriptions():
         
         # Notify tenant
         try:
-            from .nextsms import send_sms
-            
             message = (
                 f"Kitonga Subscription Expired\n"
                 f"Your subscription has expired. WiFi services are now limited.\n"
@@ -576,7 +583,7 @@ def suspend_expired_subscriptions():
                 f"Contact: support@kitonga.com"
             )
             
-            send_sms(tenant.business_phone, message, sms_type='admin')
+            sms_client.send_sms(tenant.business_phone, message)
             
         except Exception as e:
             logger.error(f"Failed to send expiry notification to {tenant.slug}: {e}")
@@ -591,6 +598,8 @@ def expire_trials():
     Handle trial expirations
     Called daily via cron
     """
+    from .nextsms import NextSMSAPI
+    
     now = timezone.now()
     
     expired_trials = Tenant.objects.filter(
@@ -599,7 +608,9 @@ def expire_trials():
         is_active=True
     )
     
+    sms_client = NextSMSAPI()
     expired_count = 0
+    
     for tenant in expired_trials:
         tenant.subscription_status = 'suspended'
         tenant.save()
@@ -607,7 +618,7 @@ def expire_trials():
         
         # Notify tenant
         try:
-            from .nextsms import send_sms
+            from .nextsms import NextSMSAPI
             
             message = (
                 f"Kitonga Trial Ended\n"
@@ -616,7 +627,8 @@ def expire_trials():
                 f"Plans start at TZS 30,000/month."
             )
             
-            send_sms(tenant.business_phone, message, sms_type='admin')
+            sms_client = NextSMSAPI()
+            sms_client.send_sms(tenant.business_phone, message, sms_type='admin')
             
         except Exception as e:
             logger.error(f"Failed to send trial expiry notification to {tenant.slug}: {e}")

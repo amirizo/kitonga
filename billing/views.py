@@ -4922,15 +4922,16 @@ def register_tenant(request):
         
         # Send welcome SMS
         try:
-            from .nextsms import send_sms
+            from .nextsms import NextSMSAPI
+            sms_client = NextSMSAPI()
             message = (
                 f"Welcome to Kitonga!\n"
                 f"Your business: {tenant.business_name}\n"
-                f"Trial ends: {tenant.trial_ends_at.strftime('%d/%m/%Y')}\n"
+                f"Trial ends: {tenant.trial_ends_at.strftime('%d/%m/%Y') if tenant.trial_ends_at else '14 days'}\n"
                 f"Login: https://app.kitonga.com\n"
                 f"API Key: {tenant.api_key[:16]}..."
             )
-            send_sms(tenant.business_phone, message, sms_type='admin')
+            sms_client.send_sms(tenant.business_phone, message)
         except Exception as e:
             logger.warning(f"Failed to send welcome SMS: {e}")
         
@@ -4942,7 +4943,7 @@ def register_tenant(request):
                 'slug': tenant.slug,
                 'business_name': tenant.business_name,
                 'api_key': tenant.api_key,
-                'trial_ends_at': tenant.trial_ends_at.isoformat(),
+                'trial_ends_at': tenant.trial_ends_at.isoformat() if tenant.trial_ends_at else None,
             },
             'admin': {
                 'email': admin_user.email,
@@ -5101,30 +5102,25 @@ def subscription_payment_webhook(request):
         data = request.data
         logger.info(f"Subscription payment webhook received: {data}")
         
-        transaction_id = data.get('external_reference') or data.get('merchant_reference')
-        payment_status = data.get('payment_status', '')
+        transaction_id = data.get('external_reference') or data.get('merchant_reference') or data.get('order_reference')
+        payment_status = data.get('payment_status', '') or data.get('status', '')
         payment_reference = data.get('order_reference', '')
         channel = data.get('channel', '')
         
         if not transaction_id:
             return Response({'error': 'Missing transaction_id'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Check if this is a subscription payment (starts with SUB-)
-        if not transaction_id.startswith('SUB-'):
+        # Check if this is a subscription payment (starts with SUB)
+        if not transaction_id.startswith('SUB'):
             logger.info(f"Not a subscription payment: {transaction_id}")
             return Response({'message': 'Not a subscription payment'}, status=status.HTTP_200_OK)
         
-        # Extract tenant slug from transaction ID
-        parts = transaction_id.split('-')
-        if len(parts) < 2:
-            return Response({'error': 'Invalid transaction_id format'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        tenant_slug = parts[1]
-        
+        # Find payment by transaction_id
         try:
-            tenant = Tenant.objects.get(slug=tenant_slug)
-        except Tenant.DoesNotExist:
-            return Response({'error': 'Tenant not found'}, status=status.HTTP_404_NOT_FOUND)
+            payment = TenantSubscriptionPayment.objects.get(transaction_id=transaction_id)
+            tenant = payment.tenant
+        except TenantSubscriptionPayment.DoesNotExist:
+            return Response({'error': 'Payment not found'}, status=status.HTTP_404_NOT_FOUND)
         
         from .subscription import SubscriptionManager
         
@@ -5168,16 +5164,16 @@ def tenant_subscription_history(request):
             'message': 'Tenant not found'
         }, status=status.HTTP_403_FORBIDDEN)
     
-    payments = TenantSubscriptionPayment.objects.filter(
-        tenant=tenant
-    ).order_by('-created_at')[:50]
+    all_payments = TenantSubscriptionPayment.objects.filter(tenant=tenant)
+    total_paid = float(sum(p.amount for p in all_payments.filter(status='completed')))
     
+    payments = all_payments.order_by('-created_at')[:50]
     serializer = SubscriptionPaymentSerializer(payments, many=True)
     
     return Response({
         'success': True,
         'payments': serializer.data,
-        'total_paid': float(sum(p.amount for p in payments.filter(status='completed')))
+        'total_paid': total_paid
     })
 
 
@@ -5217,7 +5213,7 @@ def tenant_revenue_report(request):
 # =============================================================================
 
 @api_view(['GET'])
-@permission_classes([IsAdminUser])
+@permission_classes([SimpleAdminTokenPermission])
 def platform_dashboard(request):
     """
     Platform-wide dashboard for super admin
@@ -5286,7 +5282,7 @@ def platform_dashboard(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminUser])
+@permission_classes([SimpleAdminTokenPermission])
 def list_all_tenants(request):
     """
     List all tenants for platform admin
@@ -5336,7 +5332,7 @@ def list_all_tenants(request):
 
 
 @api_view(['GET', 'PUT'])
-@permission_classes([IsAdminUser])
+@permission_classes([SimpleAdminTokenPermission])
 def manage_tenant(request, tenant_id):
     """
     Get or update a specific tenant (platform admin)
@@ -5393,7 +5389,7 @@ def manage_tenant(request, tenant_id):
 
 
 @api_view(['GET'])
-@permission_classes([IsAdminUser])
+@permission_classes([SimpleAdminTokenPermission])
 def platform_revenue_report(request):
     """
     Generate platform-wide revenue report

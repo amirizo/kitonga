@@ -149,8 +149,14 @@ class TenantAPIKeyPermission(permissions.BasePermission):
             # Verify subscription is valid for non-public endpoints
             if tenant.is_subscription_valid():
                 return True
-            # Allow access to subscription-related endpoints even if expired
-            if any(x in request.path for x in ['/subscribe', '/plans', '/dashboard', '/usage']):
+            # Allow access to SaaS management endpoints even if subscription expired
+            # (so tenant can renew, view status, manage settings)
+            saas_paths = [
+                '/saas/subscribe', '/saas/plans', '/saas/dashboard', 
+                '/saas/usage', '/saas/routers', '/saas/subscription-history',
+                '/saas/revenue', '/platform/'
+            ]
+            if any(x in request.path for x in saas_paths):
                 return True
         
         return False
