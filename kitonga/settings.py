@@ -537,6 +537,23 @@ JAZZMIN_UI_TWEAKS = {
 }
 
 # ============================================
+# EMAIL CONFIGURATION
+# ============================================
+# Email settings for OTP, notifications, and transactional emails
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = config('EMAIL_HOST', default='klikcell.com')
+EMAIL_PORT = config('EMAIL_PORT', default=465, cast=int)
+EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=True, cast=bool)
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=False, cast=bool)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='info@klikcell.com')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='Kijangwani2003')
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='Kitonga WiFi <info@klikcell.com>')
+SERVER_EMAIL = config('SERVER_EMAIL', default='info@klikcell.com')
+
+# Email timeout settings
+EMAIL_TIMEOUT = 30  # seconds
+
+
 # CRONTAB CONFIGURATION FOR SCHEDULED TASKS
 # ============================================
 # These tasks run automatically at scheduled intervals

@@ -127,6 +127,10 @@ class Tenant(models.Model):
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True)  # Internal notes for super admin
     
+    # Email Verification
+    email_verified = models.BooleanField(default=False)
+    email_verified_at = models.DateTimeField(null=True, blank=True)
+    
     class Meta:
         ordering = ['-created_at']
     
@@ -196,6 +200,99 @@ class Tenant(models.Model):
         if not self.subscription_plan:
             return False
         return self.wifi_users.count() < self.subscription_plan.max_wifi_users
+
+
+class EmailOTP(models.Model):
+    """
+    Email OTP for tenant email verification and password reset
+    """
+    PURPOSE_CHOICES = [
+        ('registration', 'Registration Verification'),
+        ('password_reset', 'Password Reset'),
+        ('email_change', 'Email Change'),
+        ('login', 'Two-Factor Login'),
+    ]
+    
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='email_otps', null=True, blank=True)
+    email = models.EmailField()
+    otp_code = models.CharField(max_length=6)
+    purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES, default='registration')
+    is_used = models.BooleanField(default=False)
+    attempts = models.IntegerField(default=0)  # Track failed attempts
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['email', 'otp_code', 'is_used']),
+        ]
+    
+    def __str__(self):
+        return f"OTP for {self.email} - {self.purpose}"
+    
+    def save(self, *args, **kwargs):
+        # Set expiry to 15 minutes from now if not set
+        if not self.expires_at:
+            self.expires_at = timezone.now() + timedelta(minutes=15)
+        super().save(*args, **kwargs)
+    
+    def is_valid(self):
+        """Check if OTP is still valid"""
+        if self.is_used:
+            return False
+        if self.attempts >= 5:  # Max 5 attempts
+            return False
+        if timezone.now() > self.expires_at:
+            return False
+        return True
+    
+    def verify(self, code):
+        """Verify OTP code"""
+        if not self.is_valid():
+            return False, "OTP has expired or been used"
+        
+        self.attempts += 1
+        self.save(update_fields=['attempts'])
+        
+        if self.otp_code != code:
+            if self.attempts >= 5:
+                return False, "Too many failed attempts. Request a new OTP."
+            return False, f"Invalid OTP. {5 - self.attempts} attempts remaining."
+        
+        # Mark as used
+        self.is_used = True
+        self.used_at = timezone.now()
+        self.save(update_fields=['is_used', 'used_at'])
+        
+        return True, "OTP verified successfully"
+    
+    @staticmethod
+    def generate_otp():
+        """Generate a 6-digit OTP"""
+        import random
+        return ''.join([str(random.randint(0, 9)) for _ in range(6)])
+    
+    @classmethod
+    def create_for_email(cls, email, purpose='registration', tenant=None):
+        """Create a new OTP for an email"""
+        # Invalidate any existing unused OTPs for this email and purpose
+        cls.objects.filter(
+            email=email, 
+            purpose=purpose, 
+            is_used=False
+        ).update(is_used=True)
+        
+        # Create new OTP
+        otp = cls.objects.create(
+            tenant=tenant,
+            email=email,
+            otp_code=cls.generate_otp(),
+            purpose=purpose,
+            expires_at=timezone.now() + timedelta(minutes=15)
+        )
+        return otp
 
 
 class TenantStaff(models.Model):

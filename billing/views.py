@@ -4845,7 +4845,7 @@ def list_subscription_plans(request):
 def register_tenant(request):
     """
     Register a new tenant (hotspot business)
-    Creates tenant account with 14-day trial
+    Step 1: Create account and send OTP for email verification
     """
     serializer = TenantRegistrationSerializer(data=request.data)
     if not serializer.is_valid():
@@ -4859,6 +4859,8 @@ def register_tenant(request):
     try:
         # Create Django user for tenant owner
         from django.contrib.auth.models import User as DjangoUser
+        from .models import EmailOTP
+        from .email_utils import send_otp_email
         import re
         
         # Generate slug from business name if not provided
@@ -4872,13 +4874,14 @@ def register_tenant(request):
                 slug = f"{base_slug}-{counter}"
                 counter += 1
         
-        # Create admin user
+        # Create admin user (inactive until email verified)
         admin_user = DjangoUser.objects.create_user(
             username=data['admin_email'],
             email=data['admin_email'],
             password=data['admin_password'],
             first_name=data.get('admin_first_name', ''),
-            last_name=data.get('admin_last_name', '')
+            last_name=data.get('admin_last_name', ''),
+            is_active=False  # Inactive until email verified
         )
         
         # Get subscription plan (default to Starter if none specified)
@@ -4892,7 +4895,7 @@ def register_tenant(request):
         if not plan:
             plan = SubscriptionPlan.objects.filter(name='starter', is_active=True).first()
         
-        # Create tenant
+        # Create tenant (email not verified yet)
         tenant = Tenant.objects.create(
             slug=slug,
             business_name=data['business_name'],
@@ -4901,7 +4904,8 @@ def register_tenant(request):
             business_address=data.get('business_address', ''),
             owner=admin_user,
             subscription_plan=plan,
-            subscription_status='trial'  # 14-day trial is set automatically
+            subscription_status='trial',
+            email_verified=False  # Will be set to True after OTP verification
         )
         
         # Create owner staff entry
@@ -4920,24 +4924,137 @@ def register_tenant(request):
             joined_at=timezone.now()
         )
         
+        # Create and send OTP for email verification
+        otp = EmailOTP.create_for_email(
+            email=data['admin_email'],
+            purpose='registration',
+            tenant=tenant
+        )
+        
+        # Send OTP email
+        email_sent = send_otp_email(
+            email=data['admin_email'],
+            otp_code=otp.otp_code,
+            purpose='registration',
+            tenant_name=tenant.business_name
+        )
+        
+        if not email_sent:
+            logger.warning(f"Failed to send OTP email for registration: {data['admin_email']}")
+        
+        return Response({
+            'success': True,
+            'message': 'Registration successful! Please check your email for the verification code.',
+            'email': data['admin_email'],
+            'tenant_id': str(tenant.id),
+            'requires_verification': True,
+            'next_step': 'verify_email'
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        logger.error(f"Tenant registration failed: {e}")
+        # Clean up if tenant was partially created
+        try:
+            if 'admin_user' in locals() and admin_user.pk:
+                admin_user.delete()
+        except:
+            pass
+        return Response({
+            'success': False,
+            'message': 'Registration failed. Please try again.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def verify_email_otp(request):
+    """
+    Verify email OTP after registration
+    Step 2: Complete registration by verifying email
+    """
+    from .models import EmailOTP
+    from .email_utils import send_welcome_email
+    from .serializers import EmailOTPVerifySerializer
+    
+    serializer = EmailOTPVerifySerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    email = serializer.validated_data['email']
+    otp_code = serializer.validated_data['otp_code']
+    
+    # Find the OTP
+    try:
+        otp = EmailOTP.objects.filter(
+            email=email,
+            purpose='registration',
+            is_used=False
+        ).latest('created_at')
+    except EmailOTP.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'No pending verification found. Please register again.'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    # Verify OTP
+    is_valid, message = otp.verify(otp_code)
+    
+    if not is_valid:
+        return Response({
+            'success': False,
+            'message': message
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # OTP verified - activate the tenant and user
+    try:
+        tenant = otp.tenant
+        if not tenant:
+            return Response({
+                'success': False,
+                'message': 'Tenant not found.'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Activate tenant email
+        tenant.email_verified = True
+        tenant.email_verified_at = timezone.now()
+        tenant.save(update_fields=['email_verified', 'email_verified_at'])
+        
+        # Activate Django user
+        admin_user = tenant.owner
+        admin_user.is_active = True
+        admin_user.save(update_fields=['is_active'])
+        
         # Send welcome SMS
         try:
             from .nextsms import NextSMSAPI
             sms_client = NextSMSAPI()
-            message = (
+            sms_message = (
                 f"Welcome to Kitonga!\n"
                 f"Your business: {tenant.business_name}\n"
                 f"Trial ends: {tenant.trial_ends_at.strftime('%d/%m/%Y') if tenant.trial_ends_at else '14 days'}\n"
-                f"Login: https://app.kitonga.com\n"
-                f"API Key: {tenant.api_key[:16]}..."
+                f"Login: https://app.kitonga.com"
             )
-            sms_client.send_sms(tenant.business_phone, message)
+            sms_client.send_sms(tenant.business_phone, sms_message)
         except Exception as e:
             logger.warning(f"Failed to send welcome SMS: {e}")
         
+        # Send welcome email
+        try:
+            send_welcome_email(
+                email=admin_user.email,
+                business_name=tenant.business_name,
+                trial_ends_at=tenant.trial_ends_at.strftime('%B %d, %Y') if tenant.trial_ends_at else '14 days',
+                api_key_preview=tenant.api_key[:16]
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send welcome email: {e}")
+        
         return Response({
             'success': True,
-            'message': 'Registration successful! Your 14-day trial has started.',
+            'message': 'Email verified successfully! Your 14-day trial has started.',
             'tenant': {
                 'id': str(tenant.id),
                 'slug': tenant.slug,
@@ -4954,13 +5071,324 @@ def register_tenant(request):
                 'Create WiFi bundles/packages',
                 'Generate vouchers or enable payments',
             ]
-        }, status=status.HTTP_201_CREATED)
+        })
         
     except Exception as e:
-        logger.error(f"Tenant registration failed: {e}")
+        logger.error(f"Email verification failed: {e}")
         return Response({
             'success': False,
-            'message': 'Registration failed. Please try again.'
+            'message': 'Verification failed. Please try again.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def resend_otp(request):
+    """
+    Resend OTP for email verification
+    """
+    from .models import EmailOTP
+    from .email_utils import send_otp_email
+    from .serializers import ResendOTPSerializer
+    
+    serializer = ResendOTPSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    email = serializer.validated_data['email']
+    purpose = serializer.validated_data.get('purpose', 'registration')
+    
+    # Find tenant by email
+    tenant = None
+    try:
+        from django.contrib.auth.models import User as DjangoUser
+        user = DjangoUser.objects.get(email=email)
+        tenant = Tenant.objects.filter(owner=user).first()
+    except DjangoUser.DoesNotExist:
+        pass
+    
+    # Rate limiting: Check if OTP was sent in the last 60 seconds
+    recent_otp = EmailOTP.objects.filter(
+        email=email,
+        purpose=purpose,
+        created_at__gte=timezone.now() - timedelta(seconds=60)
+    ).exists()
+    
+    if recent_otp:
+        return Response({
+            'success': False,
+            'message': 'Please wait 60 seconds before requesting a new code.'
+        }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+    
+    # Create new OTP
+    otp = EmailOTP.create_for_email(
+        email=email,
+        purpose=purpose,
+        tenant=tenant
+    )
+    
+    # Send OTP email
+    email_sent = send_otp_email(
+        email=email,
+        otp_code=otp.otp_code,
+        purpose=purpose,
+        tenant_name=tenant.business_name if tenant else None
+    )
+    
+    if email_sent:
+        return Response({
+            'success': True,
+            'message': 'Verification code sent! Check your email.'
+        })
+    else:
+        return Response({
+            'success': False,
+            'message': 'Failed to send email. Please try again.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def tenant_login(request):
+    """
+    Login endpoint for tenant owners/staff
+    Returns API key and tenant info on successful login
+    """
+    from django.contrib.auth import authenticate
+    from .serializers import TenantLoginSerializer
+    
+    serializer = TenantLoginSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    email = serializer.validated_data['email']
+    password = serializer.validated_data['password']
+    
+    # Authenticate user
+    user = authenticate(username=email, password=password)
+    
+    if not user:
+        return Response({
+            'success': False,
+            'message': 'Invalid email or password.'
+        }, status=status.HTTP_401_UNAUTHORIZED)
+    
+    if not user.is_active:
+        # Check if email needs verification
+        tenant = Tenant.objects.filter(owner=user).first()
+        if tenant and not tenant.email_verified:
+            return Response({
+                'success': False,
+                'message': 'Please verify your email first.',
+                'requires_verification': True,
+                'email': email
+            }, status=status.HTTP_403_FORBIDDEN)
+        return Response({
+            'success': False,
+            'message': 'Account is inactive. Contact support.'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    # Find tenant for this user
+    tenant = Tenant.objects.filter(owner=user).first()
+    staff_entry = None
+    
+    if not tenant:
+        # Check if user is staff of a tenant
+        staff_entry = TenantStaff.objects.filter(user=user, is_active=True).first()
+        if staff_entry:
+            tenant = staff_entry.tenant
+    
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'No tenant account found for this user.'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    # Check tenant subscription status
+    if not tenant.is_subscription_valid():
+        if tenant.subscription_status == 'suspended':
+            return Response({
+                'success': False,
+                'message': 'Your account is suspended. Please contact support.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        elif tenant.subscription_status == 'cancelled':
+            return Response({
+                'success': False,
+                'message': 'Your subscription has been cancelled.'
+            }, status=status.HTTP_403_FORBIDDEN)
+    
+    # Determine role and permissions
+    role = 'owner'
+    permissions = {}
+    
+    if staff_entry:
+        role = staff_entry.role
+        permissions = {
+            'can_manage_routers': staff_entry.can_manage_routers,
+            'can_manage_users': staff_entry.can_manage_users,
+            'can_manage_payments': staff_entry.can_manage_payments,
+            'can_manage_vouchers': staff_entry.can_manage_vouchers,
+            'can_view_reports': staff_entry.can_view_reports,
+            'can_manage_staff': staff_entry.can_manage_staff,
+            'can_manage_settings': staff_entry.can_manage_settings,
+        }
+    else:
+        # Owner has all permissions
+        permissions = {
+            'can_manage_routers': True,
+            'can_manage_users': True,
+            'can_manage_payments': True,
+            'can_manage_vouchers': True,
+            'can_view_reports': True,
+            'can_manage_staff': True,
+            'can_manage_settings': True,
+        }
+    
+    return Response({
+        'success': True,
+        'message': 'Login successful!',
+        'user': {
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'role': role,
+            'permissions': permissions,
+        },
+        'tenant': {
+            'id': str(tenant.id),
+            'slug': tenant.slug,
+            'business_name': tenant.business_name,
+            'api_key': tenant.api_key,
+            'subscription_status': tenant.subscription_status,
+            'subscription_plan': tenant.subscription_plan.display_name if tenant.subscription_plan else None,
+            'subscription_ends_at': tenant.subscription_ends_at.isoformat() if tenant.subscription_ends_at else None,
+            'trial_ends_at': tenant.trial_ends_at.isoformat() if tenant.trial_ends_at else None,
+        }
+    })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def tenant_password_reset_request(request):
+    """
+    Request password reset - sends OTP to email
+    """
+    from .models import EmailOTP
+    from .email_utils import send_otp_email
+    from .serializers import TenantPasswordResetRequestSerializer
+    from django.contrib.auth.models import User as DjangoUser
+    
+    serializer = TenantPasswordResetRequestSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    email = serializer.validated_data['email']
+    
+    # Check if user exists (don't reveal if they do or not for security)
+    try:
+        user = DjangoUser.objects.get(email=email)
+        tenant = Tenant.objects.filter(owner=user).first()
+        
+        # Create OTP
+        otp = EmailOTP.create_for_email(
+            email=email,
+            purpose='password_reset',
+            tenant=tenant
+        )
+        
+        # Send OTP email
+        send_otp_email(
+            email=email,
+            otp_code=otp.otp_code,
+            purpose='password_reset'
+        )
+    except DjangoUser.DoesNotExist:
+        pass  # Don't reveal if user exists
+    
+    # Always return success to prevent email enumeration
+    return Response({
+        'success': True,
+        'message': 'If an account exists with this email, you will receive a password reset code.'
+    })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def tenant_password_reset_confirm(request):
+    """
+    Confirm password reset with OTP and new password
+    """
+    from .models import EmailOTP
+    from .email_utils import send_password_reset_success_email
+    from .serializers import TenantPasswordResetConfirmSerializer
+    from django.contrib.auth.models import User as DjangoUser
+    
+    serializer = TenantPasswordResetConfirmSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    email = serializer.validated_data['email']
+    otp_code = serializer.validated_data['otp_code']
+    new_password = serializer.validated_data['new_password']
+    
+    # Find the OTP
+    try:
+        otp = EmailOTP.objects.filter(
+            email=email,
+            purpose='password_reset',
+            is_used=False
+        ).latest('created_at')
+    except EmailOTP.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'No pending password reset found. Please request a new code.'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    # Verify OTP
+    is_valid, message = otp.verify(otp_code)
+    
+    if not is_valid:
+        return Response({
+            'success': False,
+            'message': message
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Update password
+    try:
+        user = DjangoUser.objects.get(email=email)
+        user.set_password(new_password)
+        user.save()
+        
+        # Send confirmation email
+        send_password_reset_success_email(email)
+        
+        return Response({
+            'success': True,
+            'message': 'Password reset successful! You can now log in with your new password.'
+        })
+        
+    except DjangoUser.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'User not found.'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Password reset failed: {e}")
+        return Response({
+            'success': False,
+            'message': 'Password reset failed. Please try again.'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

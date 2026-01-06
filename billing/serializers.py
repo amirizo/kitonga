@@ -59,7 +59,8 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'phone_number', 'paid_until', 'is_active', 
                   'has_active_access', 'time_remaining', 'total_payments', 
-                  'max_devices', 'active_devices', 'device_limit_reached', 'created_at']
+                  'max_devices', 'active_devices', 'device_limit_reached', 'created_at'
+                 ]
         read_only_fields = ['id', 'created_at', 'total_payments']
     
     def get_has_active_access(self, obj):
@@ -520,3 +521,73 @@ class DashboardSummarySerializer(serializers.Serializer):
     top_bundles = serializers.ListField()
     device_breakdown = serializers.DictField()
     router_status = serializers.ListField()
+
+
+# =============================================================================
+# TENANT AUTHENTICATION SERIALIZERS
+# =============================================================================
+
+class EmailOTPVerifySerializer(serializers.Serializer):
+    """Serializer for verifying email OTP"""
+    email = serializers.EmailField()
+    otp_code = serializers.CharField(min_length=6, max_length=6)
+    
+    def validate_otp_code(self, value):
+        # Ensure OTP is numeric
+        if not value.isdigit():
+            raise serializers.ValidationError("OTP must be 6 digits")
+        return value
+
+
+class ResendOTPSerializer(serializers.Serializer):
+    """Serializer for resending OTP"""
+    email = serializers.EmailField()
+    purpose = serializers.ChoiceField(
+        choices=['registration', 'password_reset', 'login'],
+        default='registration'
+    )
+
+
+class TenantLoginSerializer(serializers.Serializer):
+    """Serializer for tenant login"""
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
+
+
+class TenantPasswordResetRequestSerializer(serializers.Serializer):
+    """Serializer for password reset request"""
+    email = serializers.EmailField()
+
+
+class TenantPasswordResetConfirmSerializer(serializers.Serializer):
+    """Serializer for password reset confirmation"""
+    email = serializers.EmailField()
+    otp_code = serializers.CharField(min_length=6, max_length=6)
+    new_password = serializers.CharField(min_length=8, write_only=True)
+    confirm_password = serializers.CharField(min_length=8, write_only=True)
+    
+    def validate(self, data):
+        if data['new_password'] != data['confirm_password']:
+            raise serializers.ValidationError({
+                'confirm_password': 'Passwords do not match'
+            })
+        return data
+    
+    def validate_otp_code(self, value):
+        if not value.isdigit():
+            raise serializers.ValidationError("OTP must be 6 digits")
+        return value
+
+
+class TenantChangePasswordSerializer(serializers.Serializer):
+    """Serializer for changing password (authenticated)"""
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(min_length=8, write_only=True)
+    confirm_password = serializers.CharField(min_length=8, write_only=True)
+    
+    def validate(self, data):
+        if data['new_password'] != data['confirm_password']:
+            raise serializers.ValidationError({
+                'confirm_password': 'Passwords do not match'
+            })
+        return data

@@ -89,6 +89,13 @@ urlpatterns = [
     path('saas/plans/', views.list_subscription_plans, name='list_subscription_plans'),
     path('saas/register/', views.register_tenant, name='register_tenant'),
     
+    # Email verification and authentication
+    path('saas/verify-email/', views.verify_email_otp, name='verify_email_otp'),
+    path('saas/resend-otp/', views.resend_otp, name='resend_otp'),
+    path('saas/login/', views.tenant_login, name='tenant_login'),
+    path('saas/password-reset/', views.tenant_password_reset_request, name='tenant_password_reset_request'),
+    path('saas/password-reset/confirm/', views.tenant_password_reset_confirm, name='tenant_password_reset_confirm'),
+    
     # Tenant endpoints (requires API key)
     path('saas/dashboard/', views.tenant_dashboard, name='tenant_dashboard'),
     path('saas/usage/', views.tenant_usage, name='tenant_usage'),
