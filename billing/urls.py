@@ -112,4 +112,52 @@ urlpatterns = [
     
     # System endpoints
     path('health/', views.health_check, name='health_check'),
+    
+    # =========================================================================
+    # TENANT PORTAL ENDPOINTS (Phase 3)
+    # =========================================================================
+    
+    # Portal Dashboard
+    path('portal/dashboard/', portal_views.portal_dashboard, name='portal_dashboard'),
+    path('portal/realtime/', portal_views.portal_realtime_stats, name='portal_realtime_stats'),
+    path('portal/comparison/', portal_views.portal_comparison, name='portal_comparison'),
+    
+    # Analytics & Reporting
+    path('portal/analytics/revenue/', portal_views.portal_revenue_analytics, name='portal_revenue_analytics'),
+    path('portal/analytics/users/', portal_views.portal_user_analytics, name='portal_user_analytics'),
+    path('portal/analytics/vouchers/', portal_views.portal_voucher_analytics, name='portal_voucher_analytics'),
+    path('portal/export/', portal_views.portal_export_data, name='portal_export_data'),
+    
+    # Router Configuration Wizard
+    path('portal/router/test/', portal_views.portal_router_test_connection, name='portal_router_test_connection'),
+    path('portal/router/save/', portal_views.portal_router_save_config, name='portal_router_save_config'),
+    path('portal/router/auto-configure/', portal_views.portal_router_auto_configure, name='portal_router_auto_configure'),
+    path('portal/router/<int:router_id>/html/', portal_views.portal_router_generate_html, name='portal_router_generate_html'),
+    path('portal/router/health/', portal_views.portal_router_health, name='portal_router_health'),
+    
+    # White-Label Customization
+    path('portal/branding/', portal_views.portal_branding, name='portal_branding'),
+    path('portal/branding/update/', portal_views.portal_branding_update, name='portal_branding_update'),
+    path('portal/branding/logo/', portal_views.portal_logo_upload, name='portal_logo_upload'),
+    path('portal/branding/logo/remove/', portal_views.portal_logo_remove, name='portal_logo_remove'),
+    path('portal/branding/domain/', portal_views.portal_custom_domain, name='portal_custom_domain'),
+    path('portal/branding/theme/', portal_views.portal_theme_css, name='portal_theme_css'),
+    path('portal/branding/captive-portal/', portal_views.portal_captive_portal_pages, name='portal_captive_portal_pages'),
+    
+    # Tenant Settings
+    path('portal/settings/', portal_views.portal_settings, name='portal_settings'),
+    path('portal/api-keys/', portal_views.portal_api_keys, name='portal_api_keys'),
+    path('portal/api-keys/regenerate/', portal_views.portal_regenerate_api_key, name='portal_regenerate_api_key'),
+    
+    # Staff Management
+    path('portal/staff/', portal_views.portal_staff, name='portal_staff'),
+    path('portal/staff/<int:staff_id>/', portal_views.portal_staff_detail, name='portal_staff_detail'),
+    
+    # Location Management
+    path('portal/locations/', portal_views.portal_locations, name='portal_locations'),
+    path('portal/locations/<int:location_id>/', portal_views.portal_location_detail, name='portal_location_detail'),
+    
+    # Bundle Management
+    path('portal/bundles/', portal_views.portal_bundles, name='portal_bundles'),
+    path('portal/bundles/<int:bundle_id>/', portal_views.portal_bundle_detail, name='portal_bundle_detail'),
 ]

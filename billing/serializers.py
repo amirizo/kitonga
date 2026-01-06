@@ -301,13 +301,20 @@ class RouterSerializer(serializers.ModelSerializer):
     class Meta:
         model = Router
         fields = [
-            'id', 'name', 'location', 'location_name', 'host', 'port',
-            'username', 'api_port', 'hotspot_server_name', 'hotspot_interface',
-            'is_active', 'last_connected', 'last_error'
+            'id', 'name', 'description', 'location', 'location_name', 'host', 'port',
+            'username', 'password', 'use_ssl', 'hotspot_interface', 'hotspot_profile',
+            'router_model', 'router_version', 'router_identity',
+            'status', 'is_active', 'last_seen', 'last_error', 'created_at'
         ]
         extra_kwargs = {
-            'password': {'write_only': True},
-            'api_ssl': {'required': False}
+            'password': {'write_only': True, 'required': False},
+            'router_model': {'read_only': True},
+            'router_version': {'read_only': True},
+            'router_identity': {'read_only': True},
+            'status': {'read_only': True},
+            'last_seen': {'read_only': True},
+            'last_error': {'read_only': True},
+            'created_at': {'read_only': True},
         }
 
 
