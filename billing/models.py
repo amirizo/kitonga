@@ -930,3 +930,99 @@ class PaymentWebhook(models.Model):
             processing_status='processed',
             received_at__lt=self.received_at
         ).exists()
+
+
+class TenantPayout(models.Model):
+    """
+    Track tenant payout requests and status
+    Tenants can request payouts from their available balance
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('cancelled', 'Cancelled'),
+    ]
+    
+    PAYOUT_METHODS = [
+        ('bank_transfer', 'Bank Transfer'),
+        ('mobile_money', 'Mobile Money'),
+        ('mpesa', 'M-Pesa'),
+        ('tigopesa', 'TigoPesa'),
+        ('airtel_money', 'Airtel Money'),
+        ('halopesa', 'HaloPesa'),
+    ]
+    
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='payouts')
+    
+    # Payout details
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    payout_method = models.CharField(max_length=50, choices=PAYOUT_METHODS, default='mobile_money')
+    
+    # Destination details
+    account_number = models.CharField(max_length=100)  # Phone number or bank account
+    account_name = models.CharField(max_length=200, blank=True)  # Account holder name
+    bank_name = models.CharField(max_length=100, blank=True)  # For bank transfers
+    bank_branch = models.CharField(max_length=100, blank=True)
+    
+    # Status tracking
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    reference = models.CharField(max_length=100, unique=True)  # Unique payout reference
+    transaction_id = models.CharField(max_length=100, blank=True)  # External transaction ID
+    
+    # Timestamps
+    requested_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    
+    # Notes and errors
+    notes = models.TextField(blank=True)
+    error_message = models.TextField(blank=True)
+    
+    # Requested by (staff member if applicable)
+    requested_by = models.CharField(max_length=200, blank=True)
+    processed_by = models.CharField(max_length=200, blank=True)
+    
+    class Meta:
+        ordering = ['-requested_at']
+        indexes = [
+            models.Index(fields=['tenant', 'status']),
+            models.Index(fields=['reference']),
+            models.Index(fields=['-requested_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.tenant.business_name} - TSh {self.amount} - {self.status}"
+    
+    def save(self, *args, **kwargs):
+        if not self.reference:
+            import uuid
+            self.reference = f"PO-{uuid.uuid4().hex[:12].upper()}"
+        super().save(*args, **kwargs)
+    
+    def mark_processing(self, processed_by=''):
+        """Mark payout as being processed"""
+        self.status = 'processing'
+        self.processed_at = timezone.now()
+        self.processed_by = processed_by
+        self.save()
+    
+    def mark_completed(self, transaction_id=''):
+        """Mark payout as completed"""
+        self.status = 'completed'
+        self.completed_at = timezone.now()
+        self.transaction_id = transaction_id
+        self.save()
+    
+    def mark_failed(self, error_message):
+        """Mark payout as failed"""
+        self.status = 'failed'
+        self.error_message = error_message
+        self.save()
+    
+    def cancel(self, reason=''):
+        """Cancel the payout request"""
+        self.status = 'cancelled'
+        self.error_message = reason
+        self.save()

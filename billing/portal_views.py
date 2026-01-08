@@ -15,7 +15,7 @@ from django.contrib.auth.models import User as DjangoUser
 import logging
 
 from .models import (
-    Tenant, Router, Location, TenantStaff, Bundle, User, Payment, Voucher
+    Tenant, Router, Location, TenantStaff, Bundle, User, Payment, Voucher, TenantPayout
 )
 from .serializers import (
     RouterWizardSerializer, RouterConfigSerializer, HotspotAutoConfigSerializer,
