@@ -18,6 +18,7 @@ urlpatterns = [
     path('bundles/', views.list_bundles, name='list_bundles'),
     path('initiate-payment/', views.initiate_payment, name='initiate_payment'),
     path('clickpesa-webhook/', views.clickpesa_webhook, name='clickpesa_webhook'),
+    path('clickpesa-payout-webhook/', views.clickpesa_payout_webhook, name='clickpesa_payout_webhook'),
     path('payment-status/<str:order_reference>/', views.query_payment_status, name='query_payment_status'),
     path('user-status/<str:phone_number>/', views.user_status, name='user_status'),
     path('devices/remove/', views.remove_device, name='remove_device'),  # Must be before devices/<str:phone_number>/
@@ -185,5 +186,7 @@ urlpatterns = [
     path('portal/balance/', portal_views.portal_balance, name='portal_balance'),
     path('portal/payouts/', portal_views.portal_payouts, name='portal_payouts'),
     path('portal/payouts/<int:payout_id>/', portal_views.portal_payout_detail, name='portal_payout_detail'),
+    path('portal/payouts/<int:payout_id>/refresh/', portal_views.portal_payout_refresh_status, name='portal_payout_refresh_status'),
     path('portal/financial-summary/', portal_views.portal_financial_summary, name='portal_financial_summary'),
+    path('portal/clickpesa-balance/', portal_views.portal_clickpesa_balance, name='portal_clickpesa_balance'),
 ]

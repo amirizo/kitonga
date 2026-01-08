@@ -227,3 +227,280 @@ class ClickPesaAPI:
                 'success': False,
                 'message': 'Failed to query payment status'
             }
+    
+    # =========================================================================
+    # PAYOUT API METHODS
+    # =========================================================================
+    
+    def get_account_balance(self):
+        """
+        Retrieve account balance
+        Check if merchant has enough funds to perform a payout
+        
+        Returns:
+            dict: Account balance information
+        """
+        token = self.get_access_token()
+        if not token:
+            return {
+                'success': False,
+                'message': 'Failed to authenticate with ClickPesa'
+            }
+        
+        url = f'{self.base_url}/third-parties/account/balance'
+        
+        headers = {
+            'Authorization': token
+        }
+        
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            
+            result = response.json()
+            logger.info(f'ClickPesa account balance: {result}')
+            
+            # Response can be an array OR an object with 'balances' array
+            balances = {}
+            balance_list = result if isinstance(result, list) else result.get('balances', [])
+            
+            if isinstance(balance_list, list):
+                for bal in balance_list:
+                    currency = bal.get('currency', 'TZS')
+                    balances[currency] = bal.get('balance', 0)
+            
+            return {
+                'success': True,
+                'balances': balances,
+                'data': result
+            }
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f'ClickPesa balance query failed: {str(e)}')
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f'Response text: {e.response.text}')
+            return {
+                'success': False,
+                'message': 'Failed to retrieve account balance'
+            }
+    
+    def preview_mobile_money_payout(self, phone_number, amount, order_reference, currency='TZS'):
+        """
+        Preview/validate mobile money payout details
+        Step 2: Validates phone number, amount, order-reference, fee
+        
+        Args:
+            phone_number: Mobile phone number (format: 255XXXXXXXXX)
+            amount: Payout amount
+            order_reference: Unique order reference
+            currency: Currency (TZS or USD)
+        
+        Returns:
+            dict: Preview response with fee, channel provider, receiver details
+        """
+        token = self.get_access_token()
+        if not token:
+            return {
+                'success': False,
+                'message': 'Failed to authenticate with ClickPesa'
+            }
+        
+        url = f'{self.base_url}/third-parties/payouts/preview-mobile-money-payout'
+        
+        # Format phone number (ensure it starts with 255)
+        if phone_number.startswith('0'):
+            phone_number = '255' + phone_number[1:]
+        elif phone_number.startswith('+'):
+            phone_number = phone_number[1:]
+        elif not phone_number.startswith('255'):
+            phone_number = '255' + phone_number
+        
+        headers = {
+            'Authorization': token,
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            'amount': float(amount),
+            'phoneNumber': phone_number,
+            'currency': currency,
+            'orderReference': order_reference
+        }
+        
+        try:
+            response = requests.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            
+            result = response.json()
+            logger.info(f'ClickPesa payout preview for {order_reference}: {result}')
+            
+            return {
+                'success': True,
+                'total_amount': result.get('amount'),  # Amount including fee
+                'fee': result.get('fee'),
+                'balance': result.get('balance'),
+                'channel_provider': result.get('channelProvider'),
+                'receiver': result.get('receiver'),
+                'data': result
+            }
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f'ClickPesa payout preview failed: {str(e)}')
+            error_message = 'Failed to preview payout'
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f'Response text: {e.response.text}')
+                try:
+                    error_data = e.response.json()
+                    error_message = error_data.get('message', error_message)
+                except:
+                    pass
+            return {
+                'success': False,
+                'message': error_message
+            }
+    
+    def create_mobile_money_payout(self, phone_number, amount, order_reference, currency='TZS'):
+        """
+        Initiate a mobile money payout
+        Step 3: The specified amount will be transferred to recipient's mobile wallet
+        
+        Args:
+            phone_number: Mobile phone number (format: 255XXXXXXXXX)
+            amount: Payout amount
+            order_reference: Unique order reference
+            currency: Currency (TZS or USD)
+        
+        Returns:
+            dict: Payout response with transaction details
+        """
+        token = self.get_access_token()
+        if not token:
+            return {
+                'success': False,
+                'message': 'Failed to authenticate with ClickPesa'
+            }
+        
+        url = f'{self.base_url}/third-parties/payouts/create-mobile-money-payout'
+        
+        # Format phone number (ensure it starts with 255)
+        if phone_number.startswith('0'):
+            phone_number = '255' + phone_number[1:]
+        elif phone_number.startswith('+'):
+            phone_number = phone_number[1:]
+        elif not phone_number.startswith('255'):
+            phone_number = '255' + phone_number
+        
+        headers = {
+            'Authorization': token,
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            'amount': float(amount),
+            'phoneNumber': phone_number,
+            'currency': currency,
+            'orderReference': order_reference
+        }
+        
+        try:
+            response = requests.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            
+            result = response.json()
+            logger.info(f'ClickPesa payout created for {order_reference}: {result}')
+            
+            return {
+                'success': True,
+                'payout_id': result.get('id'),
+                'order_reference': result.get('orderReference'),
+                'amount': result.get('amount'),
+                'fee': result.get('fee'),
+                'status': result.get('status'),  # AUTHORIZED, SUCCESS, REVERSED
+                'channel': result.get('channel'),
+                'channel_provider': result.get('channelProvider'),
+                'beneficiary': result.get('beneficiary'),
+                'data': result
+            }
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f'ClickPesa payout creation failed: {str(e)}')
+            error_message = 'Failed to create payout'
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f'Response text: {e.response.text}')
+                try:
+                    error_data = e.response.json()
+                    error_message = error_data.get('message', error_message)
+                except:
+                    pass
+            return {
+                'success': False,
+                'message': error_message
+            }
+    
+    def query_payout_status(self, order_reference):
+        """
+        Query payout status by order reference
+        Step 4: Check payout status
+        
+        Args:
+            order_reference: Unique order reference
+        
+        Returns:
+            dict: Payout status information
+            Statuses: SUCCESS, PROCESSING, PENDING, FAILED, REFUNDED, REVERSED
+        """
+        token = self.get_access_token()
+        if not token:
+            return {
+                'success': False,
+                'message': 'Failed to authenticate with ClickPesa'
+            }
+        
+        url = f'{self.base_url}/third-parties/payouts/{order_reference}'
+        
+        headers = {
+            'Authorization': token
+        }
+        
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            
+            result = response.json()
+            logger.info(f'ClickPesa payout status for {order_reference}: {result}')
+            
+            # Response is an array
+            if isinstance(result, list) and len(result) > 0:
+                payout = result[0]
+                return {
+                    'success': True,
+                    'payout_id': payout.get('id'),
+                    'order_reference': payout.get('orderReference'),
+                    'amount': payout.get('amount'),
+                    'fee': payout.get('fee'),
+                    'status': payout.get('status'),  # SUCCESS, PROCESSING, PENDING, FAILED, REFUNDED, REVERSED
+                    'channel': payout.get('channel'),
+                    'channel_provider': payout.get('channelProvider'),
+                    'beneficiary': payout.get('beneficiary'),
+                    'data': payout
+                }
+            
+            return {
+                'success': False,
+                'message': f'Payout not found in ClickPesa for reference: {order_reference}'
+            }
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f'ClickPesa payout status query failed: {str(e)}')
+            error_message = 'Failed to query payout status'
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f'Response text: {e.response.text}')
+                try:
+                    error_data = e.response.json()
+                    error_message = error_data.get('message', error_message)
+                except:
+                    pass
+            return {
+                'success': False,
+                'message': error_message
+            }

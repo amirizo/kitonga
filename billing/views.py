@@ -2975,6 +2975,95 @@ def clickpesa_webhook(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def clickpesa_payout_webhook(request):
+    """
+    ClickPesa Payout Webhook endpoint
+    Receives payout status notifications from ClickPesa
+    Handles: SUCCESS, FAILED, REVERSED, REFUNDED
+    """
+    try:
+        webhook_data = request.data
+        logger.info(f'ClickPesa PAYOUT webhook received: {json.dumps(webhook_data)}')
+        
+        # Extract payout data
+        event_type = webhook_data.get('event') or webhook_data.get('eventType', 'PAYOUT')
+        payout_data = webhook_data.get('data', webhook_data)
+        
+        # Extract order reference (our payout reference)
+        order_reference = (
+            payout_data.get('orderReference') or 
+            payout_data.get('order_reference') or
+            webhook_data.get('orderReference')
+        )
+        
+        # Extract status
+        payout_status = (
+            payout_data.get('status') or 
+            webhook_data.get('status', '').upper()
+        )
+        
+        # Extract transaction ID
+        transaction_id = (
+            payout_data.get('id') or 
+            payout_data.get('payoutId') or
+            webhook_data.get('id')
+        )
+        
+        logger.info(f'Payout webhook - Reference: {order_reference}, Status: {payout_status}, TxID: {transaction_id}')
+        
+        if not order_reference:
+            logger.error('No order reference in payout webhook')
+            return Response({'success': False, 'message': 'Missing order reference'})
+        
+        # Find payout by reference
+        from .models import TenantPayout
+        
+        try:
+            payout = TenantPayout.objects.get(reference=order_reference)
+            old_status = payout.status
+            
+            # Update status based on ClickPesa status
+            if payout_status in ['SUCCESS', 'COMPLETED']:
+                payout.mark_completed(transaction_id)
+                logger.info(f'Payout {order_reference} marked as completed')
+                
+            elif payout_status in ['FAILED', 'REVERSED', 'REFUNDED']:
+                error_message = payout_data.get('notes') or payout_data.get('message') or f'ClickPesa status: {payout_status}'
+                payout.mark_failed(error_message)
+                logger.warning(f'Payout {order_reference} marked as failed: {error_message}')
+                
+            elif payout_status in ['PROCESSING', 'PENDING', 'AUTHORIZED']:
+                if payout.status != 'processing':
+                    payout.status = 'processing'
+                    payout.transaction_id = transaction_id or payout.transaction_id
+                    payout.save()
+                    logger.info(f'Payout {order_reference} marked as processing')
+            
+            return Response({
+                'success': True,
+                'message': f'Payout status updated: {old_status} -> {payout.status}',
+                'payout_reference': order_reference
+            })
+            
+        except TenantPayout.DoesNotExist:
+            logger.error(f'Payout not found for reference: {order_reference}')
+            return Response({
+                'success': False,
+                'message': 'Payout not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+            
+    except Exception as e:
+        error_msg = f'Error processing payout webhook: {str(e)}'
+        logger.error(error_msg)
+        return Response({
+            'success': False,
+            'message': 'Webhook processing failed'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def query_payment_status(request, order_reference):

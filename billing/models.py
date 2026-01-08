@@ -998,7 +998,8 @@ class TenantPayout(models.Model):
     def save(self, *args, **kwargs):
         if not self.reference:
             import uuid
-            self.reference = f"PO-{uuid.uuid4().hex[:12].upper()}"
+            # ClickPesa requires alphanumeric only - no hyphens or special chars
+            self.reference = f"PO{uuid.uuid4().hex[:12].upper()}"
         super().save(*args, **kwargs)
     
     def mark_processing(self, processed_by=''):
