@@ -266,6 +266,183 @@ def health_check(request):
         }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
 
+# Contact Form API
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def contact_submit(request):
+    """
+    Public contact form submission endpoint
+    
+    Request Body:
+    {
+        "name": "John Doe",
+        "email": "john@example.com",
+        "phone": "+255 XXX XXX XXX",  // Optional
+        "subject": "general",  // general, sales, support, partnership, demo, other
+        "message": "Your message here..."
+    }
+    """
+    from .serializers import ContactFormSerializer
+    from .models import ContactSubmission
+    from django.core.mail import send_mail, EmailMultiAlternatives
+    from django.template.loader import render_to_string
+    from django.conf import settings as django_settings
+    
+    serializer = ContactFormSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Get client info
+    ip_address = get_client_ip(request)
+    user_agent = request.META.get('HTTP_USER_AGENT', '')[:500]
+    
+    # Rate limiting - max 5 submissions per email per day
+    from datetime import timedelta
+    today = timezone.now() - timedelta(hours=24)
+    recent_submissions = ContactSubmission.objects.filter(
+        email=serializer.validated_data['email'],
+        created_at__gte=today
+    ).count()
+    
+    if recent_submissions >= 5:
+        return Response({
+            'success': False,
+            'message': 'Too many submissions. Please try again later.'
+        }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+    
+    # Create submission
+    submission = ContactSubmission.objects.create(
+        name=serializer.validated_data['name'],
+        email=serializer.validated_data['email'],
+        phone=serializer.validated_data.get('phone', ''),
+        subject=serializer.validated_data.get('subject', 'general'),
+        message=serializer.validated_data['message'],
+        ip_address=ip_address,
+        user_agent=user_agent
+    )
+    
+    logger.info(f"Contact form submission from {submission.email}: {submission.get_subject_display()}")
+    
+    # Send email notification to admin
+    email_sent = False
+    try:
+        contact_email = getattr(django_settings, 'CONTACT_EMAIL', 'info@klikcell.com')
+        
+        # Build email content
+        subject_display = submission.get_subject_display()
+        email_subject = f'[Kitonga Contact] New {subject_display} from {submission.name}'
+        
+        # Plain text version
+        plain_message = f"""
+New Contact Form Submission
+============================
+
+Name: {submission.name}
+Email: {submission.email}
+Phone: {submission.phone or 'Not provided'}
+Subject: {subject_display}
+
+Message:
+{submission.message}
+
+---
+Reference: CONTACT-{submission.id}
+Submitted: {submission.created_at.strftime('%Y-%m-%d %H:%M:%S')} UTC
+IP Address: {submission.ip_address or 'Unknown'}
+
+View in admin: https://api.kitonga.klikcell.com/admin/billing/contactsubmission/{submission.id}/change/
+        """.strip()
+        
+        # HTML version
+        html_message = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background: #3B82F6; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }}
+        .content {{ background: #f9fafb; padding: 20px; border: 1px solid #e5e7eb; }}
+        .field {{ margin-bottom: 15px; }}
+        .label {{ font-weight: bold; color: #374151; }}
+        .value {{ color: #6b7280; }}
+        .message-box {{ background: white; padding: 15px; border-radius: 8px; border: 1px solid #e5e7eb; margin-top: 15px; }}
+        .footer {{ padding: 15px; text-align: center; font-size: 12px; color: #9ca3af; }}
+        .btn {{ display: inline-block; background: #3B82F6; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; }}
+        .subject-badge {{ display: inline-block; background: #22c55e; color: white; padding: 4px 12px; border-radius: 4px; font-size: 14px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2 style="margin: 0;">📬 New Contact Form Submission</h2>
+        </div>
+        <div class="content">
+            <p><span class="subject-badge">{subject_display}</span></p>
+            
+            <div class="field">
+                <span class="label">Name:</span>
+                <span class="value">{submission.name}</span>
+            </div>
+            
+            <div class="field">
+                <span class="label">Email:</span>
+                <span class="value"><a href="mailto:{submission.email}">{submission.email}</a></span>
+            </div>
+            
+            <div class="field">
+                <span class="label">Phone:</span>
+                <span class="value">{submission.phone or 'Not provided'}</span>
+            </div>
+            
+            <div class="message-box">
+                <strong>Message:</strong>
+                <p style="white-space: pre-wrap;">{submission.message}</p>
+            </div>
+            
+            <p style="margin-top: 20px; text-align: center;">
+                <a href="https://api.kitonga.klikcell.com/admin/billing/contactsubmission/{submission.id}/change/" class="btn">
+                    View in Admin Panel
+                </a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Reference: CONTACT-{submission.id}</p>
+            <p>Submitted: {submission.created_at.strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
+        </div>
+    </div>
+</body>
+</html>
+        """.strip()
+        
+        # Send email
+        email = EmailMultiAlternatives(
+            subject=email_subject,
+            body=plain_message,
+            from_email=django_settings.DEFAULT_FROM_EMAIL,
+            to=[contact_email],
+            reply_to=[submission.email]  # Reply goes to the person who submitted
+        )
+        email.attach_alternative(html_message, "text/html")
+        email.send(fail_silently=False)
+        
+        email_sent = True
+        logger.info(f"Contact notification email sent to {contact_email} for submission {submission.id}")
+        
+    except Exception as e:
+        logger.error(f"Failed to send contact notification email: {e}")
+        email_sent = False
+    
+    return Response({
+        'success': True,
+        'message': 'Thank you for contacting us! We will get back to you soon.',
+        'reference': f'CONTACT-{submission.id}'
+    }, status=status.HTTP_201_CREATED)
+
+
 # Authentication APIs
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -5359,6 +5536,50 @@ def tenant_login(request):
             'subscription_ends_at': tenant.subscription_ends_at.isoformat() if tenant.subscription_ends_at else None,
             'trial_ends_at': tenant.trial_ends_at.isoformat() if tenant.trial_ends_at else None,
         }
+    })
+
+
+@api_view(['POST'])
+@permission_classes([TenantAPIKeyPermission])
+def tenant_logout(request):
+    """
+    Logout endpoint for tenant owners/staff
+    Optionally regenerates API key to invalidate all sessions
+    
+    Request Body:
+    {
+        "invalidate_api_key": false  # Optional: if true, regenerates API key
+    }
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    invalidate_api_key = request.data.get('invalidate_api_key', False)
+    
+    if invalidate_api_key:
+        # Regenerate API key to invalidate all sessions using this key
+        import secrets
+        tenant.api_key = secrets.token_hex(32)
+        tenant.save()
+        
+        logger.info(f"Tenant {tenant.slug} logged out and invalidated API key")
+        
+        return Response({
+            'success': True,
+            'message': 'Logged out successfully. API key has been invalidated.',
+            'api_key_invalidated': True
+        })
+    
+    logger.info(f"Tenant {tenant.slug} logged out")
+    
+    return Response({
+        'success': True,
+        'message': 'Logged out successfully.',
+        'api_key_invalidated': False
     })
 
 

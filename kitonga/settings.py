@@ -553,6 +553,9 @@ EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='Kijangwani2003')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='Kitonga WiFi <info@klikcell.com>')
 SERVER_EMAIL = config('SERVER_EMAIL', default='info@klikcell.com')
 
+# Contact form recipient email
+CONTACT_EMAIL = config('CONTACT_EMAIL', default='info@klikcell.com')
+
 # Email timeout settings
 EMAIL_TIMEOUT = 30  # seconds
 

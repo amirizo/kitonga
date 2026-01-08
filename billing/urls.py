@@ -93,6 +93,7 @@ urlpatterns = [
     path('saas/verify-email/', views.verify_email_otp, name='verify_email_otp'),
     path('saas/resend-otp/', views.resend_otp, name='resend_otp'),
     path('saas/login/', views.tenant_login, name='tenant_login'),
+    path('saas/logout/', views.tenant_logout, name='tenant_logout'),
     path('saas/password-reset/', views.tenant_password_reset_request, name='tenant_password_reset_request'),
     path('saas/password-reset/confirm/', views.tenant_password_reset_confirm, name='tenant_password_reset_confirm'),
     
@@ -120,6 +121,7 @@ urlpatterns = [
     
     # System endpoints
     path('health/', views.health_check, name='health_check'),
+    path('contact/', views.contact_submit, name='contact_submit'),
     
     # =========================================================================
     # TENANT PORTAL ENDPOINTS (Phase 3)

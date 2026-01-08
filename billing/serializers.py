@@ -591,3 +591,40 @@ class TenantChangePasswordSerializer(serializers.Serializer):
                 'confirm_password': 'Passwords do not match'
             })
         return data
+
+
+class ContactFormSerializer(serializers.Serializer):
+    """Serializer for contact form submissions"""
+    SUBJECT_CHOICES = [
+        ('general', 'General Inquiry'),
+        ('sales', 'Sales Inquiry'),
+        ('support', 'Technical Support'),
+        ('partnership', 'Partnership Opportunity'),
+        ('demo', 'Request Demo'),
+        ('other', 'Other'),
+    ]
+    
+    name = serializers.CharField(max_length=200, min_length=2)
+    email = serializers.EmailField()
+    phone = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    subject = serializers.ChoiceField(choices=SUBJECT_CHOICES, default='general')
+    message = serializers.CharField(min_length=10, max_length=5000)
+    
+    def validate_name(self, value):
+        # Basic name validation - at least 2 characters
+        if len(value.strip()) < 2:
+            raise serializers.ValidationError("Please enter your full name")
+        return value.strip()
+    
+    def validate_phone(self, value):
+        if value:
+            # Remove spaces and dashes for validation
+            cleaned = value.replace(' ', '').replace('-', '').replace('+', '')
+            if not cleaned.isdigit():
+                raise serializers.ValidationError("Please enter a valid phone number")
+        return value
+    
+    def validate_message(self, value):
+        if len(value.strip()) < 10:
+            raise serializers.ValidationError("Please provide more details in your message")
+        return value.strip()

@@ -504,3 +504,166 @@ class ClickPesaAPI:
                 'success': False,
                 'message': error_message
             }
+    
+    # =========================================================================
+    # BANK PAYOUT API METHODS
+    # =========================================================================
+    
+    def preview_bank_payout(self, account_number, amount, order_reference, bic, 
+                            transfer_type='ACH', currency='TZS', account_currency='TZS'):
+        """
+        Preview/validate bank payout details
+        Validates account number, amount, order-reference, fee, and bank details
+        
+        Args:
+            account_number: Bank account number
+            amount: Payout amount
+            order_reference: Unique order reference
+            bic: Bank Identifier Code (BIC/SWIFT code)
+            transfer_type: ACH or RTGS (default: ACH)
+            currency: Source currency (TZS or USD)
+            account_currency: Destination account currency (TZS or USD)
+        
+        Returns:
+            dict: Preview response with fee, channel provider, receiver details
+        """
+        token = self.get_access_token()
+        if not token:
+            return {
+                'success': False,
+                'message': 'Failed to authenticate with ClickPesa'
+            }
+        
+        url = f'{self.base_url}/third-parties/payouts/preview-bank-payout'
+        
+        headers = {
+            'Authorization': token,
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            'amount': float(amount),
+            'accountNumber': account_number,
+            'currency': currency,
+            'orderReference': order_reference,
+            'bic': bic,
+            'transferType': transfer_type,
+            'accountCurrency': account_currency
+        }
+        
+        try:
+            response = requests.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            
+            result = response.json()
+            logger.info(f'ClickPesa bank payout preview for {order_reference}: {result}')
+            
+            return {
+                'success': True,
+                'total_amount': result.get('amount'),  # Amount including fee
+                'fee': result.get('fee'),
+                'balance': result.get('balance'),
+                'channel_provider': result.get('channelProvider'),
+                'receiver': result.get('receiver'),
+                'transfer_type': result.get('transferType'),
+                'exchange': result.get('exchange'),
+                'exchanged': result.get('exchanged', False),
+                'data': result
+            }
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f'ClickPesa bank payout preview failed: {str(e)}')
+            error_message = 'Failed to preview bank payout'
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f'Response text: {e.response.text}')
+                try:
+                    error_data = e.response.json()
+                    error_message = error_data.get('message', error_message)
+                except:
+                    pass
+            return {
+                'success': False,
+                'message': error_message
+            }
+    
+    def create_bank_payout(self, account_number, account_name, amount, order_reference, 
+                           bic, transfer_type='ACH', currency='TZS', account_currency='TZS'):
+        """
+        Initiate a bank transfer payout
+        The specified amount will be transferred to recipient's bank account
+        
+        Args:
+            account_number: Bank account number
+            account_name: Account holder name (required for bank transfers)
+            amount: Payout amount
+            order_reference: Unique order reference
+            bic: Bank Identifier Code (BIC/SWIFT code)
+            transfer_type: ACH or RTGS (default: ACH)
+            currency: Source currency (TZS or USD)
+            account_currency: Destination account currency (TZS or USD)
+        
+        Returns:
+            dict: Payout response with transaction details
+        """
+        token = self.get_access_token()
+        if not token:
+            return {
+                'success': False,
+                'message': 'Failed to authenticate with ClickPesa'
+            }
+        
+        url = f'{self.base_url}/third-parties/payouts/create-bank-payout'
+        
+        headers = {
+            'Authorization': token,
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            'amount': float(amount),
+            'accountNumber': account_number,
+            'accountName': account_name,
+            'currency': currency,
+            'orderReference': order_reference,
+            'bic': bic,
+            'transferType': transfer_type,
+            'accountCurrency': account_currency
+        }
+        
+        try:
+            response = requests.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            
+            result = response.json()
+            logger.info(f'ClickPesa bank payout created for {order_reference}: {result}')
+            
+            return {
+                'success': True,
+                'payout_id': result.get('id'),
+                'order_reference': result.get('orderReference'),
+                'amount': result.get('amount'),
+                'fee': result.get('fee'),
+                'status': result.get('status'),  # AUTHORIZED, SUCCESS, REVERSED
+                'channel': result.get('channel'),
+                'channel_provider': result.get('channelProvider'),
+                'transfer_type': result.get('transferType'),
+                'beneficiary': result.get('beneficiary'),
+                'exchange': result.get('exchange'),
+                'exchanged': result.get('exchanged', False),
+                'data': result
+            }
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f'ClickPesa bank payout creation failed: {str(e)}')
+            error_message = 'Failed to create bank payout'
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f'Response text: {e.response.text}')
+                try:
+                    error_data = e.response.json()
+                    error_message = error_data.get('message', error_message)
+                except:
+                    pass
+            return {
+                'success': False,
+                'message': error_message
+            }

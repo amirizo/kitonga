@@ -2166,6 +2166,9 @@ def portal_payouts(request):
             'amount': float(p.amount),
             'payout_method': p.payout_method,
             'account_number': p.account_number,
+            'account_name': p.account_name,
+            'bank_name': p.bank_name,
+            'bank_branch': p.bank_branch,  # BIC/SWIFT code
             'status': p.status,
             'requested_at': p.requested_at.isoformat(),
             'completed_at': p.completed_at.isoformat() if p.completed_at else None
@@ -2187,12 +2190,27 @@ def portal_payouts(request):
         account_number = request.data.get('account_number')
         account_name = request.data.get('account_name', '')
         bank_name = request.data.get('bank_name', '')
+        bank_branch = request.data.get('bank_branch', '')  # BIC/SWIFT code for bank transfers
+        transfer_type = request.data.get('transfer_type', 'ACH')  # ACH or RTGS
         
         if not amount or not account_number:
             return Response({
                 'success': False,
                 'message': 'amount and account_number are required'
             }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Bank transfers require additional fields
+        if payout_method == 'bank_transfer':
+            if not account_name:
+                return Response({
+                    'success': False,
+                    'message': 'account_name is required for bank transfers'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            if not bank_branch:
+                return Response({
+                    'success': False,
+                    'message': 'bank_branch (BIC/SWIFT code) is required for bank transfers'
+                }, status=status.HTTP_400_BAD_REQUEST)
         
         try:
             amount = float(amount)
@@ -2225,13 +2243,16 @@ def portal_payouts(request):
             account_number=account_number,
             account_name=account_name,
             bank_name=bank_name,
+            bank_branch=bank_branch,  # BIC/SWIFT code
             requested_by=f'API:{tenant.slug}'
         )
         
         logger.info(f"Tenant {tenant.slug} requested payout of TSh {amount}")
         
-        # Auto-process payout via ClickPesa if mobile money
+        # Auto-process payout via ClickPesa
         clickpesa_result = None
+        
+        # Mobile Money payouts
         if payout_method in ['mobile_money', 'mpesa', 'tigopesa', 'airtel_money', 'halopesa']:
             try:
                 from .clickpesa import ClickPesaAPI
@@ -2301,6 +2322,83 @@ def portal_payouts(request):
                 payout.save()
                 clickpesa_result = {'processed': False, 'error': str(e)}
         
+        # Bank Transfer payouts
+        elif payout_method == 'bank_transfer':
+            try:
+                from .clickpesa import ClickPesaAPI
+                
+                clickpesa = ClickPesaAPI()
+                
+                # Step 1: Check account balance
+                balance_result = clickpesa.get_account_balance()
+                if not balance_result.get('success'):
+                    logger.warning(f"Could not check ClickPesa balance: {balance_result.get('message')}")
+                    clickpesa_result = {
+                        'processed': False,
+                        'reason': 'balance_check_failed',
+                        'message': balance_result.get('message', 'Could not verify platform balance')
+                    }
+                else:
+                    tzs_balance = balance_result.get('balances', {}).get('TZS', 0)
+                    if tzs_balance < amount:
+                        logger.warning(f"Insufficient ClickPesa balance for bank transfer: {tzs_balance} < {amount}")
+                        payout.error_message = f"Insufficient platform balance (TSh {tzs_balance:,.0f}). Will be processed manually."
+                        payout.save()
+                        clickpesa_result = {
+                            'processed': False,
+                            'reason': 'insufficient_platform_balance',
+                            'platform_balance': float(tzs_balance),
+                            'required_amount': float(amount),
+                            'message': 'Platform does not have enough funds. Payout will be processed manually.'
+                        }
+                    else:
+                        # Step 2: Preview bank payout
+                        preview_result = clickpesa.preview_bank_payout(
+                            account_number=account_number,
+                            amount=amount,
+                            order_reference=payout.reference,
+                            bic=bank_branch,  # BIC/SWIFT code
+                            transfer_type=transfer_type
+                        )
+                        
+                        if preview_result.get('success'):
+                            # Step 3: Create bank payout
+                            payout_result = clickpesa.create_bank_payout(
+                                account_number=account_number,
+                                account_name=account_name,
+                                amount=amount,
+                                order_reference=payout.reference,
+                                bic=bank_branch,
+                                transfer_type=transfer_type
+                            )
+                            
+                            if payout_result.get('success'):
+                                payout.mark_processing()
+                                payout.transaction_id = payout_result.get('payout_id')
+                                payout.save()
+                                clickpesa_result = {
+                                    'processed': True,
+                                    'status': payout_result.get('status'),
+                                    'channel_provider': payout_result.get('channel_provider'),
+                                    'transfer_type': payout_result.get('transfer_type'),
+                                    'fee': payout_result.get('fee'),
+                                    'beneficiary': payout_result.get('beneficiary')
+                                }
+                                logger.info(f"Bank payout {payout.reference} submitted to ClickPesa: {payout_result.get('status')}")
+                            else:
+                                payout.error_message = payout_result.get('message', 'ClickPesa bank payout failed')
+                                payout.save()
+                                clickpesa_result = {'processed': False, 'error': payout_result.get('message')}
+                        else:
+                            payout.error_message = preview_result.get('message', 'Bank payout preview failed')
+                            payout.save()
+                            clickpesa_result = {'processed': False, 'error': preview_result.get('message')}
+            except Exception as e:
+                logger.error(f"Error processing bank payout via ClickPesa: {e}")
+                payout.error_message = f"Auto-processing failed: {str(e)}"
+                payout.save()
+                clickpesa_result = {'processed': False, 'error': str(e)}
+        
         return Response({
             'success': True,
             'message': 'Payout request submitted',
@@ -2342,6 +2440,7 @@ def portal_payout_detail(request, payout_id):
                 'account_number': payout.account_number,
                 'account_name': payout.account_name,
                 'bank_name': payout.bank_name,
+                'bank_branch': payout.bank_branch,  # BIC/SWIFT code
                 'status': payout.status,
                 'transaction_id': payout.transaction_id,
                 'error_message': payout.error_message,
@@ -2387,8 +2486,8 @@ def portal_payout_refresh_status(request, payout_id):
         })
     
     # Check if this payout was ever submitted to ClickPesa
-    # Payouts with hyphenated references (old format) were never created in ClickPesa
-    if not payout.transaction_id and '-' in payout.reference:
+    # If no transaction_id, it was never created in ClickPesa (e.g., insufficient balance)
+    if not payout.transaction_id:
         return Response({
             'success': True,
             'message': 'Payout was not submitted to payment provider - needs manual processing',
@@ -2396,7 +2495,8 @@ def portal_payout_refresh_status(request, payout_id):
                 'id': payout.id,
                 'reference': payout.reference,
                 'status': payout.status,
-                'needs_resubmit': True
+                'needs_resubmit': True,
+                'error_message': payout.error_message or 'Not submitted to payment provider'
             }
         })
     

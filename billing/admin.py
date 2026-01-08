@@ -13,7 +13,9 @@ from .models import (
     # SaaS Models
     SubscriptionPlan, Tenant, TenantStaff, Location, Router, TenantSubscriptionPayment,
     # WiFi Billing Models (now multi-tenant)
-    User, Payment, AccessLog, Voucher, Bundle, Device, SMSLog, PaymentWebhook
+    User, Payment, AccessLog, Voucher, Bundle, Device, SMSLog, PaymentWebhook,
+    # Contact & Support
+    ContactSubmission
 )
 from .views import dashboard_stats
 
@@ -546,6 +548,107 @@ class BundleAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         return qs.select_related('tenant')
+
+
+# =============================================================================
+# CONTACT SUBMISSIONS ADMIN
+# =============================================================================
+
+@admin.register(ContactSubmission)
+class ContactSubmissionAdmin(admin.ModelAdmin):
+    """Manage contact form submissions"""
+    list_display = ['name', 'email', 'phone', 'subject_display', 'status_badge', 'created_at', 'replied_at']
+    list_filter = ['status', 'subject', 'created_at']
+    search_fields = ['name', 'email', 'phone', 'message']
+    readonly_fields = ['ip_address', 'user_agent', 'created_at', 'updated_at']
+    ordering = ['-created_at']
+    date_hierarchy = 'created_at'
+    list_per_page = 50
+    
+    fieldsets = (
+        ('Contact Info', {
+            'fields': ('name', 'email', 'phone')
+        }),
+        ('Message', {
+            'fields': ('subject', 'message')
+        }),
+        ('Status', {
+            'fields': ('status', 'replied_at', 'replied_by')
+        }),
+        ('Internal Notes', {
+            'fields': ('notes',),
+            'classes': ('collapse',)
+        }),
+        ('Metadata', {
+            'fields': ('ip_address', 'user_agent', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    actions = ['mark_as_read', 'mark_as_replied', 'mark_as_closed']
+    
+    def subject_display(self, obj):
+        """Display subject with color coding"""
+        colors = {
+            'sales': '#22c55e',      # Green
+            'demo': '#3b82f6',       # Blue
+            'support': '#f59e0b',    # Orange
+            'partnership': '#8b5cf6', # Purple
+            'general': '#6b7280',    # Gray
+            'other': '#6b7280',      # Gray
+        }
+        color = colors.get(obj.subject, '#6b7280')
+        return format_html(
+            '<span style="background: {}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">{}</span>',
+            color, obj.get_subject_display()
+        )
+    subject_display.short_description = 'Subject'
+    
+    def status_badge(self, obj):
+        """Display status with color badges"""
+        colors = {
+            'new': '#ef4444',      # Red
+            'read': '#f59e0b',     # Orange
+            'replied': '#22c55e',  # Green
+            'closed': '#6b7280',   # Gray
+        }
+        color = colors.get(obj.status, '#6b7280')
+        return format_html(
+            '<span style="background: {}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">{}</span>',
+            color, obj.get_status_display().upper()
+        )
+    status_badge.short_description = 'Status'
+    
+    def mark_as_read(self, request, queryset):
+        """Mark selected submissions as read"""
+        updated = queryset.filter(status='new').update(status='read')
+        self.message_user(request, f'{updated} submission(s) marked as read.')
+    mark_as_read.short_description = 'Mark as Read'
+    
+    def mark_as_replied(self, request, queryset):
+        """Mark selected submissions as replied"""
+        updated = queryset.exclude(status='replied').update(
+            status='replied',
+            replied_at=timezone.now(),
+            replied_by=request.user.email or request.user.username
+        )
+        self.message_user(request, f'{updated} submission(s) marked as replied.')
+    mark_as_replied.short_description = 'Mark as Replied'
+    
+    def mark_as_closed(self, request, queryset):
+        """Mark selected submissions as closed"""
+        updated = queryset.exclude(status='closed').update(status='closed')
+        self.message_user(request, f'{updated} submission(s) closed.')
+    mark_as_closed.short_description = 'Mark as Closed'
+    
+    def save_model(self, request, obj, form, change):
+        """Auto-set replied_by when status changes to replied"""
+        if 'status' in form.changed_data and obj.status == 'replied':
+            if not obj.replied_at:
+                obj.replied_at = timezone.now()
+            if not obj.replied_by:
+                obj.replied_by = request.user.email or request.user.username
+        super().save_model(request, obj, form, change)
 
 
 # Set admin site properties

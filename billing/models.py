@@ -1027,3 +1027,75 @@ class TenantPayout(models.Model):
         self.status = 'cancelled'
         self.error_message = reason
         self.save()
+
+
+class ContactSubmission(models.Model):
+    """
+    Contact form submissions from potential customers or users
+    """
+    STATUS_CHOICES = [
+        ('new', 'New'),
+        ('read', 'Read'),
+        ('replied', 'Replied'),
+        ('closed', 'Closed'),
+    ]
+    
+    SUBJECT_CHOICES = [
+        ('general', 'General Inquiry'),
+        ('sales', 'Sales Inquiry'),
+        ('support', 'Technical Support'),
+        ('partnership', 'Partnership Opportunity'),
+        ('demo', 'Request Demo'),
+        ('other', 'Other'),
+    ]
+    
+    # Contact info
+    name = models.CharField(max_length=200)
+    email = models.EmailField()
+    phone = models.CharField(max_length=30, blank=True)
+    
+    # Message details
+    subject = models.CharField(max_length=50, choices=SUBJECT_CHOICES, default='general')
+    message = models.TextField()
+    
+    # Tracking
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='new')
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    
+    # Response tracking
+    replied_at = models.DateTimeField(null=True, blank=True)
+    replied_by = models.CharField(max_length=200, blank=True)
+    notes = models.TextField(blank=True)  # Internal notes
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['email']),
+        ]
+    
+    def __str__(self):
+        return f"{self.name} - {self.get_subject_display()} ({self.status})"
+    
+    def mark_read(self):
+        """Mark submission as read"""
+        if self.status == 'new':
+            self.status = 'read'
+            self.save()
+    
+    def mark_replied(self, replied_by=''):
+        """Mark submission as replied"""
+        self.status = 'replied'
+        self.replied_at = timezone.now()
+        self.replied_by = replied_by
+        self.save()
+    
+    def close(self):
+        """Close the submission"""
+        self.status = 'closed'
+        self.save()
