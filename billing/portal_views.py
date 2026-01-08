@@ -1845,32 +1845,72 @@ def portal_user_disconnect(request, user_id):
         }, status=status.HTTP_404_NOT_FOUND)
     
     # Get tenant's routers and disconnect user from all
-    from .mikrotik import MikroTikAPI
+    from .mikrotik import disconnect_user_from_mikrotik, get_mikrotik_api, safe_close
+    import routeros_api
     
     routers = Router.objects.filter(tenant=tenant, is_active=True)
     disconnected_from = []
     errors = []
     
-    for router in routers:
+    # If no routers configured for tenant, try using global settings
+    if not routers.exists():
         try:
-            mikrotik = MikroTikAPI(
-                host=router.host,
+            result = disconnect_user_from_mikrotik(user.phone_number)
+            if result.get('success') or result.get('session_removed') or result.get('user_disabled'):
+                return Response({
+                    'success': True,
+                    'message': f'User {user.phone_number} disconnected',
+                    'disconnected_from': ['Default Router'],
+                    'details': result
+                })
+        except Exception as e:
+            return Response({
+                'success': False,
+                'message': f'Failed to disconnect user: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    # Disconnect from each tenant router
+    for router in routers:
+        api = None
+        try:
+            # Connect to router using tenant-specific credentials
+            connection = routeros_api.RouterOsApiPool(
+                router.host,
                 username=router.username,
                 password=router.password,
-                port=router.api_port
+                port=router.port or 8728,
+                plaintext_login=True
             )
+            api = connection.get_api()
             
-            # Try to disconnect by phone number
-            result = mikrotik.remove_hotspot_user(user.phone_number)
-            if result.get('success'):
-                disconnected_from.append(router.name)
+            # Remove active sessions
+            try:
+                active = api.get_resource('/ip/hotspot/active')
+                all_sessions = active.get()
+                
+                for session in all_sessions:
+                    if session.get('user', '') == user.phone_number:
+                        session_id = session.get('.id') or session.get('id')
+                        if session_id:
+                            active.remove(id=session_id)
+                            disconnected_from.append(router.name)
+                            break
+            except Exception as e:
+                errors.append(f"{router.name}: {str(e)}")
+            
         except Exception as e:
-            errors.append(f"{router.name}: {str(e)}")
+            errors.append(f"{router.name}: Connection failed - {str(e)}")
+        finally:
+            if api:
+                try:
+                    api.get_communicator().close()
+                except:
+                    pass
     
     return Response({
         'success': True,
         'message': f'User {user.phone_number} disconnected',
-        'disconnected_from': disconnected_from,
+        'disconnected_from': disconnected_from if disconnected_from else None,
         'errors': errors if errors else None
     })
 
