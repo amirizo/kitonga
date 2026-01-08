@@ -226,6 +226,8 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PARSER_CLASSES': [
         'rest_framework.parsers.JSONParser',
+        'rest_framework.parsers.MultiPartParser',
+        'rest_framework.parsers.FormParser',
     ],
     'EXCEPTION_HANDLER': 'rest_framework.views.exception_handler',
 }
@@ -272,6 +274,7 @@ CORS_ALLOW_HEADERS = [
     'origin',
     'user-agent',
     'x-csrftoken',
+    'x-api-key',
     'x-requested-with',
     'x-admin-access',  # Custom header for admin authentication
     'cache-control',   # For static file caching

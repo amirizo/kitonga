@@ -88,7 +88,6 @@ urlpatterns = [
     # Public endpoints (pricing page, registration)
     path('saas/plans/', views.list_subscription_plans, name='list_subscription_plans'),
     path('saas/register/', views.register_tenant, name='register_tenant'),
-    
     # Email verification and authentication
     path('saas/verify-email/', views.verify_email_otp, name='verify_email_otp'),
     path('saas/resend-otp/', views.resend_otp, name='resend_otp'),
@@ -105,6 +104,7 @@ urlpatterns = [
     
     # Subscription webhook (ClickPesa callback)
     path('saas/webhook/', views.subscription_payment_webhook, name='subscription_payment_webhook'),
+    path('saas/payment-status/<str:transaction_id>/', views.subscription_payment_status, name='subscription_payment_status'),
     
     # Tenant router management
     path('saas/routers/', views.tenant_routers, name='tenant_routers'),
@@ -167,4 +167,16 @@ urlpatterns = [
     # Bundle Management
     path('portal/bundles/', portal_views.portal_bundles, name='portal_bundles'),
     path('portal/bundles/<int:bundle_id>/', portal_views.portal_bundle_detail, name='portal_bundle_detail'),
+    
+    # Voucher Management
+    path('portal/vouchers/', portal_views.portal_list_vouchers, name='portal_list_vouchers'),
+    path('portal/vouchers/generate/', portal_views.portal_generate_vouchers, name='portal_generate_vouchers'),
+    path('portal/vouchers/delete/', portal_views.portal_delete_voucher_batch, name='portal_delete_voucher_batch'),
+    path('portal/vouchers/<int:voucher_id>/', portal_views.portal_delete_voucher, name='portal_delete_voucher'),
+    
+    # User Management
+    path('portal/users/', portal_views.portal_users, name='portal_users'),
+    path('portal/users/<int:user_id>/', portal_views.portal_user_detail, name='portal_user_detail'),
+    path('portal/users/<int:user_id>/disconnect/', portal_views.portal_user_disconnect, name='portal_user_disconnect'),
+    path('portal/users/<int:user_id>/extend/', portal_views.portal_user_extend_access, name='portal_user_extend_access'),
 ]

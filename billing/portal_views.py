@@ -2,14 +2,15 @@
 Tenant Portal Views for Kitonga Wi-Fi Billing System
 Phase 3: Self-service dashboard, router wizard, analytics, and white-label customization
 """
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, parser_classes
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
 from django.http import HttpResponse
-from django.db.models import Sum, Count
-from django.db import transaction
+from django.db.models import Sum, Count, Q
+from django.db import transaction, models
 from django.contrib.auth.models import User as DjangoUser
 import logging
 
@@ -194,6 +195,390 @@ def portal_voucher_analytics(request):
     return Response({
         'success': True,
         'data': analytics.get_voucher_analytics()
+    })
+
+
+@api_view(['POST'])
+@permission_classes([TenantAPIKeyPermission])
+def portal_generate_vouchers(request):
+    """
+    Generate voucher codes for tenant and optionally send via SMS (in Swahili)
+    
+    Request Body:
+    {
+        "quantity": 10,              # Number of vouchers (1-100)
+        "duration_hours": 24,        # Duration in hours
+        "batch_id": "BATCH-001",     # Optional batch identifier
+        "notes": "Holiday promo",    # Optional notes
+        "phone_number": "0712345678" # Optional: Send vouchers via SMS (will be formatted to 255...)
+    }
+    
+    Phone number formats accepted:
+    - 0712345678 → 255712345678
+    - 255712345678 → 255712345678
+    - 712345678 → 255712345678
+    """
+    import uuid
+    from .nextsms import NextSMSAPI
+    from .models import SMSLog
+    
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    # Validate input
+    quantity = request.data.get('quantity', 1)
+    duration_hours = request.data.get('duration_hours')
+    batch_id = request.data.get('batch_id', f'BATCH-{uuid.uuid4().hex[:8].upper()}')
+    notes = request.data.get('notes', '')
+    phone_number = request.data.get('phone_number')
+    
+    # Validate quantity
+    try:
+        quantity = int(quantity)
+        if quantity < 1 or quantity > 100:
+            return Response({
+                'success': False,
+                'message': 'Quantity must be between 1 and 100'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    except (ValueError, TypeError):
+        return Response({
+            'success': False,
+            'message': 'Invalid quantity'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Validate duration
+    if not duration_hours:
+        return Response({
+            'success': False,
+            'message': 'duration_hours is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        duration_hours = int(duration_hours)
+        if duration_hours < 1:
+            return Response({
+                'success': False,
+                'message': 'Duration must be at least 1 hour'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    except (ValueError, TypeError):
+        return Response({
+            'success': False,
+            'message': 'Invalid duration_hours'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Format phone number to start with 255 (Tanzania format)
+    normalized_phone = None
+    if phone_number:
+        # Remove spaces, dashes, and other characters
+        phone_clean = ''.join(filter(str.isdigit, str(phone_number)))
+        
+        # Handle different formats
+        if phone_clean.startswith('0'):
+            # Remove leading 0 and add 255
+            phone_clean = '255' + phone_clean[1:]
+        elif phone_clean.startswith('255'):
+            # Already in correct format
+            pass
+        elif len(phone_clean) == 9:
+            # Just the number without prefix, add 255
+            phone_clean = '255' + phone_clean
+        else:
+            return Response({
+                'success': False,
+                'message': 'Invalid phone number format. Should start with 0 or 255'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validate length (255 + 9 digits = 12 total)
+        if len(phone_clean) != 12:
+            return Response({
+                'success': False,
+                'message': 'Invalid phone number. Must have 9 digits after 255'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        normalized_phone = phone_clean
+    
+    # Generate vouchers for this tenant
+    vouchers_created = []
+    voucher_objects = []
+    for _ in range(quantity):
+        voucher = Voucher.objects.create(
+            code=Voucher.generate_code(),
+            duration_hours=duration_hours,
+            batch_id=batch_id,
+            created_by=f'tenant:{tenant.slug}',
+            notes=notes,
+            tenant=tenant  # Associate with tenant
+        )
+        voucher_objects.append(voucher)
+        vouchers_created.append({
+            'id': voucher.id,
+            'code': voucher.code,
+            'duration_hours': voucher.duration_hours,
+            'is_used': voucher.is_used,
+            'created_at': voucher.created_at.isoformat()
+        })
+    
+    logger.info(f"Tenant {tenant.slug} generated {quantity} vouchers in batch {batch_id}")
+    
+    # Send SMS if phone number provided (always in Swahili)
+    sms_result = {'sent': False, 'phone_number': None}
+    if normalized_phone:
+        try:
+            nextsms = NextSMSAPI()
+            
+            # Build duration text in Swahili
+            if duration_hours < 24:
+                duration_text = f"saa {duration_hours}"
+            elif duration_hours == 24:
+                duration_text = "siku 1"
+            elif duration_hours < 168:  # Less than a week
+                days = duration_hours // 24
+                duration_text = f"siku {days}"
+            elif duration_hours == 168:
+                duration_text = "wiki 1"
+            elif duration_hours < 720:
+                weeks = duration_hours // 168
+                duration_text = f"wiki {weeks}"
+            else:
+                months = duration_hours // 720
+                duration_text = f"mwezi {months}" if months == 1 else f"miezi {months}"
+            
+            # Create voucher codes list
+            voucher_codes = [v.code for v in voucher_objects]
+            
+            # Always Swahili message
+            if quantity == 1:
+                message = (
+                    f"Habari! Umepokea voucher ya Wi-Fi kutoka {tenant.business_name}.\n"
+                    f"Code: {voucher_codes[0]}\n"
+                    f"Muda: {duration_text}\n"
+                    f"Ingia kwenye portal na utumie code hii kupata internet. Karibu!"
+                )
+            else:
+                codes_text = '\n'.join(voucher_codes[:10])  # Limit to 10 codes per SMS
+                message = (
+                    f"Habari! Umepokea voucher {quantity} za Wi-Fi kutoka {tenant.business_name}.\n"
+                    f"Muda: {duration_text} kila moja\n"
+                    f"Codes:\n{codes_text}"
+                )
+                if quantity > 10:
+                    message += f"\n...na {quantity - 10} zaidi"
+            
+            # Send SMS
+            result = nextsms.send_sms(normalized_phone, message, f'VOUCHER-{batch_id}')
+            
+            # Log SMS
+            SMSLog.objects.create(
+                phone_number=normalized_phone,
+                message=message,
+                sms_type='voucher',
+                success=result.get('success', False),
+                response_data=result.get('data')
+            )
+            
+            sms_result = {
+                'sent': result.get('success', False),
+                'phone_number': normalized_phone,
+                'message': 'Voucher SMS sent successfully' if result.get('success') else 'SMS sending failed'
+            }
+            
+            logger.info(f"Voucher SMS sent to {normalized_phone}: {result.get('success')}")
+            
+        except Exception as e:
+            logger.error(f"Failed to send voucher SMS to {normalized_phone}: {e}")
+            sms_result = {
+                'sent': False,
+                'phone_number': normalized_phone,
+                'error': str(e)
+            }
+    
+    return Response({
+        'success': True,
+        'message': f'Successfully generated {quantity} vouchers',
+        'batch_id': batch_id,
+        'vouchers': vouchers_created,
+        'summary': {
+            'total_generated': quantity,
+            'duration_hours': duration_hours,
+            'batch_id': batch_id
+        },
+        'sms': sms_result
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+@permission_classes([TenantAPIKeyPermission])
+def portal_list_vouchers(request):
+    """
+    List all vouchers for tenant with filtering options
+    
+    Query Parameters:
+    - batch_id: Filter by batch ID
+    - is_used: Filter by usage status (true/false)
+    - page: Page number (default 1)
+    - page_size: Items per page (default 50, max 100)
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    # Get vouchers for this tenant
+    vouchers = Voucher.objects.filter(tenant=tenant).order_by('-created_at')
+    
+    # Apply filters
+    batch_id = request.query_params.get('batch_id')
+    if batch_id:
+        vouchers = vouchers.filter(batch_id=batch_id)
+    
+    is_used = request.query_params.get('is_used')
+    if is_used is not None:
+        is_used_bool = is_used.lower() == 'true'
+        vouchers = vouchers.filter(is_used=is_used_bool)
+    
+    # Pagination
+    page = int(request.query_params.get('page', 1))
+    page_size = min(int(request.query_params.get('page_size', 50)), 100)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    
+    total_count = vouchers.count()
+    vouchers_page = vouchers[start_idx:end_idx]
+    
+    voucher_list = []
+    for v in vouchers_page:
+        voucher_list.append({
+            'id': v.id,
+            'code': v.code,
+            'duration_hours': v.duration_hours,
+            'batch_id': v.batch_id,
+            'is_used': v.is_used,
+            'used_by': v.used_by.phone_number if v.used_by else None,
+            'used_at': v.used_at.isoformat() if v.used_at else None,
+            'notes': v.notes,
+            'created_at': v.created_at.isoformat()
+        })
+    
+    # Get batch summary
+    batches = Voucher.objects.filter(tenant=tenant).values('batch_id').annotate(
+        total=Count('id'),
+        used=Count('id', filter=models.Q(is_used=True))
+    ).order_by('-batch_id')[:10]
+    
+    return Response({
+        'success': True,
+        'vouchers': voucher_list,
+        'pagination': {
+            'page': page,
+            'page_size': page_size,
+            'total_count': total_count,
+            'total_pages': (total_count + page_size - 1) // page_size
+        },
+        'recent_batches': list(batches)
+    })
+
+
+@api_view(['DELETE'])
+@permission_classes([TenantAPIKeyPermission])
+def portal_delete_voucher(request, voucher_id):
+    """
+    Delete a single voucher (only if not used)
+    
+    URL: DELETE /api/portal/vouchers/<voucher_id>/
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        voucher = Voucher.objects.get(id=voucher_id, tenant=tenant)
+    except Voucher.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Voucher not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    # Don't allow deleting used vouchers
+    if voucher.is_used:
+        return Response({
+            'success': False,
+            'message': 'Cannot delete a voucher that has already been used'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    voucher_code = voucher.code
+    voucher.delete()
+    
+    logger.info(f"Tenant {tenant.slug} deleted voucher {voucher_code}")
+    
+    return Response({
+        'success': True,
+        'message': f'Voucher {voucher_code} deleted successfully'
+    })
+
+
+@api_view(['DELETE'])
+@permission_classes([TenantAPIKeyPermission])
+def portal_delete_voucher_batch(request):
+    """
+    Delete multiple vouchers by batch_id or list of IDs (only unused vouchers)
+    
+    Request Body:
+    {
+        "batch_id": "BATCH-001"    # Delete all unused vouchers in this batch
+    }
+    OR
+    {
+        "voucher_ids": [1, 2, 3]   # Delete specific vouchers by ID
+    }
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    batch_id = request.data.get('batch_id')
+    voucher_ids = request.data.get('voucher_ids', [])
+    
+    if not batch_id and not voucher_ids:
+        return Response({
+            'success': False,
+            'message': 'Please provide batch_id or voucher_ids'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Get vouchers to delete
+    if batch_id:
+        vouchers = Voucher.objects.filter(tenant=tenant, batch_id=batch_id, is_used=False)
+    else:
+        vouchers = Voucher.objects.filter(tenant=tenant, id__in=voucher_ids, is_used=False)
+    
+    count = vouchers.count()
+    
+    if count == 0:
+        return Response({
+            'success': False,
+            'message': 'No vouchers available to delete (they may have been used already)'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    # Delete vouchers
+    vouchers.delete()
+    
+    logger.info(f"Tenant {tenant.slug} deleted {count} vouchers (batch: {batch_id}, ids: {voucher_ids})")
+    
+    return Response({
+        'success': True,
+        'message': f'{count} voucher(s) deleted successfully',
+        'deleted_count': count
     })
 
 
@@ -471,10 +856,16 @@ def portal_branding(request):
         }, status=status.HTTP_403_FORBIDDEN)
     
     branding = BrandingManager(tenant)
+    branding_data = branding.get_branding()
+    
+    # Build full URL for logo
+    if branding_data.get('logo_url'):
+        base_url = request.build_absolute_uri('/').rstrip('/')
+        branding_data['logo_url'] = f"{base_url}{branding_data['logo_url']}"
     
     return Response({
         'success': True,
-        'branding': branding.get_branding()
+        'branding': branding_data
     })
 
 
@@ -533,6 +924,7 @@ def portal_branding_update(request):
 
 @api_view(['POST'])
 @permission_classes([TenantAPIKeyPermission])
+@parser_classes([MultiPartParser, FormParser])
 def portal_logo_upload(request):
     """
     Upload tenant logo
@@ -561,10 +953,19 @@ def portal_logo_upload(request):
     success, message = branding.update_logo(request.FILES['logo'])
     
     if success:
+        # Build full URL with domain
+        logo_url = None
+        if tenant.logo:
+            logo_path = tenant.logo.url
+            # Get base URL from request
+            base_url = request.build_absolute_uri('/').rstrip('/')
+            logo_url = f"{base_url}{logo_path}"
+        
         return Response({
             'success': True,
             'message': message,
-            'logo_url': tenant.logo.url if tenant.logo else None
+            'logo_url': logo_url,
+            'logo_path': tenant.logo.url if tenant.logo else None
         })
     else:
         return Response({
@@ -1171,3 +1572,410 @@ def portal_bundle_detail(request, bundle_id):
             'success': True,
             'message': 'Bundle deactivated'
         })
+
+
+# =============================================================================
+# USER MANAGEMENT
+# =============================================================================
+
+@api_view(['GET'])
+@permission_classes([TenantAPIKeyPermission])
+def portal_users(request):
+    """
+    List all WiFi users for tenant with filtering and pagination
+    
+    Query Parameters:
+    - search: Search by phone number or name
+    - is_active: Filter by active status (true/false)
+    - has_access: Filter by current access (true/false)
+    - page: Page number (default 1)
+    - page_size: Items per page (default 50, max 100)
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    users = User.objects.filter(tenant=tenant).order_by('-created_at')
+    
+    # Search filter
+    search = request.query_params.get('search')
+    if search:
+        users = users.filter(
+            models.Q(phone_number__icontains=search) |
+            models.Q(name__icontains=search)
+        )
+    
+    # Active status filter
+    is_active = request.query_params.get('is_active')
+    if is_active is not None:
+        is_active_bool = is_active.lower() == 'true'
+        users = users.filter(is_active=is_active_bool)
+    
+    # Current access filter
+    has_access = request.query_params.get('has_access')
+    if has_access is not None:
+        now = timezone.now()
+        if has_access.lower() == 'true':
+            users = users.filter(is_active=True, paid_until__gt=now)
+        else:
+            users = users.filter(models.Q(is_active=False) | models.Q(paid_until__lte=now) | models.Q(paid_until__isnull=True))
+    
+    # Pagination
+    page = int(request.query_params.get('page', 1))
+    page_size = min(int(request.query_params.get('page_size', 50)), 100)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    
+    total_count = users.count()
+    users_page = users[start_idx:end_idx]
+    
+    now = timezone.now()
+    user_list = []
+    for u in users_page:
+        # Calculate remaining time
+        remaining_hours = None
+        if u.paid_until and u.paid_until > now:
+            remaining = u.paid_until - now
+            remaining_hours = remaining.total_seconds() / 3600
+        
+        user_list.append({
+            'id': u.id,
+            'phone_number': u.phone_number,
+            'name': u.name or '',
+            'email': u.email or '',
+            'is_active': u.is_active,
+            'has_access': u.has_active_access(),
+            'paid_until': u.paid_until.isoformat() if u.paid_until else None,
+            'remaining_hours': round(remaining_hours, 1) if remaining_hours else None,
+            'total_payments': u.total_payments,
+            'total_amount_paid': float(u.total_amount_paid),
+            'max_devices': u.max_devices,
+            'created_at': u.created_at.isoformat()
+        })
+    
+    # Summary stats
+    active_users = User.objects.filter(tenant=tenant, is_active=True, paid_until__gt=now).count()
+    total_users = User.objects.filter(tenant=tenant).count()
+    
+    return Response({
+        'success': True,
+        'users': user_list,
+        'pagination': {
+            'page': page,
+            'page_size': page_size,
+            'total_count': total_count,
+            'total_pages': (total_count + page_size - 1) // page_size
+        },
+        'summary': {
+            'total_users': total_users,
+            'active_users': active_users,
+            'inactive_users': total_users - active_users
+        }
+    })
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([TenantAPIKeyPermission])
+def portal_user_detail(request, user_id):
+    """
+    Get, update or delete a specific user
+    
+    GET: Get user details with payment history
+    PUT: Update user (name, email, max_devices, extend access)
+    DELETE: Deactivate user and revoke access
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        user = User.objects.get(id=user_id, tenant=tenant)
+    except User.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    if request.method == 'GET':
+        now = timezone.now()
+        
+        # Get payment history
+        payments = Payment.objects.filter(user=user).order_by('-created_at')[:20]
+        payment_list = [{
+            'id': p.id,
+            'amount': float(p.amount),
+            'status': p.status,
+            'bundle_name': p.bundle.name if p.bundle else 'Unknown',
+            'created_at': p.created_at.isoformat()
+        } for p in payments]
+        
+        # Get vouchers used
+        vouchers_used = Voucher.objects.filter(used_by=user).order_by('-used_at')[:10]
+        voucher_list = [{
+            'id': v.id,
+            'code': v.code,
+            'duration_hours': v.duration_hours,
+            'used_at': v.used_at.isoformat() if v.used_at else None
+        } for v in vouchers_used]
+        
+        # Calculate remaining time
+        remaining_hours = None
+        if user.paid_until and user.paid_until > now:
+            remaining = user.paid_until - now
+            remaining_hours = remaining.total_seconds() / 3600
+        
+        return Response({
+            'success': True,
+            'user': {
+                'id': user.id,
+                'phone_number': user.phone_number,
+                'name': user.name or '',
+                'email': user.email or '',
+                'is_active': user.is_active,
+                'has_access': user.has_active_access(),
+                'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+                'remaining_hours': round(remaining_hours, 1) if remaining_hours else None,
+                'total_payments': user.total_payments,
+                'total_amount_paid': float(user.total_amount_paid),
+                'max_devices': user.max_devices,
+                'created_at': user.created_at.isoformat()
+            },
+            'payments': payment_list,
+            'vouchers_used': voucher_list
+        })
+    
+    elif request.method == 'PUT':
+        # Update user details
+        name = request.data.get('name')
+        email = request.data.get('email')
+        max_devices = request.data.get('max_devices')
+        extend_hours = request.data.get('extend_hours')  # Manually extend access
+        
+        if name is not None:
+            user.name = name
+        if email is not None:
+            user.email = email
+        if max_devices is not None:
+            try:
+                max_devices = int(max_devices)
+                if max_devices < 1:
+                    return Response({
+                        'success': False,
+                        'message': 'max_devices must be at least 1'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                user.max_devices = max_devices
+            except (ValueError, TypeError):
+                return Response({
+                    'success': False,
+                    'message': 'Invalid max_devices value'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Extend access if requested
+        if extend_hours:
+            try:
+                extend_hours = int(extend_hours)
+                if extend_hours < 1:
+                    return Response({
+                        'success': False,
+                        'message': 'extend_hours must be at least 1'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                user.extend_access(hours=extend_hours, source='manual')
+                logger.info(f"Tenant {tenant.slug} extended access for user {user.phone_number} by {extend_hours} hours")
+            except (ValueError, TypeError):
+                return Response({
+                    'success': False,
+                    'message': 'Invalid extend_hours value'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        user.save()
+        
+        return Response({
+            'success': True,
+            'message': 'User updated successfully',
+            'user': {
+                'id': user.id,
+                'phone_number': user.phone_number,
+                'name': user.name,
+                'email': user.email,
+                'max_devices': user.max_devices,
+                'is_active': user.is_active,
+                'paid_until': user.paid_until.isoformat() if user.paid_until else None
+            }
+        })
+    
+    elif request.method == 'DELETE':
+        # Deactivate user and revoke access
+        user.is_active = False
+        user.paid_until = None
+        user.save()
+        
+        logger.info(f"Tenant {tenant.slug} deactivated user {user.phone_number}")
+        
+        return Response({
+            'success': True,
+            'message': f'User {user.phone_number} deactivated'
+        })
+
+
+@api_view(['POST'])
+@permission_classes([TenantAPIKeyPermission])
+def portal_user_disconnect(request, user_id):
+    """
+    Disconnect user from MikroTik router (force logout)
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        user = User.objects.get(id=user_id, tenant=tenant)
+    except User.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    # Get tenant's routers and disconnect user from all
+    from .mikrotik import MikroTikAPI
+    
+    routers = Router.objects.filter(tenant=tenant, is_active=True)
+    disconnected_from = []
+    errors = []
+    
+    for router in routers:
+        try:
+            mikrotik = MikroTikAPI(
+                host=router.host,
+                username=router.username,
+                password=router.password,
+                port=router.api_port
+            )
+            
+            # Try to disconnect by phone number
+            result = mikrotik.remove_hotspot_user(user.phone_number)
+            if result.get('success'):
+                disconnected_from.append(router.name)
+        except Exception as e:
+            errors.append(f"{router.name}: {str(e)}")
+    
+    return Response({
+        'success': True,
+        'message': f'User {user.phone_number} disconnected',
+        'disconnected_from': disconnected_from,
+        'errors': errors if errors else None
+    })
+
+
+@api_view(['POST'])
+@permission_classes([TenantAPIKeyPermission])
+def portal_user_extend_access(request, user_id):
+    """
+    Extend user access by specified hours
+    
+    Request Body:
+    {
+        "hours": 24,
+        "notify_sms": true  # Optional: send SMS notification
+    }
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        user = User.objects.get(id=user_id, tenant=tenant)
+    except User.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    hours = request.data.get('hours')
+    notify_sms = request.data.get('notify_sms', False)
+    
+    if not hours:
+        return Response({
+            'success': False,
+            'message': 'hours is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        hours = int(hours)
+        if hours < 1:
+            return Response({
+                'success': False,
+                'message': 'hours must be at least 1'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    except (ValueError, TypeError):
+        return Response({
+            'success': False,
+            'message': 'Invalid hours value'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Extend access
+    user.extend_access(hours=hours, source='manual')
+    user.save()
+    
+    logger.info(f"Tenant {tenant.slug} extended access for user {user.phone_number} by {hours} hours")
+    
+    # Send SMS notification if requested
+    sms_result = {'sent': False}
+    if notify_sms:
+        try:
+            from .nextsms import NextSMSAPI
+            from .models import SMSLog
+            
+            nextsms = NextSMSAPI()
+            
+            # Build duration text in Swahili
+            if hours < 24:
+                duration_text = f"saa {hours}"
+            elif hours == 24:
+                duration_text = "siku 1"
+            else:
+                days = hours // 24
+                duration_text = f"siku {days}"
+            
+            message = (
+                f"Habari! Muda wako wa Wi-Fi umeongezwa na {duration_text} kutoka {tenant.business_name}. "
+                f"Unaweza kuendelea kutumia internet. Karibu!"
+            )
+            
+            result = nextsms.send_sms(user.phone_number, message, f'EXTEND-{user.id}')
+            
+            SMSLog.objects.create(
+                phone_number=user.phone_number,
+                message=message,
+                sms_type='access_extension',
+                success=result.get('success', False),
+                response_data=result.get('data')
+            )
+            
+            sms_result = {'sent': result.get('success', False)}
+        except Exception as e:
+            logger.error(f"Failed to send extension SMS: {e}")
+            sms_result = {'sent': False, 'error': str(e)}
+    
+    return Response({
+        'success': True,
+        'message': f'Access extended by {hours} hours',
+        'user': {
+            'id': user.id,
+            'phone_number': user.phone_number,
+            'paid_until': user.paid_until.isoformat() if user.paid_until else None,
+            'is_active': user.is_active
+        },
+        'sms': sms_result
+    })

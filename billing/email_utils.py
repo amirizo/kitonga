@@ -334,3 +334,7 @@ def send_password_reset_confirmation(email, tenant_name=None):
     except Exception as e:
         logger.error(f"Failed to send password reset confirmation to {email}: {e}")
         return False
+
+
+# Alias for backward compatibility
+send_password_reset_success_email = send_password_reset_confirmation

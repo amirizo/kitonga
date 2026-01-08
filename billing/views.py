@@ -5518,7 +5518,51 @@ def create_subscription_payment(request):
         return Response(result, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['POST'])
+@api_view(['GET'])
+@permission_classes([TenantAPIKeyPermission])
+def subscription_payment_status(request, transaction_id):
+    """
+    Check the status of a subscription payment
+    Used by frontend to poll payment status after initiating payment
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({
+            'success': False,
+            'message': 'Tenant not found'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        payment = TenantSubscriptionPayment.objects.get(
+            tenant=tenant,
+            transaction_id=transaction_id
+        )
+        
+        return Response({
+            'success': True,
+            'transaction_id': transaction_id,
+            'status': payment.status,  # pending, completed, failed
+            'amount': float(payment.amount),
+            'currency': payment.currency,
+            'plan': payment.plan.display_name if payment.plan else None,
+            'billing_cycle': payment.billing_cycle,
+            'created_at': payment.created_at.isoformat(),
+            'completed_at': payment.completed_at.isoformat() if payment.completed_at else None,
+            'period_start': payment.period_start.isoformat() if payment.period_start else None,
+            'period_end': payment.period_end.isoformat() if payment.period_end else None,
+            'message': 'Payment completed successfully!' if payment.status == 'completed' else 
+                      'Payment failed' if payment.status == 'failed' else 
+                      'Waiting for payment confirmation...'
+        })
+        
+    except TenantSubscriptionPayment.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Payment not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+
+
 @permission_classes([AllowAny])
 @csrf_exempt
 def subscription_payment_webhook(request):
