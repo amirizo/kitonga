@@ -179,4 +179,11 @@ urlpatterns = [
     path('portal/users/<int:user_id>/', portal_views.portal_user_detail, name='portal_user_detail'),
     path('portal/users/<int:user_id>/disconnect/', portal_views.portal_user_disconnect, name='portal_user_disconnect'),
     path('portal/users/<int:user_id>/extend/', portal_views.portal_user_extend_access, name='portal_user_extend_access'),
+    
+    # Payment Management
+    path('portal/payments/', portal_views.portal_payments, name='portal_payments'),
+    path('portal/balance/', portal_views.portal_balance, name='portal_balance'),
+    path('portal/payouts/', portal_views.portal_payouts, name='portal_payouts'),
+    path('portal/payouts/<int:payout_id>/', portal_views.portal_payout_detail, name='portal_payout_detail'),
+    path('portal/financial-summary/', portal_views.portal_financial_summary, name='portal_financial_summary'),
 ]

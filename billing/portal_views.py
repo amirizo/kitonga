@@ -2019,3 +2019,340 @@ def portal_user_extend_access(request, user_id):
         },
         'sms': sms_result
     })
+
+
+# =============================================================================
+# PAYMENT MANAGEMENT
+# =============================================================================
+
+@api_view(['GET'])
+@permission_classes([TenantAPIKeyPermission])
+def portal_payments(request):
+    """
+    List all payments for tenant with filtering and pagination
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({'success': False, 'message': 'Tenant not found'}, status=status.HTTP_403_FORBIDDEN)
+    
+    payments = Payment.objects.filter(tenant=tenant).order_by('-created_at')
+    
+    # Filters
+    payment_status = request.query_params.get('status')
+    if payment_status:
+        payments = payments.filter(status=payment_status)
+    
+    search = request.query_params.get('search')
+    if search:
+        payments = payments.filter(
+            models.Q(phone_number__icontains=search) |
+            models.Q(transaction_id__icontains=search)
+        )
+    
+    # Pagination
+    page = int(request.query_params.get('page', 1))
+    page_size = min(int(request.query_params.get('page_size', 50)), 100)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    
+    total_count = payments.count()
+    payments_page = payments[start_idx:end_idx]
+    
+    payment_list = [{
+        'id': p.id,
+        'phone_number': p.phone_number,
+        'amount': float(p.amount),
+        'status': p.status,
+        'bundle_name': p.bundle.name if p.bundle else None,
+        'transaction_id': p.transaction_id,
+        'payment_channel': p.payment_channel,
+        'created_at': p.created_at.isoformat(),
+        'completed_at': p.completed_at.isoformat() if p.completed_at else None
+    } for p in payments_page]
+    
+    # Summary
+    completed = Payment.objects.filter(tenant=tenant, status='completed')
+    total_revenue = completed.aggregate(total=Sum('amount'))['total'] or 0
+    
+    return Response({
+        'success': True,
+        'payments': payment_list,
+        'pagination': {
+            'page': page,
+            'page_size': page_size,
+            'total_count': total_count,
+            'total_pages': (total_count + page_size - 1) // page_size
+        },
+        'summary': {
+            'total_payments': Payment.objects.filter(tenant=tenant).count(),
+            'completed_payments': completed.count(),
+            'total_revenue': float(total_revenue)
+        }
+    })
+
+
+@api_view(['GET'])
+@permission_classes([TenantAPIKeyPermission])
+def portal_balance(request):
+    """
+    Get tenant's financial balance with payout info
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({'success': False, 'message': 'Tenant not found'}, status=status.HTTP_403_FORBIDDEN)
+    
+    # Revenue from completed payments
+    completed_payments = Payment.objects.filter(tenant=tenant, status='completed')
+    total_revenue = completed_payments.aggregate(total=Sum('amount'))['total'] or 0
+    
+    # Platform fee (5% default)
+    platform_fee_percent = 5
+    if tenant.subscription_plan and hasattr(tenant.subscription_plan, 'revenue_share_percent'):
+        platform_fee_percent = tenant.subscription_plan.revenue_share_percent or 5
+    
+    platform_fee = float(total_revenue) * (platform_fee_percent / 100)
+    net_revenue = float(total_revenue) - platform_fee
+    
+    # Payouts
+    completed_payouts = TenantPayout.objects.filter(
+        tenant=tenant, status='completed'
+    ).aggregate(total=Sum('amount'))['total'] or 0
+    
+    pending_payouts = TenantPayout.objects.filter(
+        tenant=tenant, status__in=['pending', 'processing']
+    ).aggregate(total=Sum('amount'))['total'] or 0
+    
+    available_balance = net_revenue - float(completed_payouts) - float(pending_payouts)
+    
+    return Response({
+        'success': True,
+        'balance': {
+            'total_revenue': float(total_revenue),
+            'platform_fee_percent': platform_fee_percent,
+            'platform_fee': round(platform_fee, 2),
+            'net_revenue': round(net_revenue, 2),
+            'total_payouts': float(completed_payouts),
+            'pending_payouts': float(pending_payouts),
+            'available_balance': round(available_balance, 2)
+        },
+        'payout_info': {
+            'minimum_payout': 10000,
+            'can_request_payout': available_balance >= 10000
+        }
+    })
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([TenantAPIKeyPermission])
+def portal_payouts(request):
+    """
+    GET: List payout requests
+    POST: Request new payout
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({'success': False, 'message': 'Tenant not found'}, status=status.HTTP_403_FORBIDDEN)
+    
+    if request.method == 'GET':
+        payouts = TenantPayout.objects.filter(tenant=tenant).order_by('-requested_at')
+        
+        payout_status = request.query_params.get('status')
+        if payout_status:
+            payouts = payouts.filter(status=payout_status)
+        
+        payout_list = [{
+            'id': p.id,
+            'reference': p.reference,
+            'amount': float(p.amount),
+            'payout_method': p.payout_method,
+            'account_number': p.account_number,
+            'status': p.status,
+            'requested_at': p.requested_at.isoformat(),
+            'completed_at': p.completed_at.isoformat() if p.completed_at else None
+        } for p in payouts[:50]]
+        
+        return Response({
+            'success': True,
+            'payouts': payout_list,
+            'summary': {
+                'total_requested': float(TenantPayout.objects.filter(tenant=tenant).aggregate(total=Sum('amount'))['total'] or 0),
+                'total_completed': float(TenantPayout.objects.filter(tenant=tenant, status='completed').aggregate(total=Sum('amount'))['total'] or 0),
+                'pending_count': TenantPayout.objects.filter(tenant=tenant, status__in=['pending', 'processing']).count()
+            }
+        })
+    
+    elif request.method == 'POST':
+        amount = request.data.get('amount')
+        payout_method = request.data.get('payout_method', 'mobile_money')
+        account_number = request.data.get('account_number')
+        account_name = request.data.get('account_name', '')
+        bank_name = request.data.get('bank_name', '')
+        
+        if not amount or not account_number:
+            return Response({
+                'success': False,
+                'message': 'amount and account_number are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            amount = float(amount)
+        except (ValueError, TypeError):
+            return Response({'success': False, 'message': 'Invalid amount'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Calculate available balance
+        completed_payments = Payment.objects.filter(tenant=tenant, status='completed')
+        total_revenue = completed_payments.aggregate(total=Sum('amount'))['total'] or 0
+        
+        platform_fee_percent = 5
+        platform_fee = float(total_revenue) * (platform_fee_percent / 100)
+        net_revenue = float(total_revenue) - platform_fee
+        
+        completed_payouts = TenantPayout.objects.filter(tenant=tenant, status='completed').aggregate(total=Sum('amount'))['total'] or 0
+        pending_payouts = TenantPayout.objects.filter(tenant=tenant, status__in=['pending', 'processing']).aggregate(total=Sum('amount'))['total'] or 0
+        
+        available_balance = net_revenue - float(completed_payouts) - float(pending_payouts)
+        
+        if amount < 10000:
+            return Response({'success': False, 'message': 'Minimum payout is TSh 10,000'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if amount > available_balance:
+            return Response({'success': False, 'message': f'Insufficient balance. Available: TSh {available_balance:,.2f}'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        payout = TenantPayout.objects.create(
+            tenant=tenant,
+            amount=amount,
+            payout_method=payout_method,
+            account_number=account_number,
+            account_name=account_name,
+            bank_name=bank_name,
+            requested_by=f'API:{tenant.slug}'
+        )
+        
+        logger.info(f"Tenant {tenant.slug} requested payout of TSh {amount}")
+        
+        return Response({
+            'success': True,
+            'message': 'Payout request submitted',
+            'payout': {
+                'id': payout.id,
+                'reference': payout.reference,
+                'amount': float(payout.amount),
+                'status': payout.status
+            },
+            'new_available_balance': round(available_balance - amount, 2)
+        }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET', 'DELETE'])
+@permission_classes([TenantAPIKeyPermission])
+def portal_payout_detail(request, payout_id):
+    """
+    GET: Get payout details
+    DELETE: Cancel pending payout
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({'success': False, 'message': 'Tenant not found'}, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        payout = TenantPayout.objects.get(id=payout_id, tenant=tenant)
+    except TenantPayout.DoesNotExist:
+        return Response({'success': False, 'message': 'Payout not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    if request.method == 'GET':
+        return Response({
+            'success': True,
+            'payout': {
+                'id': payout.id,
+                'reference': payout.reference,
+                'amount': float(payout.amount),
+                'payout_method': payout.payout_method,
+                'account_number': payout.account_number,
+                'account_name': payout.account_name,
+                'bank_name': payout.bank_name,
+                'status': payout.status,
+                'transaction_id': payout.transaction_id,
+                'error_message': payout.error_message,
+                'requested_at': payout.requested_at.isoformat(),
+                'completed_at': payout.completed_at.isoformat() if payout.completed_at else None
+            }
+        })
+    
+    elif request.method == 'DELETE':
+        if payout.status != 'pending':
+            return Response({'success': False, 'message': f'Cannot cancel payout with status: {payout.status}'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        payout.cancel('Cancelled by tenant')
+        logger.info(f"Tenant {tenant.slug} cancelled payout {payout.reference}")
+        
+        return Response({'success': True, 'message': 'Payout cancelled'})
+
+
+@api_view(['GET'])
+@permission_classes([TenantAPIKeyPermission])
+def portal_financial_summary(request):
+    """
+    Comprehensive financial summary for dashboard
+    """
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        return Response({'success': False, 'message': 'Tenant not found'}, status=status.HTTP_403_FORBIDDEN)
+    
+    from datetime import timedelta
+    from django.db.models.functions import TruncDate
+    
+    now = timezone.now()
+    today = now.date()
+    
+    # Revenue
+    completed = Payment.objects.filter(tenant=tenant, status='completed')
+    total_revenue = completed.aggregate(total=Sum('amount'))['total'] or 0
+    
+    # Platform fee
+    platform_fee_percent = 5
+    platform_fee = float(total_revenue) * (platform_fee_percent / 100)
+    net_revenue = float(total_revenue) - platform_fee
+    
+    # Payouts
+    completed_payouts = TenantPayout.objects.filter(tenant=tenant, status='completed').aggregate(total=Sum('amount'))['total'] or 0
+    pending_payouts = TenantPayout.objects.filter(tenant=tenant, status__in=['pending', 'processing']).aggregate(total=Sum('amount'))['total'] or 0
+    
+    available_balance = net_revenue - float(completed_payouts) - float(pending_payouts)
+    
+    # Period revenue
+    today_revenue = completed.filter(completed_at__date=today).aggregate(total=Sum('amount'))['total'] or 0
+    week_start = today - timedelta(days=today.weekday())
+    week_revenue = completed.filter(completed_at__date__gte=week_start).aggregate(total=Sum('amount'))['total'] or 0
+    month_start = today.replace(day=1)
+    month_revenue = completed.filter(completed_at__date__gte=month_start).aggregate(total=Sum('amount'))['total'] or 0
+    
+    # Daily trend (last 30 days)
+    thirty_days_ago = today - timedelta(days=30)
+    daily_revenue = completed.filter(completed_at__date__gte=thirty_days_ago).annotate(
+        date=TruncDate('completed_at')
+    ).values('date').annotate(
+        total=Sum('amount'),
+        count=Count('id')
+    ).order_by('date')
+    
+    return Response({
+        'success': True,
+        'financial': {
+            'total_revenue': float(total_revenue),
+            'platform_fee': round(platform_fee, 2),
+            'net_revenue': round(net_revenue, 2),
+            'total_payouts': float(completed_payouts),
+            'pending_payouts': float(pending_payouts),
+            'available_balance': round(available_balance, 2),
+            'can_request_payout': available_balance >= 10000
+        },
+        'period_revenue': {
+            'today': float(today_revenue),
+            'this_week': float(week_revenue),
+            'this_month': float(month_revenue)
+        },
+        'daily_trend': [
+            {'date': d['date'].strftime('%Y-%m-%d') if d['date'] else None, 'revenue': float(d['total'] or 0), 'payments': d['count']}
+            for d in daily_revenue
+        ]
+    })
