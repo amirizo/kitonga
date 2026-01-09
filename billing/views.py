@@ -1456,10 +1456,27 @@ def refund_payment(request, payment_id):
 def manage_bundles(request):
     """
     List all bundles (GET) or create new bundle (POST) (Admin only)
+    Now supports multi-tenancy - returns bundles for all tenants or specific tenant
     """
     if request.method == 'GET':
         try:
-            bundles = Bundle.objects.all().order_by('price')
+            # Get tenant filter from query params (optional)
+            tenant_slug = request.query_params.get('tenant')
+            
+            if tenant_slug:
+                # Filter by specific tenant
+                try:
+                    tenant = Tenant.objects.get(slug=tenant_slug)
+                    bundles = Bundle.objects.filter(tenant=tenant).order_by('price')
+                except Tenant.DoesNotExist:
+                    return Response({
+                        'success': False,
+                        'message': f'Tenant "{tenant_slug}" not found'
+                    }, status=status.HTTP_404_NOT_FOUND)
+            else:
+                # Show ALL bundles (platform bundles + all tenant bundles)
+                # Admin can see all bundles across the system
+                bundles = Bundle.objects.all().order_by('price')
             
             bundles_data = []
             for bundle in bundles:
@@ -1476,9 +1493,11 @@ def manage_bundles(request):
                 
                 bundles_data.append({
                     'id': bundle.id,
+                    'tenant': bundle.tenant.slug if bundle.tenant else 'platform',
                     'name': bundle.name,
                     'description': bundle.description,
                     'price': str(bundle.price),
+                    'currency': bundle.currency,
                     'duration_hours': bundle.duration_hours,
                     'is_active': bundle.is_active,
                     'display_order': bundle.display_order,
@@ -1500,11 +1519,35 @@ def manage_bundles(request):
     
     elif request.method == 'POST':
         try:
+            # Get tenant from request data (optional - platform admin may create global bundles)
+            tenant_slug = request.data.get('tenant')
+            tenant = None
+            
+            if tenant_slug:
+                try:
+                    tenant = Tenant.objects.get(slug=tenant_slug)
+                except Tenant.DoesNotExist:
+                    return Response({
+                        'success': False,
+                        'message': f'Tenant "{tenant_slug}" not found'
+                    }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Validate required fields
+            required_fields = ['name', 'price', 'duration_hours']
+            missing_fields = [field for field in required_fields if not request.data.get(field)]
+            if missing_fields:
+                return Response({
+                    'success': False,
+                    'message': f'Missing required fields: {", ".join(missing_fields)}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
             # Create new bundle
             bundle = Bundle.objects.create(
+                tenant=tenant,
                 name=request.data.get('name'),
                 description=request.data.get('description', ''),
                 price=request.data.get('price'),
+                currency=request.data.get('currency', 'TZS'),
                 duration_hours=request.data.get('duration_hours'),
                 display_order=request.data.get('display_order', 0),
                 is_active=request.data.get('is_active', True)
@@ -1515,8 +1558,10 @@ def manage_bundles(request):
                 'message': 'Bundle created successfully',
                 'bundle': {
                     'id': bundle.id,
+                    'tenant': bundle.tenant.slug if bundle.tenant else 'platform',
                     'name': bundle.name,
                     'price': str(bundle.price),
+                    'currency': bundle.currency,
                     'duration_hours': bundle.duration_hours
                 }
             }, status=status.HTTP_201_CREATED)
@@ -1534,9 +1579,31 @@ def manage_bundles(request):
 def manage_bundle(request, bundle_id):
     """
     Get, update, or delete a specific bundle (Admin only)
+    Now validates tenant ownership for security
     """
     try:
-        bundle = Bundle.objects.get(id=bundle_id)
+        # Get tenant filter from query params (optional)
+        tenant_slug = request.query_params.get('tenant')
+        
+        # Fetch bundle
+        try:
+            if tenant_slug:
+                try:
+                    tenant = Tenant.objects.get(slug=tenant_slug)
+                    bundle = Bundle.objects.get(id=bundle_id, tenant=tenant)
+                except Tenant.DoesNotExist:
+                    return Response({
+                        'success': False,
+                        'message': f'Tenant "{tenant_slug}" not found'
+                    }, status=status.HTTP_404_NOT_FOUND)
+            else:
+                # Allow access to platform bundles (tenant=None)
+                bundle = Bundle.objects.get(id=bundle_id)
+        except Bundle.DoesNotExist:
+            return Response({
+                'success': False,
+                'message': 'Bundle not found'
+            }, status=status.HTTP_404_NOT_FOUND)
         
         if request.method == 'GET':
             # Get usage statistics
@@ -1552,14 +1619,16 @@ def manage_bundle(request, bundle_id):
                 recent_data.append({
                     'phone_number': payment.phone_number,
                     'amount': str(payment.amount),
-                    'completed_at': payment.completed_at.isoformat()
+                    'completed_at': payment.completed_at.isoformat() if payment.completed_at else None
                 })
             
             bundle_data = {
                 'id': bundle.id,
+                'tenant': bundle.tenant.slug if bundle.tenant else 'platform',
                 'name': bundle.name,
                 'description': bundle.description,
                 'price': str(bundle.price),
+                'currency': bundle.currency,
                 'duration_hours': bundle.duration_hours,
                 'is_active': bundle.is_active,
                 'display_order': bundle.display_order,
@@ -1582,9 +1651,23 @@ def manage_bundle(request, bundle_id):
             if 'description' in request.data:
                 bundle.description = request.data['description']
             if 'price' in request.data:
-                bundle.price = request.data['price']
+                try:
+                    bundle.price = float(request.data['price'])
+                except (ValueError, TypeError):
+                    return Response({
+                        'success': False,
+                        'message': 'Invalid price format'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            if 'currency' in request.data:
+                bundle.currency = request.data['currency']
             if 'duration_hours' in request.data:
-                bundle.duration_hours = request.data['duration_hours']
+                try:
+                    bundle.duration_hours = int(request.data['duration_hours'])
+                except (ValueError, TypeError):
+                    return Response({
+                        'success': False,
+                        'message': 'Invalid duration_hours format'
+                    }, status=status.HTTP_400_BAD_REQUEST)
             if 'display_order' in request.data:
                 bundle.display_order = request.data['display_order']
             if 'is_active' in request.data:
@@ -1599,6 +1682,7 @@ def manage_bundle(request, bundle_id):
                     'id': bundle.id,
                     'name': bundle.name,
                     'price': str(bundle.price),
+                    'currency': bundle.currency,
                     'is_active': bundle.is_active
                 }
             })
@@ -1620,11 +1704,6 @@ def manage_bundle(request, bundle_id):
                 'message': f'Bundle "{bundle_name}" deleted successfully'
             })
         
-    except Bundle.DoesNotExist:
-        return Response({
-            'success': False,
-            'message': 'Bundle not found'
-        }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         logger.error(f'Error managing bundle: {str(e)}')
         return Response({
@@ -1637,22 +1716,25 @@ def manage_bundle(request, bundle_id):
 
 @api_view(['GET', 'PUT'])
 @permission_classes([SimpleAdminTokenPermission])
+@csrf_exempt
 def system_settings(request):
     """
     Get or update system settings (Admin only)
+    GET: Retrieve current system configuration
+    PUT: Update system settings (requires server restart for Django settings changes)
     """
     if request.method == 'GET':
         try:
             from django.conf import settings as django_settings
             
-            # Get current settings (you can expand this based on your needs)
+            # Get current settings
             settings_data = {
                 'mikrotik': {
                     'router_ip': getattr(django_settings, 'MIKROTIK_ROUTER_IP', ''),
                     'username': getattr(django_settings, 'MIKROTIK_USERNAME', ''),
                     'hotspot_name': getattr(django_settings, 'MIKROTIK_HOTSPOT_NAME', ''),
                     'api_port': getattr(django_settings, 'MIKROTIK_API_PORT', 8728),
-                    'connection_status': 'Unknown'  # You can add a test here
+                    'connection_status': 'Unknown'  # Can add actual test here
                 },
                 'clickpesa': {
                     'api_key_configured': bool(getattr(django_settings, 'CLICKPESA_API_KEY', '')),
@@ -1665,7 +1747,7 @@ def system_settings(request):
                 },
                 'system': {
                     'debug_mode': getattr(django_settings, 'DEBUG', False),
-                    'allowed_hosts': getattr(django_settings, 'ALLOWED_HOSTS', []),
+                    'allowed_hosts': list(getattr(django_settings, 'ALLOWED_HOSTS', [])),
                     'time_zone': getattr(django_settings, 'TIME_ZONE', 'UTC'),
                     'language_code': getattr(django_settings, 'LANGUAGE_CODE', 'en-us')
                 }
@@ -1673,7 +1755,8 @@ def system_settings(request):
             
             return Response({
                 'success': True,
-                'settings': settings_data
+                'settings': settings_data,
+                'timestamp': timezone.now().isoformat()
             })
             
         except Exception as e:
@@ -1684,12 +1767,15 @@ def system_settings(request):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     elif request.method == 'PUT':
-        # Note: In production, you'd want to store these in a database table
-        # or environment variables, not modify Django settings directly
+        # Note: In production, settings should be stored in database or environment
+        # Modifying Django settings directly requires server restart
+        logger.warning(f'System settings update requested by admin (requires restart)')
+        
         return Response({
             'success': True,
-            'message': 'Settings updated successfully',
-            'note': 'Settings updates require server restart to take effect'
+            'message': 'Settings updates noted. Server restart required to apply changes.',
+            'note': 'For production, store settings in database or environment variables instead',
+            'timestamp': timezone.now().isoformat()
         })
 
 
@@ -1827,12 +1913,13 @@ def cleanup_expired_users(request):
 
 @api_view(['GET', 'POST'])
 @permission_classes([SimpleAdminTokenPermission])
+@csrf_exempt
 def expiry_watcher_status(request):
     """
     Get the status of the real-time expiry watcher or trigger a manual check (Admin only)
     
     GET: Returns the watcher status and users about to expire
-    POST: Triggers an immediate expiry check
+    POST: Triggers an immediate expiry check (manual enforcement)
     """
     try:
         from .expiry_watcher import get_watcher, AccessExpiryWatcher
@@ -1842,19 +1929,28 @@ def expiry_watcher_status(request):
         
         if request.method == 'POST':
             # Trigger immediate check
-            watcher = AccessExpiryWatcher()
-            watcher._check_and_disconnect_expired()
-            
-            return Response({
-                'success': True,
-                'message': 'Expiry check triggered successfully',
-                'timestamp': now.isoformat()
-            })
+            try:
+                watcher = AccessExpiryWatcher()
+                watcher._check_and_disconnect_expired()
+                
+                logger.info(f'Manual expiry check triggered by admin')
+                
+                return Response({
+                    'success': True,
+                    'message': 'Expiry check triggered successfully',
+                    'timestamp': now.isoformat()
+                })
+            except Exception as e:
+                logger.error(f'Error during manual expiry check: {str(e)}')
+                return Response({
+                    'success': False,
+                    'message': f'Error triggering expiry check: {str(e)}'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         # GET - Return status
         watcher = get_watcher()
         
-        # Get users about to expire
+        # Get users about to expire (within 30 minutes)
         expiring_soon = User.objects.filter(
             is_active=True,
             paid_until__gt=now,
@@ -1882,11 +1978,21 @@ def expiry_watcher_status(request):
         
         expired_list = []
         for user in recently_expired:
+            expired_at = user['paid_until']
+            time_expired = now - expired_at
             expired_list.append({
                 'id': user['id'],
                 'phone_number': user['phone_number'],
-                'expired_at': user['paid_until'].isoformat()
+                'expired_at': expired_at.isoformat(),
+                'minutes_expired': int(time_expired.total_seconds() / 60)
             })
+        
+        # Determine health status
+        health_status = 'healthy'
+        if len(expired_list) > 0:
+            health_status = 'needs_attention'
+            if len(expired_list) > 10:
+                health_status = 'critical'
         
         return Response({
             'success': True,
@@ -1901,7 +2007,7 @@ def expiry_watcher_status(request):
             },
             'expiring_soon': expiring_list,
             'expired_not_disconnected': expired_list,
-            'health': 'healthy' if len(expired_list) == 0 else 'needs_attention',
+            'health': health_status,
             'timestamp': now.isoformat()
         })
         
@@ -5879,30 +5985,76 @@ def subscription_payment_webhook(request):
     """
     Webhook for subscription payment callbacks from ClickPesa
     Similar to WiFi payment webhook but for subscription payments
+    Creates PaymentWebhook log entries for audit trail
     """
+    webhook_log = None
+    
     try:
         data = request.data
         logger.info(f"Subscription payment webhook received: {data}")
         
+        # Extract webhook data
         transaction_id = data.get('external_reference') or data.get('merchant_reference') or data.get('order_reference')
         payment_status = data.get('payment_status', '') or data.get('status', '')
         payment_reference = data.get('order_reference', '')
         channel = data.get('channel', '')
+        amount = data.get('amount')
+        
+        # Convert amount to decimal if it's a string
+        if amount and isinstance(amount, str):
+            try:
+                amount = float(amount)
+            except ValueError:
+                amount = None
+        
+        # Create webhook log entry for audit trail
+        request_info = get_request_info(request)
+        
+        from .models import PaymentWebhook
+        webhook_log = PaymentWebhook.objects.create(
+            event_type='PAYMENT RECEIVED' if payment_status in ['PAYMENT RECEIVED', 'SUCCESS', 'COMPLETED'] else 'OTHER',
+            order_reference=transaction_id or 'UNKNOWN',
+            transaction_id=transaction_id or '',
+            payment_status=payment_status or 'UNKNOWN',
+            channel=channel or 'subscription',
+            amount=amount,
+            raw_payload=data,
+            source_ip=request_info['ip_address'],
+            user_agent=request_info['user_agent']
+        )
         
         if not transaction_id:
-            return Response({'error': 'Missing transaction_id'}, status=status.HTTP_400_BAD_REQUEST)
+            error_msg = 'Missing transaction_id in webhook data'
+            logger.error(error_msg)
+            webhook_log.mark_failed(error_msg)
+            return Response({'error': error_msg}, status=status.HTTP_400_BAD_REQUEST)
         
         # Check if this is a subscription payment (starts with SUB)
         if not transaction_id.startswith('SUB'):
             logger.info(f"Not a subscription payment: {transaction_id}")
+            webhook_log.mark_ignored('Not a subscription payment (transaction_id does not start with SUB)')
             return Response({'message': 'Not a subscription payment'}, status=status.HTTP_200_OK)
         
         # Find payment by transaction_id
         try:
             payment = TenantSubscriptionPayment.objects.get(transaction_id=transaction_id)
             tenant = payment.tenant
+            webhook_log.tenant = tenant
+            webhook_log.save()
         except TenantSubscriptionPayment.DoesNotExist:
+            error_msg = f'Subscription payment not found: {transaction_id}'
+            logger.error(error_msg)
+            webhook_log.mark_failed(error_msg)
             return Response({'error': 'Payment not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check for duplicates
+        if webhook_log.is_duplicate:
+            webhook_log.mark_ignored('Duplicate webhook - already processed')
+            logger.info(f'Duplicate webhook ignored: {transaction_id}')
+            return Response({
+                'success': True,
+                'message': 'Duplicate webhook ignored'
+            })
         
         from .subscription import SubscriptionManager
         
@@ -5915,18 +6067,25 @@ def subscription_payment_webhook(request):
         )
         
         if success:
+            # Mark webhook as successfully processed
+            webhook_log.mark_processed(payment=payment)
+            logger.info(f'Subscription webhook processed successfully: {transaction_id}')
             return Response({
                 'success': True,
                 'message': 'Subscription activated successfully'
             })
         else:
+            error_msg = 'Payment processing failed'
+            webhook_log.mark_failed(error_msg)
             return Response({
                 'success': False,
-                'message': 'Payment processing failed'
+                'message': error_msg
             })
             
     except Exception as e:
         logger.error(f"Subscription webhook error: {e}")
+        if webhook_log:
+            webhook_log.mark_failed(str(e))
         return Response({
             'success': False,
             'error': str(e)
@@ -6376,7 +6535,7 @@ def test_router_connection(request, router_id):
             router.host,
             username=router.username,
             password=router.password,
-            port=router.api_port,
+            port=router.port,
             plaintext_login=True
         )
         api = connection.get_api()
@@ -6384,9 +6543,10 @@ def test_router_connection(request, router_id):
         # Get router identity
         identity = api.get_resource('/system/identity').get()[0]
         
-        # Update last connected
-        router.last_connected = timezone.now()
-        router.last_error = None
+        # Update last seen and clear errors
+        router.last_seen = timezone.now()
+        router.last_error = ''
+        router.status = 'online'
         router.save()
         
         connection.disconnect()
@@ -6399,6 +6559,7 @@ def test_router_connection(request, router_id):
         
     except Exception as e:
         router.last_error = str(e)
+        router.status = 'error'
         router.save()
         
         return Response({
