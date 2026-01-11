@@ -976,9 +976,7 @@ class AutoSMSCampaignSerializer(serializers.Serializer):
 
     def validate_message_template(self, value):
         if len(value.strip()) < 5:
-            raise serializers.ValidationError(
-                "Message template must be at least 5 characters"
-            )
+            raise serializers.ValidationError("Message template must be at least 5 characters")
         return value.strip()
 
 
@@ -1035,17 +1033,13 @@ class AutoSMSCampaignCreateSerializer(serializers.Serializer):
         if trigger_type == "recurring_weekly":
             if data.get("day_of_week") is None:
                 raise serializers.ValidationError(
-                    {
-                        "day_of_week": "Day of week (0-6) is required for weekly campaigns"
-                    }
+                    {"day_of_week": "Day of week (0-6) is required for weekly campaigns"}
                 )
 
         if trigger_type == "recurring_monthly":
             if not data.get("day_of_month"):
                 raise serializers.ValidationError(
-                    {
-                        "day_of_month": "Day of month (1-28) is required for monthly campaigns"
-                    }
+                    {"day_of_month": "Day of month (1-28) is required for monthly campaigns"}
                 )
 
         if trigger_type in ["recurring_daily", "recurring_weekly", "recurring_monthly"]:
@@ -1082,9 +1076,7 @@ class TenantWebhookSerializer(serializers.Serializer):
     url = serializers.URLField(max_length=500)
 
     secret_key = serializers.CharField(read_only=True)
-    auth_header = serializers.CharField(
-        max_length=255, allow_blank=True, required=False
-    )
+    auth_header = serializers.CharField(max_length=255, allow_blank=True, required=False)
 
     events = serializers.ListField(
         child=serializers.ChoiceField(choices=[e[0] for e in EVENT_CHOICES]),
@@ -1117,11 +1109,10 @@ class TenantWebhookCreateSerializer(serializers.Serializer):
 
     name = serializers.CharField(max_length=100)
     url = serializers.URLField(max_length=500)
-    auth_header = serializers.CharField(
-        max_length=255, allow_blank=True, required=False, default=""
-    )
+    auth_header = serializers.CharField(max_length=255, allow_blank=True, required=False, default="")
     events = serializers.ListField(
-        child=serializers.CharField(max_length=50), min_length=1
+        child=serializers.CharField(max_length=50),
+        min_length=1
     )
 
     def validate_url(self, value):
@@ -1131,15 +1122,9 @@ class TenantWebhookCreateSerializer(serializers.Serializer):
 
     def validate_events(self, value):
         valid_events = [
-            "payment.success",
-            "payment.failed",
-            "user.created",
-            "user.expired",
-            "user.activated",
-            "voucher.redeemed",
-            "voucher.created",
-            "router.online",
-            "router.offline",
+            "payment.success", "payment.failed", "user.created", "user.expired",
+            "user.activated", "voucher.redeemed", "voucher.created",
+            "router.online", "router.offline"
         ]
         for event in value:
             if event not in valid_events:
@@ -1205,9 +1190,7 @@ class AnalyticsTrendSerializer(serializers.Serializer):
 
     # Trend data points
     dates = serializers.ListField(child=serializers.DateField())
-    revenue = serializers.ListField(
-        child=serializers.DecimalField(max_digits=12, decimal_places=2)
-    )
+    revenue = serializers.ListField(child=serializers.DecimalField(max_digits=12, decimal_places=2))
     users = serializers.ListField(child=serializers.IntegerField())
     payments = serializers.ListField(child=serializers.IntegerField())
 
@@ -1217,9 +1200,5 @@ class AnalyticsTrendSerializer(serializers.Serializer):
     total_payments = serializers.IntegerField()
 
     # Growth rates
-    revenue_growth_percent = serializers.DecimalField(
-        max_digits=6, decimal_places=2, allow_null=True
-    )
-    user_growth_percent = serializers.DecimalField(
-        max_digits=6, decimal_places=2, allow_null=True
-    )
+    revenue_growth_percent = serializers.DecimalField(max_digits=6, decimal_places=2, allow_null=True)
+    user_growth_percent = serializers.DecimalField(max_digits=6, decimal_places=2, allow_null=True)

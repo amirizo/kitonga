@@ -1248,31 +1248,15 @@ class TenantWebhookAdmin(admin.ModelAdmin):
     ]
     list_filter = ["is_active", "status", "tenant", "created_at"]
     search_fields = ["name", "url", "tenant__business_name"]
-    readonly_fields = [
-        "secret_key",
-        "last_success_at",
-        "last_failure_at",
-        "created_at",
-        "updated_at",
-    ]
+    readonly_fields = ["secret_key", "last_success_at", "last_failure_at", "created_at", "updated_at"]
     ordering = ["-created_at"]
 
     fieldsets = (
-        (
-            "Webhook Info",
-            {"fields": ("tenant", "name", "url", "secret_key", "is_active", "status")},
-        ),
+        ("Webhook Info", {"fields": ("tenant", "name", "url", "secret_key", "is_active", "status")}),
         ("Events", {"fields": ("events",)}),
         (
             "Timestamps",
-            {
-                "fields": (
-                    "last_success_at",
-                    "last_failure_at",
-                    "created_at",
-                    "updated_at",
-                )
-            },
+            {"fields": ("last_success_at", "last_failure_at", "created_at", "updated_at")},
         ),
     )
 
@@ -1343,7 +1327,7 @@ class WebhookDeliveryAdmin(admin.ModelAdmin):
             )
         return format_html(
             '<span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px;">{}</span>',
-            obj.status.upper(),
+            obj.status.upper()
         )
 
     success_badge.short_description = "Status"
@@ -1451,7 +1435,7 @@ class TenantAnalyticsSnapshotAdmin(admin.ModelAdmin):
         "total_users",
         "active_users",
         "total_revenue_display",
-        "vouchers_generated",
+        "vouchers_sold",
     ]
     list_filter = ["tenant", "date"]
     search_fields = ["tenant__business_name"]
@@ -1463,11 +1447,11 @@ class TenantAnalyticsSnapshotAdmin(admin.ModelAdmin):
         "new_users",
         "expired_users",
         "total_revenue",
-        "payment_count",
-        "vouchers_generated",
-        "vouchers_redeemed",
-        "bundle_breakdown",
-        "payment_channel_breakdown",
+        "vouchers_sold",
+        "vouchers_used",
+        "router_data",
+        "bundle_data",
+        "hourly_data",
         "created_at",
     ]
     ordering = ["-date", "tenant"]

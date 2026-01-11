@@ -4031,145 +4031,6 @@ def portal_auto_sms_campaign_logs(request, campaign_id):
     )
 
 
-@api_view(["POST"])
-@permission_classes([TenantAPIKeyPermission])
-def portal_auto_sms_campaign_toggle(request, campaign_id):
-    """Toggle campaign status between active and paused"""
-    from .models import AutoSMSCampaign
-
-    tenant = request.tenant
-
-    # Check permission
-    allowed, error = check_auto_sms_permission(tenant)
-    if not allowed:
-        return Response(
-            {"success": False, "error": error},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
-    try:
-        campaign = AutoSMSCampaign.objects.get(id=campaign_id, tenant=tenant)
-    except AutoSMSCampaign.DoesNotExist:
-        return Response(
-            {"success": False, "error": "Campaign not found"},
-            status=status.HTTP_404_NOT_FOUND,
-        )
-
-    # Toggle status
-    if campaign.status == "active":
-        campaign.status = "paused"
-        new_status = "paused"
-    elif campaign.status in ["paused", "draft"]:
-        campaign.status = "active"
-        new_status = "active"
-        # Calculate next run for time-based triggers
-        if campaign.trigger_type in [
-            "scheduled",
-            "recurring_daily",
-            "recurring_weekly",
-            "recurring_monthly",
-        ]:
-            campaign.calculate_next_run()
-    else:
-        return Response(
-            {
-                "success": False,
-                "error": f"Cannot toggle campaign with status: {campaign.status}",
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    campaign.save()
-
-    logger.info(
-        f"Tenant {tenant.slug} toggled campaign {campaign.name} to {new_status}"
-    )
-
-    return Response(
-        {
-            "success": True,
-            "message": f"Campaign {new_status}",
-            "campaign": {
-                "id": str(campaign.id),
-                "name": campaign.name,
-                "status": campaign.status,
-                "next_run_at": (
-                    campaign.next_run_at.isoformat() if campaign.next_run_at else None
-                ),
-            },
-        }
-    )
-
-
-@api_view(["GET"])
-@permission_classes([TenantAPIKeyPermission])
-def portal_auto_sms_campaign_preview(request, campaign_id):
-    """Preview how many users would receive SMS from this campaign"""
-    from .models import AutoSMSCampaign, User
-
-    tenant = request.tenant
-
-    # Check permission
-    allowed, error = check_auto_sms_permission(tenant)
-    if not allowed:
-        return Response(
-            {"success": False, "error": error},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
-    try:
-        campaign = AutoSMSCampaign.objects.get(id=campaign_id, tenant=tenant)
-    except AutoSMSCampaign.DoesNotExist:
-        return Response(
-            {"success": False, "error": "Campaign not found"},
-            status=status.HTTP_404_NOT_FOUND,
-        )
-
-    # Build recipient query based on targeting
-    users = User.objects.filter(tenant=tenant, phone_number__isnull=False)
-
-    if campaign.target_active_only:
-        users = users.filter(paid_until__gt=timezone.now())
-    elif campaign.target_expired_only:
-        users = users.filter(paid_until__lt=timezone.now())
-
-    recipient_count = users.count()
-
-    # Sample message preview
-    sample_message = campaign.message_template
-    sample_user = users.first()
-    if sample_user:
-        # Replace template variables
-        sample_message = sample_message.replace(
-            "{name}", sample_user.name or "Customer"
-        )
-        sample_message = sample_message.replace(
-            "{phone}", sample_user.phone_number or ""
-        )
-        sample_message = sample_message.replace(
-            "{business}", tenant.business_name or ""
-        )
-
-    return Response(
-        {
-            "success": True,
-            "preview": {
-                "recipient_count": recipient_count,
-                "sample_message": sample_message,
-                "targeting": {
-                    "all_users": campaign.target_all_users,
-                    "active_only": campaign.target_active_only,
-                    "expired_only": campaign.target_expired_only,
-                },
-                "trigger_info": {
-                    "type": campaign.trigger_type,
-                    "display": campaign.get_trigger_type_display(),
-                },
-            },
-        }
-    )
-
-
 # =============================================================================
 # WEBHOOK NOTIFICATIONS (Business/Enterprise Feature)
 # =============================================================================
@@ -4377,49 +4238,17 @@ def portal_webhook_test(request, webhook_id):
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    # Send test webhook directly
-    import requests
-    import time
-    import json
-
+    # Send test webhook
     test_payload = {
-        "event": "test",
         "test": True,
         "message": "This is a test webhook from Kitonga",
         "tenant": tenant.business_name,
         "timestamp": timezone.now().isoformat(),
     }
 
-    payload_json = json.dumps(test_payload, default=str)
-
-    # Generate signature
-    signature = WebhookService.generate_signature(payload_json, webhook.secret_key)
-
-    headers = {
-        "Content-Type": "application/json",
-        "X-Webhook-Signature": signature,
-        "X-Webhook-Event": "test",
-        "User-Agent": "Kitonga-Webhook/1.0",
-    }
-
-    try:
-        response = requests.post(
-            webhook.url,
-            data=payload_json,
-            headers=headers,
-            timeout=10,
-        )
-        success = response.status_code in [200, 201, 202, 204]
-        response_code = response.status_code
-        error_msg = None if success else response.text[:500]
-    except requests.exceptions.Timeout:
-        success = False
-        response_code = None
-        error_msg = "Request timed out"
-    except Exception as e:
-        success = False
-        response_code = None
-        error_msg = str(e)
+    success, response_code, error_msg = WebhookService.send_webhook(
+        webhook, "test", test_payload
+    )
 
     if success:
         return Response(
@@ -4774,9 +4603,13 @@ def portal_analytics_export(request):
             {
                 "phone": u.phone_number,
                 "created_at": u.created_at.isoformat(),
-                "paid_until": (u.paid_until.isoformat() if u.paid_until else None),
+                "paid_until": (
+                    u.paid_until.isoformat() if u.paid_until else None
+                ),
                 "total_payments": u.total_payments,
-                "is_active": (u.paid_until > timezone.now() if u.paid_until else False),
+                "is_active": (
+                    u.paid_until > timezone.now() if u.paid_until else False
+                ),
             }
             for u in users
         ]
@@ -4960,7 +4793,9 @@ def portal_analytics_user_segments(request):
     total_users = User.objects.filter(tenant=tenant).count()
 
     # Active vs Expired
-    active = User.objects.filter(tenant=tenant, paid_until__gt=timezone.now()).count()
+    active = User.objects.filter(
+        tenant=tenant, paid_until__gt=timezone.now()
+    ).count()
     expired = total_users - active
 
     # By payment frequency
@@ -4974,12 +4809,9 @@ def portal_analytics_user_segments(request):
     # Recently active (based on access logs in last 7 days)
     week_ago = timezone.now() - timedelta(days=7)
     from billing.models import AccessLog
-
-    recently_active = (
-        User.objects.filter(tenant=tenant, access_logs__timestamp__gte=week_ago)
-        .distinct()
-        .count()
-    )
+    recently_active = User.objects.filter(
+        tenant=tenant, access_logs__timestamp__gte=week_ago
+    ).distinct().count()
 
     # Expiring soon (next 24 hours)
     tomorrow = timezone.now() + timedelta(hours=24)

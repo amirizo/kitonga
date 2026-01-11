@@ -4031,145 +4031,6 @@ def portal_auto_sms_campaign_logs(request, campaign_id):
     )
 
 
-@api_view(["POST"])
-@permission_classes([TenantAPIKeyPermission])
-def portal_auto_sms_campaign_toggle(request, campaign_id):
-    """Toggle campaign status between active and paused"""
-    from .models import AutoSMSCampaign
-
-    tenant = request.tenant
-
-    # Check permission
-    allowed, error = check_auto_sms_permission(tenant)
-    if not allowed:
-        return Response(
-            {"success": False, "error": error},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
-    try:
-        campaign = AutoSMSCampaign.objects.get(id=campaign_id, tenant=tenant)
-    except AutoSMSCampaign.DoesNotExist:
-        return Response(
-            {"success": False, "error": "Campaign not found"},
-            status=status.HTTP_404_NOT_FOUND,
-        )
-
-    # Toggle status
-    if campaign.status == "active":
-        campaign.status = "paused"
-        new_status = "paused"
-    elif campaign.status in ["paused", "draft"]:
-        campaign.status = "active"
-        new_status = "active"
-        # Calculate next run for time-based triggers
-        if campaign.trigger_type in [
-            "scheduled",
-            "recurring_daily",
-            "recurring_weekly",
-            "recurring_monthly",
-        ]:
-            campaign.calculate_next_run()
-    else:
-        return Response(
-            {
-                "success": False,
-                "error": f"Cannot toggle campaign with status: {campaign.status}",
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    campaign.save()
-
-    logger.info(
-        f"Tenant {tenant.slug} toggled campaign {campaign.name} to {new_status}"
-    )
-
-    return Response(
-        {
-            "success": True,
-            "message": f"Campaign {new_status}",
-            "campaign": {
-                "id": str(campaign.id),
-                "name": campaign.name,
-                "status": campaign.status,
-                "next_run_at": (
-                    campaign.next_run_at.isoformat() if campaign.next_run_at else None
-                ),
-            },
-        }
-    )
-
-
-@api_view(["GET"])
-@permission_classes([TenantAPIKeyPermission])
-def portal_auto_sms_campaign_preview(request, campaign_id):
-    """Preview how many users would receive SMS from this campaign"""
-    from .models import AutoSMSCampaign, User
-
-    tenant = request.tenant
-
-    # Check permission
-    allowed, error = check_auto_sms_permission(tenant)
-    if not allowed:
-        return Response(
-            {"success": False, "error": error},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
-    try:
-        campaign = AutoSMSCampaign.objects.get(id=campaign_id, tenant=tenant)
-    except AutoSMSCampaign.DoesNotExist:
-        return Response(
-            {"success": False, "error": "Campaign not found"},
-            status=status.HTTP_404_NOT_FOUND,
-        )
-
-    # Build recipient query based on targeting
-    users = User.objects.filter(tenant=tenant, phone_number__isnull=False)
-
-    if campaign.target_active_only:
-        users = users.filter(paid_until__gt=timezone.now())
-    elif campaign.target_expired_only:
-        users = users.filter(paid_until__lt=timezone.now())
-
-    recipient_count = users.count()
-
-    # Sample message preview
-    sample_message = campaign.message_template
-    sample_user = users.first()
-    if sample_user:
-        # Replace template variables
-        sample_message = sample_message.replace(
-            "{name}", sample_user.name or "Customer"
-        )
-        sample_message = sample_message.replace(
-            "{phone}", sample_user.phone_number or ""
-        )
-        sample_message = sample_message.replace(
-            "{business}", tenant.business_name or ""
-        )
-
-    return Response(
-        {
-            "success": True,
-            "preview": {
-                "recipient_count": recipient_count,
-                "sample_message": sample_message,
-                "targeting": {
-                    "all_users": campaign.target_all_users,
-                    "active_only": campaign.target_active_only,
-                    "expired_only": campaign.target_expired_only,
-                },
-                "trigger_info": {
-                    "type": campaign.trigger_type,
-                    "display": campaign.get_trigger_type_display(),
-                },
-            },
-        }
-    )
-
-
 # =============================================================================
 # WEBHOOK NOTIFICATIONS (Business/Enterprise Feature)
 # =============================================================================
@@ -4208,13 +4069,13 @@ def portal_webhooks(request):
 
         webhook_list = [
             {
-                "id": str(w.id),
+                "id": w.id,
                 "name": w.name,
                 "url": w.url,
                 "events": w.events,
                 "is_active": w.is_active,
-                "last_success_at": (
-                    w.last_success_at.isoformat() if w.last_success_at else None
+                "last_triggered_at": (
+                    w.last_triggered_at.isoformat() if w.last_triggered_at else None
                 ),
                 "created_at": w.created_at.isoformat(),
             }
@@ -4252,6 +4113,7 @@ def portal_webhooks(request):
             name=data["name"],
             url=data["url"],
             events=data["events"],
+            secret=secrets.token_hex(32),
             is_active=data.get("is_active", True),
         )
 
@@ -4262,10 +4124,10 @@ def portal_webhooks(request):
                 "success": True,
                 "message": "Webhook created",
                 "webhook": {
-                    "id": str(webhook.id),
+                    "id": webhook.id,
                     "name": webhook.name,
                     "url": webhook.url,
-                    "secret": webhook.secret_key,
+                    "secret": webhook.secret,
                     "events": webhook.events,
                 },
             },
@@ -4306,15 +4168,15 @@ def portal_webhook_detail(request, webhook_id):
             {
                 "success": True,
                 "webhook": {
-                    "id": str(webhook.id),
+                    "id": webhook.id,
                     "name": webhook.name,
                     "url": webhook.url,
-                    "secret": webhook.secret_key,
+                    "secret": webhook.secret,
                     "events": webhook.events,
                     "is_active": webhook.is_active,
-                    "last_success_at": (
-                        webhook.last_success_at.isoformat()
-                        if webhook.last_success_at
+                    "last_triggered_at": (
+                        webhook.last_triggered_at.isoformat()
+                        if webhook.last_triggered_at
                         else None
                     ),
                     "created_at": webhook.created_at.isoformat(),
@@ -4377,49 +4239,18 @@ def portal_webhook_test(request, webhook_id):
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    # Send test webhook directly
-    import requests
-    import time
-    import json
-
+    # Send test webhook
+    service = WebhookService(tenant)
     test_payload = {
-        "event": "test",
         "test": True,
         "message": "This is a test webhook from Kitonga",
         "tenant": tenant.business_name,
         "timestamp": timezone.now().isoformat(),
     }
 
-    payload_json = json.dumps(test_payload, default=str)
-
-    # Generate signature
-    signature = WebhookService.generate_signature(payload_json, webhook.secret_key)
-
-    headers = {
-        "Content-Type": "application/json",
-        "X-Webhook-Signature": signature,
-        "X-Webhook-Event": "test",
-        "User-Agent": "Kitonga-Webhook/1.0",
-    }
-
-    try:
-        response = requests.post(
-            webhook.url,
-            data=payload_json,
-            headers=headers,
-            timeout=10,
-        )
-        success = response.status_code in [200, 201, 202, 204]
-        response_code = response.status_code
-        error_msg = None if success else response.text[:500]
-    except requests.exceptions.Timeout:
-        success = False
-        response_code = None
-        error_msg = "Request timed out"
-    except Exception as e:
-        success = False
-        response_code = None
-        error_msg = str(e)
+    success, response_code, error_msg = service._send_webhook(
+        webhook, "test", test_payload
+    )
 
     if success:
         return Response(
@@ -4476,24 +4307,20 @@ def portal_webhook_deliveries(request, webhook_id):
 
     delivery_list = [
         {
-            "id": str(d.id),
+            "id": d.id,
             "event_type": d.event_type,
-            "event_id": str(d.event_id),
-            "status": d.status,
-            "response_status_code": d.response_status_code,
-            "response_time_ms": d.response_time_ms,
+            "success": d.success,
+            "response_code": d.response_code,
             "error_message": d.error_message,
-            "attempts": d.attempts,
-            "max_attempts": d.max_attempts,
+            "retry_count": d.retry_count,
             "created_at": d.created_at.isoformat(),
-            "delivered_at": d.delivered_at.isoformat() if d.delivered_at else None,
         }
         for d in deliveries_page
     ]
 
     # Success rate
     total = deliveries.count()
-    successful = deliveries.filter(status="success").count()
+    successful = deliveries.filter(success=True).count()
     success_rate = (successful / total * 100) if total > 0 else 0
 
     return Response(
@@ -4555,7 +4382,7 @@ def portal_advanced_analytics(request):
     # User stats
     total_users = User.objects.filter(tenant=tenant).count()
     active_users = User.objects.filter(
-        tenant=tenant, paid_until__gt=timezone.now()
+        tenant=tenant, access_expires__gt=timezone.now()
     ).count()
     new_users = User.objects.filter(tenant=tenant, created_at__gte=start_date).count()
 
@@ -4578,7 +4405,7 @@ def portal_advanced_analytics(request):
     # Router stats
     routers = Router.objects.filter(tenant=tenant, is_active=True)
     router_count = routers.count()
-    online_routers = routers.filter(status="online").count()
+    online_routers = routers.filter(is_online=True).count()
 
     # Daily trends
     daily_revenue = (
@@ -4774,9 +4601,13 @@ def portal_analytics_export(request):
             {
                 "phone": u.phone_number,
                 "created_at": u.created_at.isoformat(),
-                "paid_until": (u.paid_until.isoformat() if u.paid_until else None),
+                "access_expires": (
+                    u.access_expires.isoformat() if u.access_expires else None
+                ),
                 "total_payments": u.total_payments,
-                "is_active": (u.paid_until > timezone.now() if u.paid_until else False),
+                "is_active": (
+                    u.access_expires > timezone.now() if u.access_expires else False
+                ),
             }
             for u in users
         ]
@@ -4788,7 +4619,7 @@ def portal_analytics_export(request):
                 "user_phone": p.user.phone_number if p.user else None,
                 "amount": float(p.amount),
                 "status": p.status,
-                "payment_channel": p.payment_channel,
+                "payment_method": p.payment_method,
                 "created_at": p.created_at.isoformat(),
             }
             for p in payments
@@ -4889,12 +4720,12 @@ def portal_analytics_revenue_breakdown(request):
         .order_by("-total")
     )
 
-    # By payment method (payment_channel in this model)
+    # By payment method
     by_method = (
         Payment.objects.filter(
             tenant=tenant, status="completed", created_at__gte=start_date
         )
-        .values("payment_channel")
+        .values("payment_method")
         .annotate(total=Sum("amount"), count=Count("id"))
         .order_by("-total")
     )
@@ -4926,7 +4757,7 @@ def portal_analytics_revenue_breakdown(request):
             ],
             "by_payment_method": [
                 {
-                    "method": r["payment_channel"] or "unknown",
+                    "method": r["payment_method"],
                     "revenue": float(r["total"]),
                     "count": r["count"],
                 }
@@ -4960,7 +4791,9 @@ def portal_analytics_user_segments(request):
     total_users = User.objects.filter(tenant=tenant).count()
 
     # Active vs Expired
-    active = User.objects.filter(tenant=tenant, paid_until__gt=timezone.now()).count()
+    active = User.objects.filter(
+        tenant=tenant, access_expires__gt=timezone.now()
+    ).count()
     expired = total_users - active
 
     # By payment frequency
@@ -4971,20 +4804,16 @@ def portal_analytics_user_segments(request):
     low_value = User.objects.filter(tenant=tenant, total_payments=1).count()
     no_payments = User.objects.filter(tenant=tenant, total_payments=0).count()
 
-    # Recently active (based on access logs in last 7 days)
+    # Recently active (last 7 days)
     week_ago = timezone.now() - timedelta(days=7)
-    from billing.models import AccessLog
-
-    recently_active = (
-        User.objects.filter(tenant=tenant, access_logs__timestamp__gte=week_ago)
-        .distinct()
-        .count()
-    )
+    recently_active = User.objects.filter(
+        tenant=tenant, last_login__gte=week_ago
+    ).count()
 
     # Expiring soon (next 24 hours)
     tomorrow = timezone.now() + timedelta(hours=24)
     expiring_soon = User.objects.filter(
-        tenant=tenant, paid_until__gt=timezone.now(), paid_until__lt=tomorrow
+        tenant=tenant, access_expires__gt=timezone.now(), access_expires__lt=tomorrow
     ).count()
 
     return Response(
@@ -5034,7 +4863,7 @@ def portal_analytics_router_performance(request):
     router_stats = []
     for router in routers:
         # Users associated with this router
-        user_count = User.objects.filter(tenant=tenant, primary_router=router).count()
+        user_count = User.objects.filter(tenant=tenant, router=router).count()
 
         # Revenue from users on this router
         revenue = (
@@ -5042,7 +4871,7 @@ def portal_analytics_router_performance(request):
                 tenant=tenant,
                 status="completed",
                 created_at__gte=start_date,
-                user__primary_router=router,
+                user__router=router,
             ).aggregate(total=Sum("amount"))["total"]
             or 0
         )
@@ -5052,9 +4881,9 @@ def portal_analytics_router_performance(request):
                 "id": router.id,
                 "name": router.name,
                 "location": router.location.name if router.location else None,
-                "status": router.status,
+                "is_online": router.is_online,
                 "last_seen": (
-                    router.last_seen.isoformat() if router.last_seen else None
+                    router.last_seen_at.isoformat() if router.last_seen_at else None
                 ),
                 "user_count": user_count,
                 "revenue": float(revenue),
@@ -5071,8 +4900,8 @@ def portal_analytics_router_performance(request):
             "routers": router_stats,
             "summary": {
                 "total_routers": routers.count(),
-                "online": routers.filter(status="online").count(),
-                "offline": routers.filter(status="offline").count(),
+                "online": routers.filter(is_online=True).count(),
+                "offline": routers.filter(is_online=False).count(),
             },
         }
     )

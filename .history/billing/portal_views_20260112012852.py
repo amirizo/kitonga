@@ -4072,18 +4072,13 @@ def portal_auto_sms_campaign_toggle(request, campaign_id):
             campaign.calculate_next_run()
     else:
         return Response(
-            {
-                "success": False,
-                "error": f"Cannot toggle campaign with status: {campaign.status}",
-            },
+            {"success": False, "error": f"Cannot toggle campaign with status: {campaign.status}"},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
     campaign.save()
 
-    logger.info(
-        f"Tenant {tenant.slug} toggled campaign {campaign.name} to {new_status}"
-    )
+    logger.info(f"Tenant {tenant.slug} toggled campaign {campaign.name} to {new_status}")
 
     return Response(
         {
@@ -4094,7 +4089,9 @@ def portal_auto_sms_campaign_toggle(request, campaign_id):
                 "name": campaign.name,
                 "status": campaign.status,
                 "next_run_at": (
-                    campaign.next_run_at.isoformat() if campaign.next_run_at else None
+                    campaign.next_run_at.isoformat()
+                    if campaign.next_run_at
+                    else None
                 ),
             },
         }
@@ -4140,15 +4137,9 @@ def portal_auto_sms_campaign_preview(request, campaign_id):
     sample_user = users.first()
     if sample_user:
         # Replace template variables
-        sample_message = sample_message.replace(
-            "{name}", sample_user.name or "Customer"
-        )
-        sample_message = sample_message.replace(
-            "{phone}", sample_user.phone_number or ""
-        )
-        sample_message = sample_message.replace(
-            "{business}", tenant.business_name or ""
-        )
+        sample_message = sample_message.replace("{name}", sample_user.name or "Customer")
+        sample_message = sample_message.replace("{phone}", sample_user.phone_number or "")
+        sample_message = sample_message.replace("{business}", tenant.business_name or "")
 
     return Response(
         {

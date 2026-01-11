@@ -59,7 +59,7 @@ class SubscriptionPlan(models.Model):
     analytics_dashboard = models.BooleanField(default=True)
     sms_notifications = models.BooleanField(default=True)
     sms_broadcast = models.BooleanField(default=False)  # Allow tenant SMS broadcasts
-
+    
     # Premium Features (Business/Enterprise)
     advanced_analytics = models.BooleanField(default=False)  # Charts, trends, exports
     auto_sms_campaigns = models.BooleanField(default=False)  # Scheduled/triggered SMS
@@ -1762,31 +1762,35 @@ class AutoSMSCampaign(models.Model):
 
     # Trigger Configuration
     trigger_type = models.CharField(max_length=30, choices=TRIGGER_TYPE_CHOICES)
-
+    
     # For expiring triggers: hours before expiry
     hours_before_expiry = models.IntegerField(
         default=24,
-        help_text="For 'access_expiring' trigger: hours before expiry to send SMS",
+        help_text="For 'access_expiring' trigger: hours before expiry to send SMS"
     )
-
+    
     # For scheduled/recurring triggers
     scheduled_time = models.TimeField(
-        null=True, blank=True, help_text="Time of day to send (for scheduled/recurring)"
+        null=True, blank=True,
+        help_text="Time of day to send (for scheduled/recurring)"
     )
     scheduled_date = models.DateField(
-        null=True, blank=True, help_text="Date to send (for one-time scheduled)"
+        null=True, blank=True,
+        help_text="Date to send (for one-time scheduled)"
     )
     day_of_week = models.IntegerField(
-        null=True, blank=True, help_text="0=Monday, 6=Sunday (for weekly recurring)"
+        null=True, blank=True,
+        help_text="0=Monday, 6=Sunday (for weekly recurring)"
     )
     day_of_month = models.IntegerField(
-        null=True, blank=True, help_text="Day of month 1-28 (for monthly recurring)"
+        null=True, blank=True,
+        help_text="Day of month 1-28 (for monthly recurring)"
     )
 
     # Message Template
     message_template = models.TextField(
         max_length=320,
-        help_text="SMS template. Variables: {name}, {phone}, {expiry_date}, {amount}, {bundle}",
+        help_text="SMS template. Variables: {name}, {phone}, {expiry_date}, {amount}, {bundle}"
     )
 
     # Target Audience (for scheduled campaigns)
@@ -1826,26 +1830,23 @@ class AutoSMSCampaign(models.Model):
     def get_recipients_for_scheduled(self):
         """Get recipients for scheduled/recurring campaigns"""
         now = timezone.now()
-        users = User.objects.filter(
-            tenant=self.tenant, phone_number__isnull=False
-        ).exclude(phone_number="")
-
+        users = User.objects.filter(tenant=self.tenant, phone_number__isnull=False).exclude(phone_number="")
+        
         if self.target_active_only:
             users = users.filter(is_active=True, paid_until__gte=now)
         elif self.target_expired_only:
             users = users.filter(paid_until__lt=now)
-
+        
         return users
 
     def calculate_next_run(self):
         """Calculate next run time for recurring campaigns"""
         now = timezone.now()
-
+        
         if self.trigger_type == "scheduled":
             # One-time: combine date and time
             if self.scheduled_date and self.scheduled_time:
                 from datetime import datetime
-
                 next_run = timezone.make_aware(
                     datetime.combine(self.scheduled_date, self.scheduled_time)
                 )
@@ -1854,24 +1855,19 @@ class AutoSMSCampaign(models.Model):
                 else:
                     self.next_run_at = None
                     self.status = "completed"
-
+        
         elif self.trigger_type == "recurring_daily" and self.scheduled_time:
             # Daily: next occurrence of scheduled_time
             next_run = now.replace(
                 hour=self.scheduled_time.hour,
                 minute=self.scheduled_time.minute,
-                second=0,
-                microsecond=0,
+                second=0, microsecond=0
             )
             if next_run <= now:
                 next_run += timedelta(days=1)
             self.next_run_at = next_run
-
-        elif (
-            self.trigger_type == "recurring_weekly"
-            and self.scheduled_time
-            and self.day_of_week is not None
-        ):
+        
+        elif self.trigger_type == "recurring_weekly" and self.scheduled_time and self.day_of_week is not None:
             # Weekly: next occurrence of day_of_week at scheduled_time
             days_ahead = self.day_of_week - now.weekday()
             if days_ahead <= 0:
@@ -1879,25 +1875,18 @@ class AutoSMSCampaign(models.Model):
             next_run = now.replace(
                 hour=self.scheduled_time.hour,
                 minute=self.scheduled_time.minute,
-                second=0,
-                microsecond=0,
+                second=0, microsecond=0
             ) + timedelta(days=days_ahead)
             self.next_run_at = next_run
-
-        elif (
-            self.trigger_type == "recurring_monthly"
-            and self.scheduled_time
-            and self.day_of_month
-        ):
+        
+        elif self.trigger_type == "recurring_monthly" and self.scheduled_time and self.day_of_month:
             # Monthly: next occurrence of day_of_month at scheduled_time
             from calendar import monthrange
-
             next_run = now.replace(
                 day=min(self.day_of_month, monthrange(now.year, now.month)[1]),
                 hour=self.scheduled_time.hour,
                 minute=self.scheduled_time.minute,
-                second=0,
-                microsecond=0,
+                second=0, microsecond=0
             )
             if next_run <= now:
                 # Move to next month
@@ -1906,15 +1895,17 @@ class AutoSMSCampaign(models.Model):
                 else:
                     next_run = next_run.replace(month=now.month + 1)
             self.next_run_at = next_run
-
+        
         self.save(update_fields=["next_run_at", "status"])
 
 
 class AutoSMSLog(models.Model):
     """Log of auto SMS campaign executions"""
-
+    
     campaign = models.ForeignKey(
-        AutoSMSCampaign, on_delete=models.CASCADE, related_name="execution_logs"
+        AutoSMSCampaign,
+        on_delete=models.CASCADE,
+        related_name="execution_logs"
     )
     trigger_event = models.CharField(max_length=50)
     recipient_phone = models.CharField(max_length=15)
@@ -1922,7 +1913,7 @@ class AutoSMSLog(models.Model):
     success = models.BooleanField(default=False)
     error_message = models.TextField(blank=True)
     triggered_at = models.DateTimeField(auto_now_add=True)
-
+    
     # Related objects (optional)
     related_user = models.ForeignKey(
         "User", on_delete=models.SET_NULL, null=True, blank=True
@@ -1972,26 +1963,27 @@ class TenantWebhook(models.Model):
     # Webhook Configuration
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, related_name="webhooks"
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="webhooks"
     )
     name = models.CharField(max_length=100)
-    url = models.URLField(
-        max_length=500, help_text="HTTPS URL to receive webhook events"
-    )
-
+    url = models.URLField(max_length=500, help_text="HTTPS URL to receive webhook events")
+    
     # Authentication
     secret_key = models.CharField(
-        max_length=64,
-        blank=True,
-        help_text="Secret key for HMAC signature verification",
+        max_length=64, blank=True,
+        help_text="Secret key for HMAC signature verification"
     )
     auth_header = models.CharField(
-        max_length=255, blank=True, help_text="Optional Authorization header value"
+        max_length=255, blank=True,
+        help_text="Optional Authorization header value"
     )
 
     # Event Subscription
     events = models.JSONField(
-        default=list, help_text="List of event types to subscribe to"
+        default=list,
+        help_text="List of event types to subscribe to"
     )
 
     # Status & Health
@@ -2032,27 +2024,22 @@ class TenantWebhook(models.Model):
         self.last_failure_at = timezone.now()
         self.last_failure_reason = reason
         self.consecutive_failures += 1
-
+        
         if self.consecutive_failures >= 3:
             self.status = "failing"
         if self.consecutive_failures >= 10:
             self.status = "disabled"
             self.is_active = False
-
-        self.save(
-            update_fields=[
-                "last_failure_at",
-                "last_failure_reason",
-                "consecutive_failures",
-                "status",
-                "is_active",
-            ]
-        )
+        
+        self.save(update_fields=[
+            "last_failure_at", "last_failure_reason", 
+            "consecutive_failures", "status", "is_active"
+        ])
 
 
 class WebhookDelivery(models.Model):
     """Log of webhook delivery attempts"""
-
+    
     STATUS_CHOICES = [
         ("pending", "Pending"),
         ("success", "Delivered"),
@@ -2061,27 +2048,29 @@ class WebhookDelivery(models.Model):
     ]
 
     webhook = models.ForeignKey(
-        TenantWebhook, on_delete=models.CASCADE, related_name="deliveries"
+        TenantWebhook,
+        on_delete=models.CASCADE,
+        related_name="deliveries"
     )
-
+    
     # Event Data
     event_type = models.CharField(max_length=50)
     event_id = models.UUIDField(default=uuid.uuid4)
     payload = models.JSONField()
-
+    
     # Delivery Status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     attempts = models.IntegerField(default=0)
     max_attempts = models.IntegerField(default=5)
-
+    
     # Response
     response_status_code = models.IntegerField(null=True, blank=True)
     response_body = models.TextField(blank=True)
     response_time_ms = models.IntegerField(null=True, blank=True)
-
+    
     # Error Tracking
     error_message = models.TextField(blank=True)
-
+    
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
@@ -2103,11 +2092,11 @@ class WebhookDelivery(models.Model):
             self.status = "failed"
             self.save()
             return
-
+        
         # Exponential backoff: 1min, 5min, 15min, 30min, 60min
         delays = [60, 300, 900, 1800, 3600]
         delay = delays[min(self.attempts, len(delays) - 1)]
-
+        
         self.status = "retrying"
         self.next_retry_at = timezone.now() + timedelta(seconds=delay)
         self.save()
@@ -2125,37 +2114,41 @@ class TenantAnalyticsSnapshot(models.Model):
     """
 
     tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, related_name="analytics_snapshots"
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="analytics_snapshots"
     )
     date = models.DateField(db_index=True)
-
+    
     # User Metrics
     total_users = models.IntegerField(default=0)
     active_users = models.IntegerField(default=0)
     new_users = models.IntegerField(default=0)
     expired_users = models.IntegerField(default=0)
-
+    
     # Revenue Metrics
     total_revenue = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     payment_count = models.IntegerField(default=0)
     avg_payment_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-
+    
     # Voucher Metrics
     vouchers_generated = models.IntegerField(default=0)
     vouchers_redeemed = models.IntegerField(default=0)
-
+    
     # Device Metrics
     total_devices = models.IntegerField(default=0)
     unique_devices_connected = models.IntegerField(default=0)
-
+    
     # Bundle Performance
     bundle_breakdown = models.JSONField(
-        default=dict, help_text="Revenue and sales count per bundle"
+        default=dict,
+        help_text="Revenue and sales count per bundle"
     )
-
+    
     # Payment Channel Breakdown
     payment_channel_breakdown = models.JSONField(
-        default=dict, help_text="Revenue per payment channel (M-Pesa, TigoPesa, etc.)"
+        default=dict,
+        help_text="Revenue per payment channel (M-Pesa, TigoPesa, etc.)"
     )
 
     # Timestamps
@@ -2176,13 +2169,13 @@ class TenantAnalyticsSnapshot(models.Model):
         """Generate or update analytics snapshot for a specific date"""
         from django.db.models import Count, Sum, Avg
         from datetime import datetime
-
+        
         start_of_day = timezone.make_aware(datetime.combine(date, datetime.min.time()))
         end_of_day = start_of_day + timedelta(days=1)
-
+        
         # Get or create snapshot
         snapshot, _ = cls.objects.get_or_create(tenant=tenant, date=date)
-
+        
         # User metrics
         snapshot.total_users = User.objects.filter(tenant=tenant).count()
         snapshot.active_users = User.objects.filter(
@@ -2194,60 +2187,68 @@ class TenantAnalyticsSnapshot(models.Model):
         snapshot.expired_users = User.objects.filter(
             tenant=tenant, paid_until__lt=start_of_day
         ).count()
-
+        
         # Revenue metrics
         payments = Payment.objects.filter(
             tenant=tenant,
             status="completed",
             completed_at__gte=start_of_day,
-            completed_at__lt=end_of_day,
+            completed_at__lt=end_of_day
         )
         revenue_data = payments.aggregate(
-            total=Sum("amount"), count=Count("id"), avg=Avg("amount")
+            total=Sum('amount'),
+            count=Count('id'),
+            avg=Avg('amount')
         )
-        snapshot.total_revenue = revenue_data["total"] or 0
-        snapshot.payment_count = revenue_data["count"] or 0
-        snapshot.avg_payment_amount = revenue_data["avg"] or 0
-
+        snapshot.total_revenue = revenue_data['total'] or 0
+        snapshot.payment_count = revenue_data['count'] or 0
+        snapshot.avg_payment_amount = revenue_data['avg'] or 0
+        
         # Voucher metrics
         snapshot.vouchers_generated = Voucher.objects.filter(
-            tenant=tenant, created_at__gte=start_of_day, created_at__lt=end_of_day
+            tenant=tenant,
+            created_at__gte=start_of_day,
+            created_at__lt=end_of_day
         ).count()
         snapshot.vouchers_redeemed = Voucher.objects.filter(
-            tenant=tenant, used_at__gte=start_of_day, used_at__lt=end_of_day
+            tenant=tenant,
+            used_at__gte=start_of_day,
+            used_at__lt=end_of_day
         ).count()
-
+        
         # Device metrics
         snapshot.total_devices = Device.objects.filter(tenant=tenant).count()
         snapshot.unique_devices_connected = Device.objects.filter(
-            tenant=tenant, last_seen__gte=start_of_day, last_seen__lt=end_of_day
+            tenant=tenant,
+            last_seen__gte=start_of_day,
+            last_seen__lt=end_of_day
         ).count()
-
+        
         # Bundle breakdown
-        bundle_data = payments.values("bundle__name").annotate(
-            revenue=Sum("amount"), count=Count("id")
+        bundle_data = payments.values('bundle__name').annotate(
+            revenue=Sum('amount'),
+            count=Count('id')
         )
         snapshot.bundle_breakdown = {
-            item["bundle__name"]
-            or "Unknown": {
-                "revenue": float(item["revenue"] or 0),
-                "count": item["count"],
+            item['bundle__name'] or 'Unknown': {
+                'revenue': float(item['revenue'] or 0),
+                'count': item['count']
             }
             for item in bundle_data
         }
-
+        
         # Payment channel breakdown
-        channel_data = payments.values("payment_channel").annotate(
-            revenue=Sum("amount"), count=Count("id")
+        channel_data = payments.values('payment_channel').annotate(
+            revenue=Sum('amount'),
+            count=Count('id')
         )
         snapshot.payment_channel_breakdown = {
-            item["payment_channel"]
-            or "Unknown": {
-                "revenue": float(item["revenue"] or 0),
-                "count": item["count"],
+            item['payment_channel'] or 'Unknown': {
+                'revenue': float(item['revenue'] or 0),
+                'count': item['count']
             }
             for item in channel_data
         }
-
+        
         snapshot.save()
         return snapshot

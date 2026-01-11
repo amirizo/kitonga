@@ -543,22 +543,12 @@ urlpatterns = [
         name="portal_auto_sms_campaigns",
     ),
     path(
-        "portal/auto-sms/campaigns/<uuid:campaign_id>/",
+        "portal/auto-sms/campaigns/<int:campaign_id>/",
         portal_views.portal_auto_sms_campaign_detail,
         name="portal_auto_sms_campaign_detail",
     ),
     path(
-        "portal/auto-sms/campaigns/<uuid:campaign_id>/toggle/",
-        portal_views.portal_auto_sms_campaign_toggle,
-        name="portal_auto_sms_campaign_toggle",
-    ),
-    path(
-        "portal/auto-sms/campaigns/<uuid:campaign_id>/preview/",
-        portal_views.portal_auto_sms_campaign_preview,
-        name="portal_auto_sms_campaign_preview",
-    ),
-    path(
-        "portal/auto-sms/campaigns/<uuid:campaign_id>/logs/",
+        "portal/auto-sms/campaigns/<int:campaign_id>/logs/",
         portal_views.portal_auto_sms_campaign_logs,
         name="portal_auto_sms_logs",
     ),

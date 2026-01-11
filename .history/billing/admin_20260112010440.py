@@ -1243,36 +1243,20 @@ class TenantWebhookAdmin(admin.ModelAdmin):
         "url_display",
         "events_count",
         "is_active",
-        "last_success_at",
+        "last_triggered_at",
         "success_rate",
     ]
-    list_filter = ["is_active", "status", "tenant", "created_at"]
+    list_filter = ["is_active", "tenant", "created_at"]
     search_fields = ["name", "url", "tenant__business_name"]
-    readonly_fields = [
-        "secret_key",
-        "last_success_at",
-        "last_failure_at",
-        "created_at",
-        "updated_at",
-    ]
+    readonly_fields = ["secret", "last_triggered_at", "created_at", "updated_at"]
     ordering = ["-created_at"]
 
     fieldsets = (
-        (
-            "Webhook Info",
-            {"fields": ("tenant", "name", "url", "secret_key", "is_active", "status")},
-        ),
+        ("Webhook Info", {"fields": ("tenant", "name", "url", "secret", "is_active")}),
         ("Events", {"fields": ("events",)}),
         (
             "Timestamps",
-            {
-                "fields": (
-                    "last_success_at",
-                    "last_failure_at",
-                    "created_at",
-                    "updated_at",
-                )
-            },
+            {"fields": ("last_triggered_at", "created_at", "updated_at")},
         ),
     )
 
@@ -1313,37 +1297,32 @@ class WebhookDeliveryAdmin(admin.ModelAdmin):
         "webhook",
         "event_type",
         "success_badge",
-        "response_status_code",
-        "attempts",
+        "response_code",
+        "retry_count",
         "created_at",
     ]
-    list_filter = ["status", "event_type", "webhook__tenant"]
+    list_filter = ["success", "event_type", "response_code", "webhook__tenant"]
     search_fields = ["webhook__name", "webhook__tenant__business_name", "event_type"]
     readonly_fields = [
         "webhook",
         "event_type",
         "payload",
-        "response_status_code",
+        "response_code",
         "response_body",
-        "status",
+        "success",
         "error_message",
-        "attempts",
+        "retry_count",
         "created_at",
     ]
     ordering = ["-created_at"]
 
     def success_badge(self, obj):
-        if obj.status == "success":
+        if obj.success:
             return format_html(
                 '<span style="background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px;">SUCCESS</span>'
             )
-        elif obj.status == "failed":
-            return format_html(
-                '<span style="background: #ef4444; color: white; padding: 2px 8px; border-radius: 4px;">FAILED</span>'
-            )
         return format_html(
-            '<span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px;">{}</span>',
-            obj.status.upper(),
+            '<span style="background: #ef4444; color: white; padding: 2px 8px; border-radius: 4px;">FAILED</span>'
         )
 
     success_badge.short_description = "Status"
@@ -1451,7 +1430,7 @@ class TenantAnalyticsSnapshotAdmin(admin.ModelAdmin):
         "total_users",
         "active_users",
         "total_revenue_display",
-        "vouchers_generated",
+        "vouchers_sold",
     ]
     list_filter = ["tenant", "date"]
     search_fields = ["tenant__business_name"]
@@ -1463,11 +1442,11 @@ class TenantAnalyticsSnapshotAdmin(admin.ModelAdmin):
         "new_users",
         "expired_users",
         "total_revenue",
-        "payment_count",
-        "vouchers_generated",
-        "vouchers_redeemed",
-        "bundle_breakdown",
-        "payment_channel_breakdown",
+        "vouchers_sold",
+        "vouchers_used",
+        "router_data",
+        "bundle_data",
+        "hourly_data",
         "created_at",
     ]
     ordering = ["-date", "tenant"]

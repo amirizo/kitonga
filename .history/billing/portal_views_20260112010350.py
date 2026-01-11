@@ -3,7 +3,6 @@ Tenant Portal Views for Kitonga Wi-Fi Billing System
 Phase 3: Self-service dashboard, router wizard, analytics, and white-label customization
 """
 
-from datetime import timedelta
 from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import AllowAny
@@ -3748,12 +3747,12 @@ def portal_auto_sms_campaigns(request):
 
     if request.method == "GET":
         campaigns = AutoSMSCampaign.objects.filter(tenant=tenant)
-
+        
         # Filter by status if provided
         status_filter = request.query_params.get("status")
         if status_filter:
             campaigns = campaigns.filter(status=status_filter)
-
+        
         campaign_list = [
             {
                 "id": str(c.id),
@@ -3763,22 +3762,18 @@ def portal_auto_sms_campaigns(request):
                 "status": c.status,
                 "total_sent": c.total_sent,
                 "total_failed": c.total_failed,
-                "last_triggered_at": (
-                    c.last_triggered_at.isoformat() if c.last_triggered_at else None
-                ),
+                "last_triggered_at": c.last_triggered_at.isoformat() if c.last_triggered_at else None,
                 "next_run_at": c.next_run_at.isoformat() if c.next_run_at else None,
                 "created_at": c.created_at.isoformat(),
             }
             for c in campaigns
         ]
-
-        return Response(
-            {
-                "success": True,
-                "campaigns": campaign_list,
-                "total_count": campaigns.count(),
-            }
-        )
+        
+        return Response({
+            "success": True,
+            "campaigns": campaign_list,
+            "total_count": campaigns.count()
+        })
 
     elif request.method == "POST":
         serializer = AutoSMSCampaignCreateSerializer(data=request.data)
@@ -3804,16 +3799,11 @@ def portal_auto_sms_campaigns(request):
             target_all_users=data.get("target_all_users", True),
             target_active_only=data.get("target_active_only", False),
             target_expired_only=data.get("target_expired_only", False),
-            status="draft",
+            status="draft"
         )
 
         # Calculate next run for scheduled campaigns
-        if campaign.trigger_type in [
-            "scheduled",
-            "recurring_daily",
-            "recurring_weekly",
-            "recurring_monthly",
-        ]:
+        if campaign.trigger_type in ["scheduled", "recurring_daily", "recurring_weekly", "recurring_monthly"]:
             campaign.calculate_next_run()
 
         logger.info(f"Tenant {tenant.slug} created auto SMS campaign: {campaign.name}")
@@ -3862,53 +3852,35 @@ def portal_auto_sms_campaign_detail(request, campaign_id):
         )
 
     if request.method == "GET":
-        return Response(
-            {
-                "success": True,
-                "campaign": {
-                    "id": str(campaign.id),
-                    "name": campaign.name,
-                    "description": campaign.description,
-                    "trigger_type": campaign.trigger_type,
-                    "trigger_type_display": campaign.get_trigger_type_display(),
-                    "hours_before_expiry": campaign.hours_before_expiry,
-                    "scheduled_time": (
-                        str(campaign.scheduled_time)
-                        if campaign.scheduled_time
-                        else None
-                    ),
-                    "scheduled_date": (
-                        campaign.scheduled_date.isoformat()
-                        if campaign.scheduled_date
-                        else None
-                    ),
-                    "day_of_week": campaign.day_of_week,
-                    "day_of_month": campaign.day_of_month,
-                    "message_template": campaign.message_template,
-                    "target_all_users": campaign.target_all_users,
-                    "target_active_only": campaign.target_active_only,
-                    "target_expired_only": campaign.target_expired_only,
-                    "status": campaign.status,
-                    "total_sent": campaign.total_sent,
-                    "total_failed": campaign.total_failed,
-                    "last_triggered_at": (
-                        campaign.last_triggered_at.isoformat()
-                        if campaign.last_triggered_at
-                        else None
-                    ),
-                    "next_run_at": (
-                        campaign.next_run_at.isoformat()
-                        if campaign.next_run_at
-                        else None
-                    ),
-                    "created_at": campaign.created_at.isoformat(),
-                },
+        return Response({
+            "success": True,
+            "campaign": {
+                "id": str(campaign.id),
+                "name": campaign.name,
+                "description": campaign.description,
+                "trigger_type": campaign.trigger_type,
+                "trigger_type_display": campaign.get_trigger_type_display(),
+                "hours_before_expiry": campaign.hours_before_expiry,
+                "scheduled_time": str(campaign.scheduled_time) if campaign.scheduled_time else None,
+                "scheduled_date": campaign.scheduled_date.isoformat() if campaign.scheduled_date else None,
+                "day_of_week": campaign.day_of_week,
+                "day_of_month": campaign.day_of_month,
+                "message_template": campaign.message_template,
+                "target_all_users": campaign.target_all_users,
+                "target_active_only": campaign.target_active_only,
+                "target_expired_only": campaign.target_expired_only,
+                "status": campaign.status,
+                "total_sent": campaign.total_sent,
+                "total_failed": campaign.total_failed,
+                "last_triggered_at": campaign.last_triggered_at.isoformat() if campaign.last_triggered_at else None,
+                "next_run_at": campaign.next_run_at.isoformat() if campaign.next_run_at else None,
+                "created_at": campaign.created_at.isoformat(),
             }
-        )
+        })
 
     elif request.method == "PUT":
         data = request.data
-
+        
         # Update fields
         if "name" in data:
             campaign.name = data["name"]
@@ -3928,32 +3900,28 @@ def portal_auto_sms_campaign_detail(request, campaign_id):
             campaign.target_active_only = data["target_active_only"]
         if "target_expired_only" in data:
             campaign.target_expired_only = data["target_expired_only"]
-
+        
         campaign.save()
-
+        
         # Recalculate next run if needed
-        if campaign.trigger_type in [
-            "scheduled",
-            "recurring_daily",
-            "recurring_weekly",
-            "recurring_monthly",
-        ]:
+        if campaign.trigger_type in ["scheduled", "recurring_daily", "recurring_weekly", "recurring_monthly"]:
             campaign.calculate_next_run()
 
         logger.info(f"Tenant {tenant.slug} updated auto SMS campaign: {campaign.name}")
 
-        return Response(
-            {
-                "success": True,
-                "message": "Campaign updated",
-            }
-        )
+        return Response({
+            "success": True,
+            "message": "Campaign updated",
+        })
 
     elif request.method == "DELETE":
         campaign_name = campaign.name
         campaign.delete()
         logger.info(f"Tenant {tenant.slug} deleted auto SMS campaign: {campaign_name}")
-        return Response({"success": True, "message": "Campaign deleted"})
+        return Response({
+            "success": True,
+            "message": "Campaign deleted"
+        })
 
 
 @api_view(["GET"])
@@ -3986,7 +3954,7 @@ def portal_auto_sms_campaign_logs(request, campaign_id):
 
     logs = AutoSMSLog.objects.filter(campaign=campaign).order_by("-triggered_at")
     total_count = logs.count()
-
+    
     start = (page - 1) * page_size
     end = start + page_size
     logs_page = logs[start:end]
@@ -3996,11 +3964,7 @@ def portal_auto_sms_campaign_logs(request, campaign_id):
             "id": log.id,
             "trigger_event": log.trigger_event,
             "recipient_phone": log.recipient_phone,
-            "message_sent": (
-                log.message_sent[:100] + "..."
-                if len(log.message_sent) > 100
-                else log.message_sent
-            ),
+            "message_sent": log.message_sent[:100] + "..." if len(log.message_sent) > 100 else log.message_sent,
             "success": log.success,
             "error_message": log.error_message,
             "triggered_at": log.triggered_at.isoformat(),
@@ -4008,166 +3972,21 @@ def portal_auto_sms_campaign_logs(request, campaign_id):
         for log in logs_page
     ]
 
-    return Response(
-        {
-            "success": True,
-            "logs": log_list,
-            "pagination": {
-                "page": page,
-                "page_size": page_size,
-                "total_count": total_count,
-                "total_pages": (total_count + page_size - 1) // page_size,
-            },
-            "summary": {
-                "total_sent": campaign.total_sent,
-                "total_failed": campaign.total_failed,
-                "last_triggered": (
-                    campaign.last_triggered_at.isoformat()
-                    if campaign.last_triggered_at
-                    else None
-                ),
-            },
+    return Response({
+        "success": True,
+        "logs": log_list,
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total_count": total_count,
+            "total_pages": (total_count + page_size - 1) // page_size,
+        },
+        "summary": {
+            "total_sent": campaign.total_sent,
+            "total_failed": campaign.total_failed,
+            "last_triggered": campaign.last_triggered_at.isoformat() if campaign.last_triggered_at else None
         }
-    )
-
-
-@api_view(["POST"])
-@permission_classes([TenantAPIKeyPermission])
-def portal_auto_sms_campaign_toggle(request, campaign_id):
-    """Toggle campaign status between active and paused"""
-    from .models import AutoSMSCampaign
-
-    tenant = request.tenant
-
-    # Check permission
-    allowed, error = check_auto_sms_permission(tenant)
-    if not allowed:
-        return Response(
-            {"success": False, "error": error},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
-    try:
-        campaign = AutoSMSCampaign.objects.get(id=campaign_id, tenant=tenant)
-    except AutoSMSCampaign.DoesNotExist:
-        return Response(
-            {"success": False, "error": "Campaign not found"},
-            status=status.HTTP_404_NOT_FOUND,
-        )
-
-    # Toggle status
-    if campaign.status == "active":
-        campaign.status = "paused"
-        new_status = "paused"
-    elif campaign.status in ["paused", "draft"]:
-        campaign.status = "active"
-        new_status = "active"
-        # Calculate next run for time-based triggers
-        if campaign.trigger_type in [
-            "scheduled",
-            "recurring_daily",
-            "recurring_weekly",
-            "recurring_monthly",
-        ]:
-            campaign.calculate_next_run()
-    else:
-        return Response(
-            {
-                "success": False,
-                "error": f"Cannot toggle campaign with status: {campaign.status}",
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    campaign.save()
-
-    logger.info(
-        f"Tenant {tenant.slug} toggled campaign {campaign.name} to {new_status}"
-    )
-
-    return Response(
-        {
-            "success": True,
-            "message": f"Campaign {new_status}",
-            "campaign": {
-                "id": str(campaign.id),
-                "name": campaign.name,
-                "status": campaign.status,
-                "next_run_at": (
-                    campaign.next_run_at.isoformat() if campaign.next_run_at else None
-                ),
-            },
-        }
-    )
-
-
-@api_view(["GET"])
-@permission_classes([TenantAPIKeyPermission])
-def portal_auto_sms_campaign_preview(request, campaign_id):
-    """Preview how many users would receive SMS from this campaign"""
-    from .models import AutoSMSCampaign, User
-
-    tenant = request.tenant
-
-    # Check permission
-    allowed, error = check_auto_sms_permission(tenant)
-    if not allowed:
-        return Response(
-            {"success": False, "error": error},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
-    try:
-        campaign = AutoSMSCampaign.objects.get(id=campaign_id, tenant=tenant)
-    except AutoSMSCampaign.DoesNotExist:
-        return Response(
-            {"success": False, "error": "Campaign not found"},
-            status=status.HTTP_404_NOT_FOUND,
-        )
-
-    # Build recipient query based on targeting
-    users = User.objects.filter(tenant=tenant, phone_number__isnull=False)
-
-    if campaign.target_active_only:
-        users = users.filter(paid_until__gt=timezone.now())
-    elif campaign.target_expired_only:
-        users = users.filter(paid_until__lt=timezone.now())
-
-    recipient_count = users.count()
-
-    # Sample message preview
-    sample_message = campaign.message_template
-    sample_user = users.first()
-    if sample_user:
-        # Replace template variables
-        sample_message = sample_message.replace(
-            "{name}", sample_user.name or "Customer"
-        )
-        sample_message = sample_message.replace(
-            "{phone}", sample_user.phone_number or ""
-        )
-        sample_message = sample_message.replace(
-            "{business}", tenant.business_name or ""
-        )
-
-    return Response(
-        {
-            "success": True,
-            "preview": {
-                "recipient_count": recipient_count,
-                "sample_message": sample_message,
-                "targeting": {
-                    "all_users": campaign.target_all_users,
-                    "active_only": campaign.target_active_only,
-                    "expired_only": campaign.target_expired_only,
-                },
-                "trigger_info": {
-                    "type": campaign.trigger_type,
-                    "display": campaign.get_trigger_type_display(),
-                },
-            },
-        }
-    )
+    })
 
 
 # =============================================================================
@@ -4205,29 +4024,29 @@ def portal_webhooks(request):
 
     if request.method == "GET":
         webhooks = TenantWebhook.objects.filter(tenant=tenant)
-
+        
         webhook_list = [
             {
-                "id": str(w.id),
+                "id": w.id,
                 "name": w.name,
                 "url": w.url,
                 "events": w.events,
                 "is_active": w.is_active,
-                "last_success_at": (
-                    w.last_success_at.isoformat() if w.last_success_at else None
-                ),
+                "last_triggered_at": w.last_triggered_at.isoformat() if w.last_triggered_at else None,
                 "created_at": w.created_at.isoformat(),
             }
             for w in webhooks
         ]
-
-        return Response(
-            {"success": True, "webhooks": webhook_list, "total_count": webhooks.count()}
-        )
+        
+        return Response({
+            "success": True,
+            "webhooks": webhook_list,
+            "total_count": webhooks.count()
+        })
 
     elif request.method == "POST":
         data = request.data
-
+        
         # Validate required fields
         if not data.get("name"):
             return Response(
@@ -4246,12 +4065,12 @@ def portal_webhooks(request):
             )
 
         import secrets
-
         webhook = TenantWebhook.objects.create(
             tenant=tenant,
             name=data["name"],
             url=data["url"],
             events=data["events"],
+            secret=secrets.token_hex(32),
             is_active=data.get("is_active", True),
         )
 
@@ -4262,10 +4081,10 @@ def portal_webhooks(request):
                 "success": True,
                 "message": "Webhook created",
                 "webhook": {
-                    "id": str(webhook.id),
+                    "id": webhook.id,
                     "name": webhook.name,
                     "url": webhook.url,
-                    "secret": webhook.secret_key,
+                    "secret": webhook.secret,
                     "events": webhook.events,
                 },
             },
@@ -4302,29 +4121,23 @@ def portal_webhook_detail(request, webhook_id):
         )
 
     if request.method == "GET":
-        return Response(
-            {
-                "success": True,
-                "webhook": {
-                    "id": str(webhook.id),
-                    "name": webhook.name,
-                    "url": webhook.url,
-                    "secret": webhook.secret_key,
-                    "events": webhook.events,
-                    "is_active": webhook.is_active,
-                    "last_success_at": (
-                        webhook.last_success_at.isoformat()
-                        if webhook.last_success_at
-                        else None
-                    ),
-                    "created_at": webhook.created_at.isoformat(),
-                },
+        return Response({
+            "success": True,
+            "webhook": {
+                "id": webhook.id,
+                "name": webhook.name,
+                "url": webhook.url,
+                "secret": webhook.secret,
+                "events": webhook.events,
+                "is_active": webhook.is_active,
+                "last_triggered_at": webhook.last_triggered_at.isoformat() if webhook.last_triggered_at else None,
+                "created_at": webhook.created_at.isoformat(),
             }
-        )
+        })
 
     elif request.method == "PUT":
         data = request.data
-
+        
         if "name" in data:
             webhook.name = data["name"]
         if "url" in data:
@@ -4333,23 +4146,24 @@ def portal_webhook_detail(request, webhook_id):
             webhook.events = data["events"]
         if "is_active" in data:
             webhook.is_active = data["is_active"]
-
+        
         webhook.save()
 
         logger.info(f"Tenant {tenant.slug} updated webhook: {webhook.name}")
 
-        return Response(
-            {
-                "success": True,
-                "message": "Webhook updated",
-            }
-        )
+        return Response({
+            "success": True,
+            "message": "Webhook updated",
+        })
 
     elif request.method == "DELETE":
         webhook_name = webhook.name
         webhook.delete()
         logger.info(f"Tenant {tenant.slug} deleted webhook: {webhook_name}")
-        return Response({"success": True, "message": "Webhook deleted"})
+        return Response({
+            "success": True,
+            "message": "Webhook deleted"
+        })
 
 
 @api_view(["POST"])
@@ -4377,66 +4191,29 @@ def portal_webhook_test(request, webhook_id):
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    # Send test webhook directly
-    import requests
-    import time
-    import json
-
+    # Send test webhook
+    service = WebhookService(tenant)
     test_payload = {
-        "event": "test",
         "test": True,
         "message": "This is a test webhook from Kitonga",
         "tenant": tenant.business_name,
         "timestamp": timezone.now().isoformat(),
     }
-
-    payload_json = json.dumps(test_payload, default=str)
-
-    # Generate signature
-    signature = WebhookService.generate_signature(payload_json, webhook.secret_key)
-
-    headers = {
-        "Content-Type": "application/json",
-        "X-Webhook-Signature": signature,
-        "X-Webhook-Event": "test",
-        "User-Agent": "Kitonga-Webhook/1.0",
-    }
-
-    try:
-        response = requests.post(
-            webhook.url,
-            data=payload_json,
-            headers=headers,
-            timeout=10,
-        )
-        success = response.status_code in [200, 201, 202, 204]
-        response_code = response.status_code
-        error_msg = None if success else response.text[:500]
-    except requests.exceptions.Timeout:
-        success = False
-        response_code = None
-        error_msg = "Request timed out"
-    except Exception as e:
-        success = False
-        response_code = None
-        error_msg = str(e)
+    
+    success, response_code, error_msg = service._send_webhook(webhook, "test", test_payload)
 
     if success:
-        return Response(
-            {
-                "success": True,
-                "message": "Test webhook sent successfully",
-                "response_code": response_code,
-            }
-        )
+        return Response({
+            "success": True,
+            "message": "Test webhook sent successfully",
+            "response_code": response_code,
+        })
     else:
-        return Response(
-            {
-                "success": False,
-                "error": f"Webhook failed: {error_msg}",
-                "response_code": response_code,
-            }
-        )
+        return Response({
+            "success": False,
+            "error": f"Webhook failed: {error_msg}",
+            "response_code": response_code,
+        })
 
 
 @api_view(["GET"])
@@ -4469,51 +4246,45 @@ def portal_webhook_deliveries(request, webhook_id):
 
     deliveries = WebhookDelivery.objects.filter(webhook=webhook).order_by("-created_at")
     total_count = deliveries.count()
-
+    
     start = (page - 1) * page_size
     end = start + page_size
     deliveries_page = deliveries[start:end]
 
     delivery_list = [
         {
-            "id": str(d.id),
+            "id": d.id,
             "event_type": d.event_type,
-            "event_id": str(d.event_id),
-            "status": d.status,
-            "response_status_code": d.response_status_code,
-            "response_time_ms": d.response_time_ms,
+            "success": d.success,
+            "response_code": d.response_code,
             "error_message": d.error_message,
-            "attempts": d.attempts,
-            "max_attempts": d.max_attempts,
+            "retry_count": d.retry_count,
             "created_at": d.created_at.isoformat(),
-            "delivered_at": d.delivered_at.isoformat() if d.delivered_at else None,
         }
         for d in deliveries_page
     ]
 
     # Success rate
     total = deliveries.count()
-    successful = deliveries.filter(status="success").count()
+    successful = deliveries.filter(success=True).count()
     success_rate = (successful / total * 100) if total > 0 else 0
 
-    return Response(
-        {
-            "success": True,
-            "deliveries": delivery_list,
-            "pagination": {
-                "page": page,
-                "page_size": page_size,
-                "total_count": total_count,
-                "total_pages": (total_count + page_size - 1) // page_size,
-            },
-            "summary": {
-                "total_deliveries": total,
-                "successful": successful,
-                "failed": total - successful,
-                "success_rate": round(success_rate, 1),
-            },
+    return Response({
+        "success": True,
+        "deliveries": delivery_list,
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total_count": total_count,
+            "total_pages": (total_count + page_size - 1) // page_size,
+        },
+        "summary": {
+            "total_deliveries": total,
+            "successful": successful,
+            "failed": total - successful,
+            "success_rate": round(success_rate, 1),
         }
-    )
+    })
 
 
 # =============================================================================
@@ -4555,13 +4326,19 @@ def portal_advanced_analytics(request):
     # User stats
     total_users = User.objects.filter(tenant=tenant).count()
     active_users = User.objects.filter(
-        tenant=tenant, paid_until__gt=timezone.now()
+        tenant=tenant, 
+        access_expires__gt=timezone.now()
     ).count()
-    new_users = User.objects.filter(tenant=tenant, created_at__gte=start_date).count()
+    new_users = User.objects.filter(
+        tenant=tenant, 
+        created_at__gte=start_date
+    ).count()
 
     # Revenue stats
     payments = Payment.objects.filter(
-        tenant=tenant, status="completed", created_at__gte=start_date
+        tenant=tenant, 
+        status="completed",
+        created_at__gte=start_date
     )
     total_revenue = payments.aggregate(total=Sum("amount"))["total"] or 0
     payment_count = payments.count()
@@ -4569,20 +4346,24 @@ def portal_advanced_analytics(request):
 
     # Voucher stats
     vouchers_created = Voucher.objects.filter(
-        tenant=tenant, created_at__gte=start_date
+        tenant=tenant,
+        created_at__gte=start_date
     ).count()
     vouchers_used = Voucher.objects.filter(
-        tenant=tenant, is_used=True, used_at__gte=start_date
+        tenant=tenant,
+        is_used=True,
+        used_at__gte=start_date
     ).count()
 
     # Router stats
     routers = Router.objects.filter(tenant=tenant, is_active=True)
     router_count = routers.count()
-    online_routers = routers.filter(status="online").count()
+    online_routers = routers.filter(is_online=True).count()
 
     # Daily trends
     daily_revenue = (
-        payments.annotate(date=TruncDate("created_at"))
+        payments
+        .annotate(date=TruncDate("created_at"))
         .values("date")
         .annotate(total=Sum("amount"), count=Count("id"))
         .order_by("date")
@@ -4596,58 +4377,45 @@ def portal_advanced_analytics(request):
         .order_by("date")
     )
 
-    return Response(
-        {
-            "success": True,
-            "period": {
-                "days": days,
-                "start_date": start_date.isoformat(),
-                "end_date": timezone.now().isoformat(),
-            },
-            "users": {
-                "total": total_users,
-                "active": active_users,
-                "new": new_users,
-                "expired": total_users - active_users,
-            },
-            "revenue": {
-                "total": float(total_revenue),
-                "payment_count": payment_count,
-                "average_payment": float(avg_payment),
-            },
-            "vouchers": {
-                "created": vouchers_created,
-                "used": vouchers_used,
-                "usage_rate": round(
-                    (
-                        (vouchers_used / vouchers_created * 100)
-                        if vouchers_created > 0
-                        else 0
-                    ),
-                    1,
-                ),
-            },
-            "routers": {
-                "total": router_count,
-                "online": online_routers,
-                "offline": router_count - online_routers,
-            },
-            "trends": {
-                "daily_revenue": [
-                    {
-                        "date": r["date"].isoformat(),
-                        "revenue": float(r["total"]),
-                        "count": r["count"],
-                    }
-                    for r in daily_revenue
-                ],
-                "daily_users": [
-                    {"date": r["date"].isoformat(), "count": r["count"]}
-                    for r in daily_users
-                ],
-            },
+    return Response({
+        "success": True,
+        "period": {
+            "days": days,
+            "start_date": start_date.isoformat(),
+            "end_date": timezone.now().isoformat(),
+        },
+        "users": {
+            "total": total_users,
+            "active": active_users,
+            "new": new_users,
+            "expired": total_users - active_users,
+        },
+        "revenue": {
+            "total": float(total_revenue),
+            "payment_count": payment_count,
+            "average_payment": float(avg_payment),
+        },
+        "vouchers": {
+            "created": vouchers_created,
+            "used": vouchers_used,
+            "usage_rate": round((vouchers_used / vouchers_created * 100) if vouchers_created > 0 else 0, 1),
+        },
+        "routers": {
+            "total": router_count,
+            "online": online_routers,
+            "offline": router_count - online_routers,
+        },
+        "trends": {
+            "daily_revenue": [
+                {"date": r["date"].isoformat(), "revenue": float(r["total"]), "count": r["count"]}
+                for r in daily_revenue
+            ],
+            "daily_users": [
+                {"date": r["date"].isoformat(), "count": r["count"]}
+                for r in daily_users
+            ],
         }
-    )
+    })
 
 
 @api_view(["GET"])
@@ -4679,18 +4447,17 @@ def portal_analytics_trends(request):
     if metric == "revenue":
         data = (
             Payment.objects.filter(
-                tenant=tenant, status="completed", created_at__gte=start_date
+                tenant=tenant, 
+                status="completed",
+                created_at__gte=start_date
             )
             .annotate(period=trunc_func("created_at"))
             .values("period")
             .annotate(value=Sum("amount"))
             .order_by("period")
         )
-        data_list = [
-            {"period": r["period"].isoformat(), "value": float(r["value"])}
-            for r in data
-        ]
-
+        data_list = [{"period": r["period"].isoformat(), "value": float(r["value"])} for r in data]
+    
     elif metric == "users":
         data = (
             User.objects.filter(tenant=tenant, created_at__gte=start_date)
@@ -4699,39 +4466,35 @@ def portal_analytics_trends(request):
             .annotate(value=Count("id"))
             .order_by("period")
         )
-        data_list = [
-            {"period": r["period"].isoformat(), "value": r["value"]} for r in data
-        ]
-
+        data_list = [{"period": r["period"].isoformat(), "value": r["value"]} for r in data]
+    
     elif metric == "payments":
         data = (
             Payment.objects.filter(
-                tenant=tenant, status="completed", created_at__gte=start_date
+                tenant=tenant, 
+                status="completed",
+                created_at__gte=start_date
             )
             .annotate(period=trunc_func("created_at"))
             .values("period")
             .annotate(value=Count("id"))
             .order_by("period")
         )
-        data_list = [
-            {"period": r["period"].isoformat(), "value": r["value"]} for r in data
-        ]
-
+        data_list = [{"period": r["period"].isoformat(), "value": r["value"]} for r in data]
+    
     else:
         return Response(
             {"success": False, "error": "Invalid metric"},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    return Response(
-        {
-            "success": True,
-            "metric": metric,
-            "granularity": granularity,
-            "period": {"days": days, "start_date": start_date.isoformat()},
-            "data": data_list,
-        }
-    )
+    return Response({
+        "success": True,
+        "metric": metric,
+        "granularity": granularity,
+        "period": {"days": days, "start_date": start_date.isoformat()},
+        "data": data_list,
+    })
 
 
 @api_view(["POST"])
@@ -4760,9 +4523,7 @@ def portal_analytics_export(request):
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    data_type = request.data.get(
-        "type", "summary"
-    )  # summary, users, payments, vouchers
+    data_type = request.data.get("type", "summary")  # summary, users, payments, vouchers
     format_type = request.data.get("format", "json")  # json, csv
     days = int(request.data.get("days", 30))
 
@@ -4774,9 +4535,9 @@ def portal_analytics_export(request):
             {
                 "phone": u.phone_number,
                 "created_at": u.created_at.isoformat(),
-                "paid_until": (u.paid_until.isoformat() if u.paid_until else None),
+                "access_expires": u.access_expires.isoformat() if u.access_expires else None,
                 "total_payments": u.total_payments,
-                "is_active": (u.paid_until > timezone.now() if u.paid_until else False),
+                "is_active": u.access_expires > timezone.now() if u.access_expires else False,
             }
             for u in users
         ]
@@ -4788,7 +4549,7 @@ def portal_analytics_export(request):
                 "user_phone": p.user.phone_number if p.user else None,
                 "amount": float(p.amount),
                 "status": p.status,
-                "payment_channel": p.payment_channel,
+                "payment_method": p.payment_method,
                 "created_at": p.created_at.isoformat(),
             }
             for p in payments
@@ -4811,14 +4572,11 @@ def portal_analytics_export(request):
         records = {
             "period": {"days": days, "start_date": start_date.isoformat()},
             "total_users": User.objects.filter(tenant=tenant).count(),
-            "new_users": User.objects.filter(
-                tenant=tenant, created_at__gte=start_date
-            ).count(),
+            "new_users": User.objects.filter(tenant=tenant, created_at__gte=start_date).count(),
             "total_revenue": float(
                 Payment.objects.filter(
                     tenant=tenant, status="completed", created_at__gte=start_date
-                ).aggregate(total=Sum("amount"))["total"]
-                or 0
+                ).aggregate(total=Sum("amount"))["total"] or 0
             ),
             "total_payments": Payment.objects.filter(
                 tenant=tenant, status="completed", created_at__gte=start_date
@@ -4834,26 +4592,22 @@ def portal_analytics_export(request):
         writer.writeheader()
         writer.writerows(records)
         csv_content = output.getvalue()
-
-        return Response(
-            {
-                "success": True,
-                "format": "csv",
-                "data_type": data_type,
-                "content": csv_content,
-                "record_count": len(records),
-            }
-        )
-
-    return Response(
-        {
+        
+        return Response({
             "success": True,
-            "format": "json",
+            "format": "csv",
             "data_type": data_type,
-            "data": records,
-            "record_count": len(records) if isinstance(records, list) else 1,
-        }
-    )
+            "content": csv_content,
+            "record_count": len(records),
+        })
+
+    return Response({
+        "success": True,
+        "format": "json",
+        "data_type": data_type,
+        "data": records,
+        "record_count": len(records) if isinstance(records, list) else 1,
+    })
 
 
 @api_view(["GET"])
@@ -4879,32 +4633,35 @@ def portal_analytics_revenue_breakdown(request):
     # By bundle
     by_bundle = (
         Payment.objects.filter(
-            tenant=tenant,
+            tenant=tenant, 
             status="completed",
             created_at__gte=start_date,
-            bundle__isnull=False,
+            bundle__isnull=False
         )
         .values("bundle__name")
         .annotate(total=Sum("amount"), count=Count("id"))
         .order_by("-total")
     )
 
-    # By payment method (payment_channel in this model)
+    # By payment method
     by_method = (
         Payment.objects.filter(
-            tenant=tenant, status="completed", created_at__gte=start_date
+            tenant=tenant, 
+            status="completed",
+            created_at__gte=start_date
         )
-        .values("payment_channel")
+        .values("payment_method")
         .annotate(total=Sum("amount"), count=Count("id"))
         .order_by("-total")
     )
 
     # By hour of day
     from django.db.models.functions import ExtractHour
-
     by_hour = (
         Payment.objects.filter(
-            tenant=tenant, status="completed", created_at__gte=start_date
+            tenant=tenant, 
+            status="completed",
+            created_at__gte=start_date
         )
         .annotate(hour=ExtractHour("created_at"))
         .values("hour")
@@ -4912,32 +4669,22 @@ def portal_analytics_revenue_breakdown(request):
         .order_by("hour")
     )
 
-    return Response(
-        {
-            "success": True,
-            "period": {"days": days},
-            "by_bundle": [
-                {
-                    "bundle": r["bundle__name"],
-                    "revenue": float(r["total"]),
-                    "count": r["count"],
-                }
-                for r in by_bundle
-            ],
-            "by_payment_method": [
-                {
-                    "method": r["payment_channel"] or "unknown",
-                    "revenue": float(r["total"]),
-                    "count": r["count"],
-                }
-                for r in by_method
-            ],
-            "by_hour": [
-                {"hour": r["hour"], "revenue": float(r["total"]), "count": r["count"]}
-                for r in by_hour
-            ],
-        }
-    )
+    return Response({
+        "success": True,
+        "period": {"days": days},
+        "by_bundle": [
+            {"bundle": r["bundle__name"], "revenue": float(r["total"]), "count": r["count"]}
+            for r in by_bundle
+        ],
+        "by_payment_method": [
+            {"method": r["payment_method"], "revenue": float(r["total"]), "count": r["count"]}
+            for r in by_method
+        ],
+        "by_hour": [
+            {"hour": r["hour"], "revenue": float(r["total"]), "count": r["count"]}
+            for r in by_hour
+        ],
+    })
 
 
 @api_view(["GET"])
@@ -4958,55 +4705,50 @@ def portal_analytics_user_segments(request):
         )
 
     total_users = User.objects.filter(tenant=tenant).count()
-
+    
     # Active vs Expired
-    active = User.objects.filter(tenant=tenant, paid_until__gt=timezone.now()).count()
+    active = User.objects.filter(tenant=tenant, access_expires__gt=timezone.now()).count()
     expired = total_users - active
 
     # By payment frequency
     high_value = User.objects.filter(tenant=tenant, total_payments__gte=5).count()
-    medium_value = User.objects.filter(
-        tenant=tenant, total_payments__gte=2, total_payments__lt=5
-    ).count()
+    medium_value = User.objects.filter(tenant=tenant, total_payments__gte=2, total_payments__lt=5).count()
     low_value = User.objects.filter(tenant=tenant, total_payments=1).count()
     no_payments = User.objects.filter(tenant=tenant, total_payments=0).count()
 
-    # Recently active (based on access logs in last 7 days)
+    # Recently active (last 7 days)
     week_ago = timezone.now() - timedelta(days=7)
-    from billing.models import AccessLog
-
-    recently_active = (
-        User.objects.filter(tenant=tenant, access_logs__timestamp__gte=week_ago)
-        .distinct()
-        .count()
-    )
+    recently_active = User.objects.filter(
+        tenant=tenant, 
+        last_login__gte=week_ago
+    ).count()
 
     # Expiring soon (next 24 hours)
     tomorrow = timezone.now() + timedelta(hours=24)
     expiring_soon = User.objects.filter(
-        tenant=tenant, paid_until__gt=timezone.now(), paid_until__lt=tomorrow
+        tenant=tenant,
+        access_expires__gt=timezone.now(),
+        access_expires__lt=tomorrow
     ).count()
 
-    return Response(
-        {
-            "success": True,
-            "total_users": total_users,
-            "status_segments": {
-                "active": active,
-                "expired": expired,
-            },
-            "value_segments": {
-                "high_value": {"count": high_value, "description": "5+ payments"},
-                "medium_value": {"count": medium_value, "description": "2-4 payments"},
-                "low_value": {"count": low_value, "description": "1 payment"},
-                "no_payments": {"count": no_payments, "description": "No payments"},
-            },
-            "activity_segments": {
-                "recently_active": recently_active,
-                "expiring_soon": expiring_soon,
-            },
+    return Response({
+        "success": True,
+        "total_users": total_users,
+        "status_segments": {
+            "active": active,
+            "expired": expired,
+        },
+        "value_segments": {
+            "high_value": {"count": high_value, "description": "5+ payments"},
+            "medium_value": {"count": medium_value, "description": "2-4 payments"},
+            "low_value": {"count": low_value, "description": "1 payment"},
+            "no_payments": {"count": no_payments, "description": "No payments"},
+        },
+        "activity_segments": {
+            "recently_active": recently_active,
+            "expiring_soon": expiring_soon,
         }
-    )
+    })
 
 
 @api_view(["GET"])
@@ -5034,45 +4776,39 @@ def portal_analytics_router_performance(request):
     router_stats = []
     for router in routers:
         # Users associated with this router
-        user_count = User.objects.filter(tenant=tenant, primary_router=router).count()
-
+        user_count = User.objects.filter(
+            tenant=tenant,
+            router=router
+        ).count()
+        
         # Revenue from users on this router
-        revenue = (
-            Payment.objects.filter(
-                tenant=tenant,
-                status="completed",
-                created_at__gte=start_date,
-                user__primary_router=router,
-            ).aggregate(total=Sum("amount"))["total"]
-            or 0
-        )
+        revenue = Payment.objects.filter(
+            tenant=tenant,
+            status="completed",
+            created_at__gte=start_date,
+            user__router=router
+        ).aggregate(total=Sum("amount"))["total"] or 0
 
-        router_stats.append(
-            {
-                "id": router.id,
-                "name": router.name,
-                "location": router.location.name if router.location else None,
-                "status": router.status,
-                "last_seen": (
-                    router.last_seen.isoformat() if router.last_seen else None
-                ),
-                "user_count": user_count,
-                "revenue": float(revenue),
-            }
-        )
+        router_stats.append({
+            "id": router.id,
+            "name": router.name,
+            "location": router.location.name if router.location else None,
+            "is_online": router.is_online,
+            "last_seen": router.last_seen_at.isoformat() if router.last_seen_at else None,
+            "user_count": user_count,
+            "revenue": float(revenue),
+        })
 
     # Sort by revenue
     router_stats.sort(key=lambda x: x["revenue"], reverse=True)
 
-    return Response(
-        {
-            "success": True,
-            "period": {"days": days},
-            "routers": router_stats,
-            "summary": {
-                "total_routers": routers.count(),
-                "online": routers.filter(status="online").count(),
-                "offline": routers.filter(status="offline").count(),
-            },
+    return Response({
+        "success": True,
+        "period": {"days": days},
+        "routers": router_stats,
+        "summary": {
+            "total_routers": routers.count(),
+            "online": routers.filter(is_online=True).count(),
+            "offline": routers.filter(is_online=False).count(),
         }
-    )
+    })

@@ -522,17 +522,17 @@ urlpatterns = [
         name="portal_webhooks",
     ),
     path(
-        "portal/webhooks/<uuid:webhook_id>/",
+        "portal/webhooks/<int:webhook_id>/",
         portal_views.portal_webhook_detail,
         name="portal_webhook_detail",
     ),
     path(
-        "portal/webhooks/<uuid:webhook_id>/test/",
+        "portal/webhooks/<int:webhook_id>/test/",
         portal_views.portal_webhook_test,
         name="portal_webhook_test",
     ),
     path(
-        "portal/webhooks/<uuid:webhook_id>/deliveries/",
+        "portal/webhooks/<int:webhook_id>/deliveries/",
         portal_views.portal_webhook_deliveries,
         name="portal_webhook_deliveries",
     ),
@@ -543,23 +543,13 @@ urlpatterns = [
         name="portal_auto_sms_campaigns",
     ),
     path(
-        "portal/auto-sms/campaigns/<uuid:campaign_id>/",
+        "portal/auto-sms/campaigns/<int:campaign_id>/",
         portal_views.portal_auto_sms_campaign_detail,
         name="portal_auto_sms_campaign_detail",
     ),
     path(
-        "portal/auto-sms/campaigns/<uuid:campaign_id>/toggle/",
-        portal_views.portal_auto_sms_campaign_toggle,
-        name="portal_auto_sms_campaign_toggle",
-    ),
-    path(
-        "portal/auto-sms/campaigns/<uuid:campaign_id>/preview/",
-        portal_views.portal_auto_sms_campaign_preview,
-        name="portal_auto_sms_campaign_preview",
-    ),
-    path(
-        "portal/auto-sms/campaigns/<uuid:campaign_id>/logs/",
-        portal_views.portal_auto_sms_campaign_logs,
+        "portal/auto-sms/campaigns/<int:campaign_id>/logs/",
+        portal_views.portal_auto_sms_logs,
         name="portal_auto_sms_logs",
     ),
     # Advanced Analytics
