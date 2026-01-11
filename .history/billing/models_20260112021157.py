@@ -464,7 +464,6 @@ class RouterMonitoringSnapshot(models.Model):
     """
     Periodic snapshots of router health metrics for monitoring
     """
-
     router = models.ForeignKey(
         Router, on_delete=models.CASCADE, related_name="monitoring_snapshots"
     )
@@ -518,7 +517,6 @@ class RouterBandwidthLog(models.Model):
     """
     Hourly bandwidth usage logs per router
     """
-
     router = models.ForeignKey(
         Router, on_delete=models.CASCADE, related_name="bandwidth_logs"
     )
@@ -565,7 +563,6 @@ class RouterHotspotCustomization(models.Model):
     """
     Per-router hotspot page customization settings
     """
-
     router = models.OneToOneField(
         Router, on_delete=models.CASCADE, related_name="hotspot_customization"
     )

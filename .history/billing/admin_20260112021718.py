@@ -18,10 +18,6 @@ from .models import (
     Location,
     Router,
     TenantSubscriptionPayment,
-    # Router Monitoring
-    RouterMonitoringSnapshot,
-    RouterBandwidthLog,
-    RouterHotspotCustomization,
     # WiFi Billing Models (now multi-tenant)
     User,
     Payment,

@@ -1008,9 +1008,7 @@ def portal_router_collect_metrics(request, router_id):
         return Response(
             {
                 "success": False,
-                "error": (
-                    snapshot.error_message if snapshot else "Failed to collect metrics"
-                ),
+                "error": snapshot.error_message if snapshot else "Failed to collect metrics",
             },
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
@@ -1651,9 +1649,7 @@ def portal_router_deploy_hotspot(request, router_id):
             "success": True,
             "message": "Hotspot pages generated. Manual upload to router required.",
             "files": {
-                "login.html": (
-                    login_html[:500] + "..." if len(login_html) > 500 else login_html
-                ),
+                "login.html": login_html[:500] + "..." if len(login_html) > 500 else login_html,
             },
             "instructions": [
                 "1. Download the generated HTML files",
