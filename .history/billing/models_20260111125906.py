@@ -1566,57 +1566,43 @@ class TenantSMSBroadcast(models.Model):
 
         if self.target_type == "all_users":
             # All WiFi users for this tenant
-            users = (
-                User.objects.filter(tenant=self.tenant, phone_number__isnull=False)
-                .exclude(phone_number="")
-                .values("phone_number", "name")
-            )
+            users = User.objects.filter(
+                tenant=self.tenant, phone_number__isnull=False
+            ).exclude(phone_number="").values("phone_number", "name")
             recipients = list(users)
 
         elif self.target_type == "active_users":
             # Only users with active access
             now = timezone.now()
-            users = (
-                User.objects.filter(
-                    tenant=self.tenant,
-                    phone_number__isnull=False,
-                    is_active=True,
-                    paid_until__gte=now,
-                )
-                .exclude(phone_number="")
-                .values("phone_number", "name")
-            )
+            users = User.objects.filter(
+                tenant=self.tenant,
+                phone_number__isnull=False,
+                is_active=True,
+                paid_until__gte=now,
+            ).exclude(phone_number="").values("phone_number", "name")
             recipients = list(users)
 
         elif self.target_type == "expired_users":
             # Users whose access has expired
             now = timezone.now()
-            users = (
-                User.objects.filter(
-                    tenant=self.tenant,
-                    phone_number__isnull=False,
-                    paid_until__lt=now,
-                )
-                .exclude(phone_number="")
-                .values("phone_number", "name")
-            )
+            users = User.objects.filter(
+                tenant=self.tenant,
+                phone_number__isnull=False,
+                paid_until__lt=now,
+            ).exclude(phone_number="").values("phone_number", "name")
             recipients = list(users)
 
         elif self.target_type == "expiring_soon":
             # Users expiring within 24 hours
             now = timezone.now()
             expiry_threshold = now + timedelta(hours=24)
-            users = (
-                User.objects.filter(
-                    tenant=self.tenant,
-                    phone_number__isnull=False,
-                    is_active=True,
-                    paid_until__gte=now,
-                    paid_until__lte=expiry_threshold,
-                )
-                .exclude(phone_number="")
-                .values("phone_number", "name")
-            )
+            users = User.objects.filter(
+                tenant=self.tenant,
+                phone_number__isnull=False,
+                is_active=True,
+                paid_until__gte=now,
+                paid_until__lte=expiry_threshold,
+            ).exclude(phone_number="").values("phone_number", "name")
             recipients = list(users)
 
         elif self.target_type == "custom":
@@ -1643,10 +1629,7 @@ class TenantSMSBroadcast(models.Model):
             self.status = "failed"
             self.error_message = "NextSMS credentials not configured"
             self.save()
-            return (
-                False,
-                "NextSMS credentials not configured. Please configure SMS settings first.",
-            )
+            return False, "NextSMS credentials not configured. Please configure SMS settings first."
 
         self.status = "sending"
         self.started_at = timezone.now()

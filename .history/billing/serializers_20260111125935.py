@@ -828,12 +828,8 @@ class TenantSMSConfigSerializer(serializers.Serializer):
     """Serializer for tenant SMS configuration"""
 
     nextsms_username = serializers.CharField(max_length=255, required=True)
-    nextsms_password = serializers.CharField(
-        max_length=255, required=True, write_only=True
-    )
-    nextsms_sender_id = serializers.CharField(
-        max_length=11, required=False, allow_blank=True
-    )
+    nextsms_password = serializers.CharField(max_length=255, required=True, write_only=True)
+    nextsms_sender_id = serializers.CharField(max_length=11, required=False, allow_blank=True)
     nextsms_base_url = serializers.URLField(required=False, allow_blank=True)
 
     def validate_nextsms_sender_id(self, value):
@@ -855,11 +851,11 @@ class TenantSMSBroadcastCreateSerializer(serializers.Serializer):
 
     title = serializers.CharField(max_length=200)
     message = serializers.CharField(max_length=320)
-    target_type = serializers.ChoiceField(
-        choices=TARGET_TYPE_CHOICES, default="all_users"
-    )
+    target_type = serializers.ChoiceField(choices=TARGET_TYPE_CHOICES, default="all_users")
     custom_recipients = serializers.ListField(
-        child=serializers.CharField(max_length=15), required=False, allow_empty=True
+        child=serializers.CharField(max_length=15),
+        required=False,
+        allow_empty=True
     )
     scheduled_at = serializers.DateTimeField(required=False, allow_null=True)
 
@@ -867,20 +863,16 @@ class TenantSMSBroadcastCreateSerializer(serializers.Serializer):
         if len(value.strip()) < 5:
             raise serializers.ValidationError("Message must be at least 5 characters")
         if len(value) > 320:
-            raise serializers.ValidationError(
-                "Message must be 320 characters or less (2 SMS max)"
-            )
+            raise serializers.ValidationError("Message must be 320 characters or less (2 SMS max)")
         return value.strip()
 
     def validate(self, data):
-        if data.get("target_type") == "custom":
-            recipients = data.get("custom_recipients", [])
+        if data.get('target_type') == 'custom':
+            recipients = data.get('custom_recipients', [])
             if not recipients:
-                raise serializers.ValidationError(
-                    {
-                        "custom_recipients": 'Custom recipients are required when target_type is "custom"'
-                    }
-                )
+                raise serializers.ValidationError({
+                    'custom_recipients': 'Custom recipients are required when target_type is "custom"'
+                })
         return data
 
 

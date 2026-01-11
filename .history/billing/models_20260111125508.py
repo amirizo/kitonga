@@ -58,7 +58,6 @@ class SubscriptionPlan(models.Model):
     priority_support = models.BooleanField(default=False)
     analytics_dashboard = models.BooleanField(default=True)
     sms_notifications = models.BooleanField(default=True)
-    sms_broadcast = models.BooleanField(default=False)  # Allow tenant SMS broadcasts
 
     # Revenue sharing (platform takes percentage of WiFi payments)
     revenue_share_percentage = models.DecimalField(
@@ -131,9 +130,6 @@ class Tenant(models.Model):
     nextsms_username = models.CharField(max_length=255, blank=True)
     nextsms_password = models.CharField(max_length=255, blank=True)
     nextsms_sender_id = models.CharField(max_length=20, blank=True)
-    nextsms_base_url = models.CharField(
-        max_length=255, blank=True, default="https://messaging-service.co.tz"
-    )
 
     # API Access
     api_key = models.CharField(max_length=64, unique=True, blank=True)
@@ -961,7 +957,6 @@ class SMSLog(models.Model):
         ("voucher", "Voucher Redemption"),
         ("welcome", "Welcome Message"),
         ("admin", "Admin Notification"),
-        ("broadcast", "Broadcast Message"),
         ("other", "Other"),
     ]
 
@@ -1468,235 +1463,6 @@ class SMSBroadcast(models.Model):
                     phone_number=phone,
                     message=self.message,
                     sms_type="admin",
-                    success=False,
-                    response_data={"error": str(e)},
-                )
-
-        self.status = "completed"
-        self.completed_at = timezone.now()
-        self.save()
-
-        return (
-            True,
-            f"Broadcast completed: {self.sent_count} sent, {self.failed_count} failed",
-        )
-
-
-# =============================================================================
-# TENANT SMS BROADCAST MODEL
-# =============================================================================
-
-
-class TenantSMSBroadcast(models.Model):
-    """
-    SMS Broadcast campaigns for tenants to send bulk SMS to their WiFi users
-    Available for Business and Enterprise plans only
-    """
-
-    STATUS_CHOICES = [
-        ("draft", "Draft"),
-        ("pending", "Pending"),
-        ("sending", "Sending"),
-        ("completed", "Completed"),
-        ("failed", "Failed"),
-        ("cancelled", "Cancelled"),
-    ]
-
-    TARGET_TYPE_CHOICES = [
-        ("all_users", "All My WiFi Users"),
-        ("active_users", "Active Users Only"),
-        ("expired_users", "Expired Users"),
-        ("expiring_soon", "Expiring Within 24 Hours"),
-        ("custom", "Custom Phone Numbers"),
-    ]
-
-    # Campaign Info
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    tenant = models.ForeignKey(
-        Tenant,
-        on_delete=models.CASCADE,
-        related_name="tenant_sms_broadcasts",
-    )
-    title = models.CharField(
-        max_length=200, help_text="Internal title for this campaign"
-    )
-    message = models.TextField(
-        max_length=320, help_text="SMS message (max 320 chars for 2 SMS)"
-    )
-
-    # Targeting
-    target_type = models.CharField(
-        max_length=20, choices=TARGET_TYPE_CHOICES, default="all_users"
-    )
-    custom_recipients = models.JSONField(
-        null=True, blank=True, help_text="List of phone numbers for custom targeting"
-    )
-
-    # Status & Progress
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
-    total_recipients = models.IntegerField(default=0)
-    sent_count = models.IntegerField(default=0)
-    failed_count = models.IntegerField(default=0)
-
-    # Timestamps
-    created_at = models.DateTimeField(auto_now_add=True)
-    scheduled_at = models.DateTimeField(
-        null=True, blank=True, help_text="Schedule for later sending"
-    )
-    started_at = models.DateTimeField(null=True, blank=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-
-    # Error tracking
-    error_message = models.TextField(blank=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-        verbose_name = "Tenant SMS Broadcast"
-        verbose_name_plural = "Tenant SMS Broadcasts"
-
-    def __str__(self):
-        return f"{self.tenant.slug} - {self.title} - {self.get_status_display()}"
-
-    def get_recipients(self):
-        """
-        Get list of phone numbers based on target_type (only tenant's users)
-        Returns list of dicts with phone_number and optional name
-        """
-        recipients = []
-
-        if self.target_type == "all_users":
-            # All WiFi users for this tenant
-            users = (
-                User.objects.filter(tenant=self.tenant, phone_number__isnull=False)
-                .exclude(phone_number="")
-                .values("phone_number", "name")
-            )
-            recipients = list(users)
-
-        elif self.target_type == "active_users":
-            # Only users with active access
-            now = timezone.now()
-            users = (
-                User.objects.filter(
-                    tenant=self.tenant,
-                    phone_number__isnull=False,
-                    is_active=True,
-                    paid_until__gte=now,
-                )
-                .exclude(phone_number="")
-                .values("phone_number", "name")
-            )
-            recipients = list(users)
-
-        elif self.target_type == "expired_users":
-            # Users whose access has expired
-            now = timezone.now()
-            users = (
-                User.objects.filter(
-                    tenant=self.tenant,
-                    phone_number__isnull=False,
-                    paid_until__lt=now,
-                )
-                .exclude(phone_number="")
-                .values("phone_number", "name")
-            )
-            recipients = list(users)
-
-        elif self.target_type == "expiring_soon":
-            # Users expiring within 24 hours
-            now = timezone.now()
-            expiry_threshold = now + timedelta(hours=24)
-            users = (
-                User.objects.filter(
-                    tenant=self.tenant,
-                    phone_number__isnull=False,
-                    is_active=True,
-                    paid_until__gte=now,
-                    paid_until__lte=expiry_threshold,
-                )
-                .exclude(phone_number="")
-                .values("phone_number", "name")
-            )
-            recipients = list(users)
-
-        elif self.target_type == "custom":
-            # Custom phone numbers from JSON field
-            if self.custom_recipients:
-                if isinstance(self.custom_recipients, list):
-                    recipients = [
-                        {"phone_number": p, "name": ""} for p in self.custom_recipients
-                    ]
-
-        return recipients
-
-    def send_broadcast(self):
-        """
-        Execute the SMS broadcast using tenant's NextSMS credentials
-        """
-        from .nextsms import TenantNextSMSAPI
-
-        if self.status not in ["draft", "pending"]:
-            return False, f"Cannot send broadcast in {self.status} status"
-
-        # Check if tenant has SMS credentials configured
-        if not self.tenant.nextsms_username or not self.tenant.nextsms_password:
-            self.status = "failed"
-            self.error_message = "NextSMS credentials not configured"
-            self.save()
-            return (
-                False,
-                "NextSMS credentials not configured. Please configure SMS settings first.",
-            )
-
-        self.status = "sending"
-        self.started_at = timezone.now()
-        self.save()
-
-        # Use tenant-specific SMS API
-        sms_api = TenantNextSMSAPI(self.tenant)
-        recipients = self.get_recipients()
-        self.total_recipients = len(recipients)
-        self.save()
-
-        if not recipients:
-            self.status = "failed"
-            self.error_message = "No recipients found for this target type"
-            self.completed_at = timezone.now()
-            self.save()
-            return False, "No recipients found"
-
-        for recipient in recipients:
-            phone = recipient.get("phone_number", "")
-            if not phone:
-                continue
-
-            try:
-                result = sms_api.send_sms(
-                    phone, self.message, reference=f"TENANT-BROADCAST-{self.id}"
-                )
-
-                # Log the SMS
-                SMSLog.objects.create(
-                    tenant=self.tenant,
-                    phone_number=phone,
-                    message=self.message,
-                    sms_type="broadcast",
-                    success=result.get("success", False),
-                    response_data=result.get("data"),
-                )
-
-                if result.get("success"):
-                    self.sent_count += 1
-                else:
-                    self.failed_count += 1
-
-            except Exception as e:
-                self.failed_count += 1
-                SMSLog.objects.create(
-                    tenant=self.tenant,
-                    phone_number=phone,
-                    message=self.message,
-                    sms_type="broadcast",
                     success=False,
                     response_data={"error": str(e)},
                 )
