@@ -58,7 +58,7 @@ class SubscriptionPlan(models.Model):
     priority_support = models.BooleanField(default=False)
     analytics_dashboard = models.BooleanField(default=True)
     sms_notifications = models.BooleanField(default=True)
-    monthly_sms_limit = models.IntegerField(default=0, help_text="0 = disabled, -1 = unlimited")
+    sms_broadcast = models.BooleanField(default=False, help_text="Allow tenant to send bulk SMS to their users")
 
     # Revenue sharing (platform takes percentage of WiFi payments)
     revenue_share_percentage = models.DecimalField(
@@ -1478,284 +1478,237 @@ class SMSBroadcast(models.Model):
         )
 
 
-# =============================================================================
-# TENANT SMS BROADCAST MODEL
-# =============================================================================
-
-
 class TenantSMSBroadcast(models.Model):
     """
-    SMS Broadcast campaigns for tenant portal to send SMS to their own users
-    Available for Business/Enterprise plans with sms_notifications enabled
+    SMS Broadcast campaigns for tenants to send SMS to their users
+    Requires Business or Enterprise plan with sms_broadcast enabled
+    Uses tenant's own NextSMS configuration
     """
-
     STATUS_CHOICES = [
-        ("draft", "Draft"),
-        ("pending", "Pending"),
-        ("sending", "Sending"),
-        ("completed", "Completed"),
-        ("failed", "Failed"),
-        ("cancelled", "Cancelled"),
+        ('draft', 'Draft'),
+        ('pending', 'Pending'),
+        ('sending', 'Sending'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('cancelled', 'Cancelled'),
     ]
-
+    
     TARGET_TYPE_CHOICES = [
-        ("all_users", "All My Users"),
-        ("active_users", "Active Users Only"),
-        ("expired_users", "Expired Users"),
-        ("custom", "Custom Phone Numbers"),
+        ('all_users', 'All My Users'),
+        ('active_users', 'Active Users Only'),
+        ('expired_users', 'Expired Users'),
+        ('custom', 'Custom Phone Numbers'),
     ]
-
-    # Tenant Owner
-    tenant = models.ForeignKey(
-        Tenant,
-        on_delete=models.CASCADE,
-        related_name="tenant_sms_broadcasts",
-    )
-
+    
     # Campaign Info
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    title = models.CharField(
-        max_length=200, help_text="Internal title for this campaign"
-    )
-    message = models.TextField(
-        max_length=320, help_text="SMS message (max 320 chars for 2 SMS)"
-    )
-
-    # Targeting (limited to tenant's own users)
-    target_type = models.CharField(
-        max_length=20, choices=TARGET_TYPE_CHOICES, default="all_users"
-    )
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='tenant_sms_broadcasts')
+    title = models.CharField(max_length=200, help_text="Internal title for this campaign")
+    message = models.TextField(max_length=320, help_text="SMS message (max 320 chars for 2 SMS)")
+    
+    # Targeting
+    target_type = models.CharField(max_length=20, choices=TARGET_TYPE_CHOICES, default='all_users')
     custom_recipients = models.JSONField(
-        null=True, blank=True, help_text="List of phone numbers for custom targeting"
+        null=True, blank=True,
+        help_text="List of phone numbers for custom targeting"
     )
-
+    
     # Status & Progress
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
     total_recipients = models.IntegerField(default=0)
     sent_count = models.IntegerField(default=0)
     failed_count = models.IntegerField(default=0)
-
+    
+    # Creator (tenant staff)
+    created_by = models.ForeignKey(
+        DjangoUser, on_delete=models.SET_NULL, null=True,
+        related_name='tenant_sms_broadcasts'
+    )
+    
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
-    scheduled_at = models.DateTimeField(
-        null=True, blank=True, help_text="Schedule for later sending"
-    )
+    scheduled_at = models.DateTimeField(null=True, blank=True, help_text="Schedule for later sending")
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
-
+    
     # Error tracking
     error_message = models.TextField(blank=True)
-
+    
     class Meta:
-        ordering = ["-created_at"]
-        verbose_name = "Tenant SMS Broadcast"
-        verbose_name_plural = "Tenant SMS Broadcasts"
-
+        ordering = ['-created_at']
+        verbose_name = 'Tenant SMS Broadcast'
+        verbose_name_plural = 'Tenant SMS Broadcasts'
+    
     def __str__(self):
         return f"{self.tenant.slug} - {self.title} - {self.get_status_display()}"
-
-    def can_send(self):
-        """
-        Check if tenant can send SMS based on subscription plan
-        Returns (can_send, reason)
-        """
-        plan = self.tenant.subscription_plan
-        if not plan:
+    
+    def can_send_sms(self):
+        """Check if tenant can send SMS broadcasts"""
+        # Check if tenant has valid subscription
+        if not self.tenant.is_subscription_valid():
+            return False, "Subscription expired or invalid"
+        
+        # Check if plan allows SMS broadcast
+        if not self.tenant.subscription_plan:
             return False, "No subscription plan"
-
-        if not plan.sms_notifications:
-            return False, "SMS notifications not included in your plan"
-
-        # Check monthly limit
-        if plan.monthly_sms_limit == 0:
-            return False, "SMS not available in your plan"
-
-        if plan.monthly_sms_limit > 0:  # -1 means unlimited
-            # Count SMS sent this month
-            now = timezone.now()
-            month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            
-            month_sms_count = SMSLog.objects.filter(
-                tenant=self.tenant,
-                sent_at__gte=month_start,
-                success=True
-            ).count()
-            
-            # Add pending broadcasts
-            pending_in_progress = TenantSMSBroadcast.objects.filter(
-                tenant=self.tenant,
-                status__in=["pending", "sending"],
-            ).aggregate(total=models.Sum("total_recipients"))["total"] or 0
-            
-            remaining = plan.monthly_sms_limit - month_sms_count - pending_in_progress
-            
-            if remaining <= 0:
-                return False, f"Monthly SMS limit reached ({plan.monthly_sms_limit} SMS/month)"
-
+        
+        if not self.tenant.subscription_plan.sms_broadcast:
+            return False, "SMS broadcast not included in your plan. Upgrade to Business or Enterprise."
+        
+        # Check if tenant has NextSMS configured
+        if not self.tenant.nextsms_username or not self.tenant.nextsms_password:
+            return False, "NextSMS not configured. Please configure your SMS settings first."
+        
         return True, "OK"
-
-    def get_sms_quota(self):
-        """
-        Get tenant's SMS quota information
-        """
-        plan = self.tenant.subscription_plan
-        if not plan or plan.monthly_sms_limit == 0:
-            return {
-                "limit": 0,
-                "used": 0,
-                "remaining": 0,
-                "unlimited": False
-            }
-
-        if plan.monthly_sms_limit == -1:
-            return {
-                "limit": -1,
-                "used": 0,
-                "remaining": -1,
-                "unlimited": True
-            }
-
-        now = timezone.now()
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        
-        used = SMSLog.objects.filter(
-            tenant=self.tenant,
-            sent_at__gte=month_start,
-            success=True
-        ).count()
-        
-        return {
-            "limit": plan.monthly_sms_limit,
-            "used": used,
-            "remaining": max(0, plan.monthly_sms_limit - used),
-            "unlimited": False
-        }
-
+    
     def get_recipients(self):
-        """
-        Get list of phone numbers based on target_type
-        Only from tenant's own users
-        """
+        """Get list of phone numbers for tenant's users"""
         recipients = []
-        now = timezone.now()
-
-        if self.target_type == "all_users":
+        
+        if self.target_type == 'all_users':
             users = User.objects.filter(
                 tenant=self.tenant,
                 phone_number__isnull=False
-            ).values("phone_number", "name")
+            ).exclude(phone_number='').values('phone_number', 'name')
             recipients = list(users)
-
-        elif self.target_type == "active_users":
+            
+        elif self.target_type == 'active_users':
+            now = timezone.now()
             users = User.objects.filter(
                 tenant=self.tenant,
                 phone_number__isnull=False,
                 is_active=True,
                 paid_until__gte=now
-            ).values("phone_number", "name")
+            ).exclude(phone_number='').values('phone_number', 'name')
             recipients = list(users)
-
-        elif self.target_type == "expired_users":
+            
+        elif self.target_type == 'expired_users':
+            now = timezone.now()
             users = User.objects.filter(
                 tenant=self.tenant,
                 phone_number__isnull=False,
                 paid_until__lt=now
-            ).values("phone_number", "name")
+            ).exclude(phone_number='').values('phone_number', 'name')
             recipients = list(users)
-
-        elif self.target_type == "custom":
-            if self.custom_recipients:
-                if isinstance(self.custom_recipients, list):
-                    recipients = [
-                        {"phone_number": p, "name": ""} for p in self.custom_recipients
-                    ]
-
+            
+        elif self.target_type == 'custom':
+            if self.custom_recipients and isinstance(self.custom_recipients, list):
+                recipients = [{'phone_number': p, 'name': ''} for p in self.custom_recipients]
+                
         return recipients
-
+    
+    def get_tenant_sms_api(self):
+        """Get NextSMS API instance with tenant's credentials"""
+        import base64
+        
+        class TenantNextSMSAPI:
+            def __init__(self, tenant):
+                self.username = tenant.nextsms_username
+                self.password = tenant.nextsms_password
+                self.sender_id = tenant.nextsms_sender_id or 'NEXTSMS'
+                self.base_url = 'https://messaging-service.co.tz'
+                
+                credentials = f"{self.username}:{self.password}"
+                self.auth_token = base64.b64encode(credentials.encode()).decode()
+            
+            def send_sms(self, phone_number, message, reference=None):
+                import requests
+                
+                url = f'{self.base_url}/api/sms/v1/text/single'
+                
+                # Format phone number
+                if phone_number.startswith('0'):
+                    phone_number = '255' + phone_number[1:]
+                elif not phone_number.startswith('255'):
+                    phone_number = '255' + phone_number
+                
+                headers = {
+                    'Authorization': f'Basic {self.auth_token}',
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+                
+                payload = {
+                    'from': self.sender_id,
+                    'to': phone_number,
+                    'text': message,
+                    'reference': reference or f'TENANT-{phone_number}'
+                }
+                
+                try:
+                    response = requests.post(url, json=payload, headers=headers, timeout=10)
+                    response.raise_for_status()
+                    return {'success': True, 'data': response.json()}
+                except Exception as e:
+                    return {'success': False, 'error': str(e)}
+        
+        return TenantNextSMSAPI(self.tenant)
+    
     def send_broadcast(self):
-        """
-        Execute the SMS broadcast
-        """
-        from .nextsms import NextSMSAPI
-
+        """Execute the SMS broadcast using tenant's NextSMS credentials"""
         # Check if tenant can send
-        can_send, reason = self.can_send()
+        can_send, reason = self.can_send_sms()
         if not can_send:
-            self.status = "failed"
+            self.status = 'failed'
             self.error_message = reason
             self.save()
             return False, reason
-
-        if self.status not in ["draft", "pending"]:
+        
+        if self.status not in ['draft', 'pending']:
             return False, f"Cannot send broadcast in {self.status} status"
-
-        self.status = "sending"
+        
+        self.status = 'sending'
         self.started_at = timezone.now()
         self.save()
-
-        sms_api = NextSMSAPI()
+        
+        sms_api = self.get_tenant_sms_api()
         recipients = self.get_recipients()
         self.total_recipients = len(recipients)
         self.save()
-
+        
         if not recipients:
-            self.status = "failed"
-            self.error_message = "No recipients found for this target type"
+            self.status = 'failed'
+            self.error_message = 'No recipients found for this target type'
             self.completed_at = timezone.now()
             self.save()
-            return False, "No recipients found"
-
-        # Check quota again with actual recipient count
-        plan = self.tenant.subscription_plan
-        if plan and plan.monthly_sms_limit > 0:
-            quota = self.get_sms_quota()
-            if quota["remaining"] < len(recipients):
-                self.status = "failed"
-                self.error_message = f"Not enough SMS quota. Need {len(recipients)}, have {quota['remaining']}"
-                self.save()
-                return False, self.error_message
-
+            return False, 'No recipients found'
+        
         for recipient in recipients:
-            phone = recipient.get("phone_number", "")
+            phone = recipient.get('phone_number', '')
             if not phone:
                 continue
-
+                
             try:
-                result = sms_api.send_sms(
-                    phone, self.message, reference=f"TENANT-{self.tenant.slug}-{self.id}"
-                )
-
-                # Log the SMS with tenant
+                result = sms_api.send_sms(phone, self.message, reference=f'TENANT-BROADCAST-{self.id}')
+                
+                # Log the SMS for this tenant
                 SMSLog.objects.create(
                     tenant=self.tenant,
                     phone_number=phone,
                     message=self.message,
-                    sms_type="admin",
-                    success=result.get("success", False),
-                    response_data=result.get("data"),
+                    sms_type='admin',
+                    success=result.get('success', False),
+                    response_data=result.get('data')
                 )
-
-                if result.get("success"):
+                
+                if result.get('success'):
                     self.sent_count += 1
                 else:
                     self.failed_count += 1
-
+                    
             except Exception as e:
                 self.failed_count += 1
                 SMSLog.objects.create(
                     tenant=self.tenant,
                     phone_number=phone,
                     message=self.message,
-                    sms_type="admin",
+                    sms_type='admin',
                     success=False,
-                    response_data={"error": str(e)},
+                    response_data={'error': str(e)}
                 )
-
-        self.status = "completed"
+        
+        self.status = 'completed'
         self.completed_at = timezone.now()
         self.save()
-
-        return (
-            True,
-            f"Broadcast completed: {self.sent_count} sent, {self.failed_count} failed",
-        )
+        
+        return True, f"Broadcast completed: {self.sent_count} sent, {self.failed_count} failed"

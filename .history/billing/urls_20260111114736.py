@@ -440,30 +440,10 @@ urlpatterns = [
     # SMS BROADCAST ENDPOINTS (Admin only)
     # ==========================================================================
     path("sms-broadcasts/", views.list_sms_broadcasts, name="list_sms_broadcasts"),
-    path(
-        "sms-broadcasts/create/",
-        views.create_sms_broadcast,
-        name="create_sms_broadcast",
-    ),
-    path(
-        "sms-broadcasts/preview/",
-        views.preview_sms_broadcast,
-        name="preview_sms_broadcast",
-    ),
+    path("sms-broadcasts/create/", views.create_sms_broadcast, name="create_sms_broadcast"),
+    path("sms-broadcasts/preview/", views.preview_sms_broadcast, name="preview_sms_broadcast"),
     path("sms-broadcasts/send-single/", views.send_single_sms, name="send_single_sms"),
-    path(
-        "sms-broadcasts/<str:broadcast_id>/",
-        views.get_sms_broadcast,
-        name="get_sms_broadcast",
-    ),
-    path(
-        "sms-broadcasts/<str:broadcast_id>/send/",
-        views.send_sms_broadcast,
-        name="send_sms_broadcast",
-    ),
-    path(
-        "sms-broadcasts/<str:broadcast_id>/delete/",
-        views.delete_sms_broadcast,
-        name="delete_sms_broadcast",
-    ),
+    path("sms-broadcasts/<str:broadcast_id>/", views.get_sms_broadcast, name="get_sms_broadcast"),
+    path("sms-broadcasts/<str:broadcast_id>/send/", views.send_sms_broadcast, name="send_sms_broadcast"),
+    path("sms-broadcasts/<str:broadcast_id>/delete/", views.delete_sms_broadcast, name="delete_sms_broadcast"),
 ]
