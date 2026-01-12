@@ -131,13 +131,13 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # WhiteNoise configuration for static files in production
 # In production, nginx serves static files directly for better performance
-# WhiteNoise handles compression and manifest during collectstatic
+# WhiteNoise acts as a fallback and handles compression during collectstatic
 if DEBUG:
     # Development: Use simple storage for faster reloads
     STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
 else:
-    # Production: Use custom storage that handles missing source maps gracefully
-    STATICFILES_STORAGE = "kitonga.storage.IgnoreMissingStaticFilesStorage"
+    # Production: Use WhiteNoise with compression (nginx will serve pre-compressed .gz files)
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
 
 # WhiteNoise settings
 WHITENOISE_USE_FINDERS = DEBUG  # Only use finders in development

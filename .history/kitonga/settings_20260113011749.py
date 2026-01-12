@@ -136,13 +136,21 @@ if DEBUG:
     # Development: Use simple storage for faster reloads
     STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
 else:
-    # Production: Use custom storage that handles missing source maps gracefully
-    STATICFILES_STORAGE = "kitonga.storage.IgnoreMissingStaticFilesStorage"
+    # Production: Use WhiteNoise with compression and manifest for cache busting
+    # This adds hash suffixes to filenames (e.g., base.a1b2c3d4.css)
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # WhiteNoise settings
 WHITENOISE_USE_FINDERS = DEBUG  # Only use finders in development
 WHITENOISE_AUTOREFRESH = DEBUG  # Only in development
 WHITENOISE_MAX_AGE = 31536000 if not DEBUG else 0  # 1 year cache in production
+WHITENOISE_MANIFEST_STRICT = False  # Don't error on missing source maps
+WHITENOISE_SKIP_COMPRESS_EXTENSIONS = [
+    "jpg", "jpeg", "png", "gif", "webp",  # Images
+    "zip", "gz", "tgz", "bz2", "tbz", "xz", "br",  # Archives
+    "woff", "woff2", "ttf", "eot",  # Fonts
+    "map",  # Source maps
+]
 
 # Static files configuration
 STATICFILES_DIRS = []
