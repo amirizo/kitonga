@@ -146,6 +146,13 @@ class PaymentSerializer(serializers.ModelSerializer):
 class InitiatePaymentSerializer(serializers.Serializer):
     phone_number = serializers.CharField(max_length=15)
     bundle_id = serializers.IntegerField(required=False)
+    router_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text="Router ID to auto-detect tenant from captive portal",
+    )
+    mac_address = serializers.CharField(max_length=17, required=False)
+    ip_address = serializers.IPAddressField(required=False)
 
     def validate_phone_number(self, value):
         """Validate and normalize phone number"""
@@ -229,6 +236,11 @@ class RedeemVoucherSerializer(serializers.Serializer):
     # Optional device information for immediate access setup
     ip_address = serializers.IPAddressField(required=False)
     mac_address = serializers.CharField(max_length=17, required=False)
+    router_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text="Router ID to auto-detect tenant from captive portal",
+    )
 
     def validate_voucher_code(self, value):
         # Remove extra spaces and convert to uppercase, but preserve the original format

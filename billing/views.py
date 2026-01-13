@@ -3776,12 +3776,15 @@ def mikrotik_system_resources(request):
 @permission_classes([AllowAny])
 def verify_access(request):
     """
-    Verify if a user has valid access
+    Verify if a user has valid access (MULTI-TENANT AWARE)
     Called by captive portal to check access status
     Works for both payment and voucher users through unified access checking
 
     If router_id is provided, authorization is done ONLY on that specific router.
     This is crucial for multi-tenant SaaS to ensure tenant isolation.
+
+    The tenant is resolved from request context, ensuring users are verified
+    within their specific tenant's scope.
     """
     serializer = VerifyAccessSerializer(data=request.data)
     if not serializer.is_valid():
@@ -3796,27 +3799,54 @@ def verify_access(request):
     mac_address = request_info["mac_address"]
     user_agent = request_info["user_agent"]
 
+    # =========================================================================
+    # MULTI-TENANT: Get tenant from request context
+    # =========================================================================
+    tenant = getattr(request, "tenant", None)
+
+    if not tenant:
+        # Try to get tenant from request data or query params
+        tenant_slug = request.data.get("tenant") or request.GET.get("tenant")
+        if tenant_slug:
+            try:
+                from .models import Tenant
+
+                tenant = Tenant.objects.get(slug=tenant_slug, is_active=True)
+            except Tenant.DoesNotExist:
+                pass
+
+    # If router_id provided, get tenant from router
+    if router_id and not tenant:
+        try:
+            router = Router.objects.get(id=router_id)
+            tenant = router.tenant
+        except Router.DoesNotExist:
+            pass
+
     try:
-        # Find user with normalized phone number
+        # =========================================================================
+        # MULTI-TENANT: Find user within tenant scope
+        # =========================================================================
         from .utils import find_user_by_phone
 
-        user = find_user_by_phone(phone_number)
+        user = find_user_by_phone(phone_number, tenant=tenant)
 
         # Log the access attempt with real user info for debugging
         logger.info(
-            f"Access verification request: phone={phone_number}, ip={ip_address}, mac={mac_address}, router_id={router_id}, user_agent={user_agent[:50]}..."
+            f"Access verification request: phone={phone_number}, ip={ip_address}, mac={mac_address}, router_id={router_id}, tenant={tenant.slug if tenant else 'GLOBAL'}"
         )
 
         if not user:
             logger.warning(
-                f"User not found during access verification: phone={phone_number}, ip={ip_address}, mac={mac_address}"
+                f"User not found during access verification: phone={phone_number}, tenant={tenant.slug if tenant else 'GLOBAL'}"
             )
             return Response(
                 {
                     "access_granted": False,
                     "message": "User not found. Please register and pay to access Wi-Fi.",
                     "suggestion": "Make a payment or redeem a voucher to create account and get access",
-                    "normalized_phone": phone_number,  # Show what the system tried to find
+                    "normalized_phone": phone_number,
+                    "tenant": tenant.slug if tenant else None,
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )
@@ -4188,7 +4218,15 @@ def verify_access(request):
 @permission_classes([AllowAny])
 def initiate_payment(request):
     """
-    Initiate ClickPesa USSD-PUSH payment
+    Initiate ClickPesa USSD-PUSH payment (MULTI-TENANT AWARE)
+
+    The tenant is resolved from:
+    1. X-API-Key header (for API integrations)
+    2. Subdomain (e.g., hotel.kitonga.com)
+    3. Query parameter (?tenant=hotel)
+
+    The user and payment are associated with the resolved tenant,
+    ensuring access is granted only on that tenant's routers.
     """
     serializer = InitiatePaymentSerializer(data=request.data)
     if not serializer.is_valid():
@@ -4196,6 +4234,42 @@ def initiate_payment(request):
 
     phone_number = serializer.validated_data["phone_number"]
     bundle_id = serializer.validated_data.get("bundle_id")
+    router_id = serializer.validated_data.get("router_id")  # From captive portal
+
+    # =========================================================================
+    # MULTI-TENANT: Get tenant from request (set by TenantMiddleware)
+    # Priority: 1. Middleware, 2. router_id, 3. tenant param
+    # =========================================================================
+    tenant = getattr(request, "tenant", None)
+
+    # If router_id provided, get tenant from router (captive portal flow)
+    if router_id and not tenant:
+        try:
+            router = Router.objects.get(id=router_id, is_active=True)
+            tenant = router.tenant
+            logger.info(f"Tenant resolved from router_id {router_id}: {tenant.slug}")
+        except Router.DoesNotExist:
+            logger.warning(f"Router {router_id} not found during payment initiation")
+
+    if not tenant:
+        # Try to get tenant from request data (for captive portal integrations)
+        tenant_slug = request.data.get("tenant") or request.GET.get("tenant")
+        if tenant_slug:
+            try:
+                from .models import Tenant
+
+                tenant = Tenant.objects.get(slug=tenant_slug, is_active=True)
+            except Tenant.DoesNotExist:
+                pass
+
+    if not tenant:
+        logger.warning(f"Payment initiated without tenant context for {phone_number}")
+        # For backwards compatibility, allow payment without tenant
+        # In strict mode, you could return an error here
+    else:
+        logger.info(
+            f"Payment initiated for tenant: {tenant.slug} ({tenant.business_name})"
+        )
 
     # Extract comprehensive request information
     request_info = get_request_info(request, serializer.validated_data)
@@ -4203,17 +4277,21 @@ def initiate_payment(request):
     mac_address = request_info["mac_address"]
     user_agent = request_info["user_agent"]
 
-    # Get or create user with normalized phone number
+    # =========================================================================
+    # MULTI-TENANT: Get or create user WITHIN this tenant's scope
+    # =========================================================================
     from .utils import get_or_create_user
 
     try:
-        user, created = get_or_create_user(phone_number)
+        user, created = get_or_create_user(phone_number, tenant=tenant)
         if created:
             logger.info(
-                f"Created new user {user.phone_number} (normalized from {phone_number}) for payment"
+                f"Created new user {user.phone_number} for tenant {tenant.slug if tenant else 'GLOBAL'}"
             )
         else:
-            logger.info(f"Found existing user {user.phone_number} for payment")
+            logger.info(
+                f"Found existing user {user.phone_number} for tenant {tenant.slug if tenant else 'GLOBAL'}"
+            )
     except ValueError as e:
         return Response(
             {"success": False, "message": f"Invalid phone number: {str(e)}"},
@@ -4253,26 +4331,53 @@ def initiate_payment(request):
                 "device_tracked": False,
             }
 
-    # Get bundle or use default
+    # =========================================================================
+    # MULTI-TENANT: Get bundle SCOPED to this tenant
+    # =========================================================================
     if bundle_id:
         try:
-            bundle = Bundle.objects.get(id=bundle_id, is_active=True)
+            if tenant:
+                # Multi-tenant: bundle must belong to this tenant
+                bundle = Bundle.objects.get(id=bundle_id, tenant=tenant, is_active=True)
+            else:
+                # Legacy: allow global bundles (tenant=null) or any bundle
+                bundle = Bundle.objects.get(id=bundle_id, is_active=True)
             amount = bundle.price
         except Bundle.DoesNotExist:
             return Response(
-                {"success": False, "message": "Invalid bundle selected"},
+                {
+                    "success": False,
+                    "message": "Invalid bundle selected for this network",
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
     else:
-        # Use default daily bundle
-        bundle = Bundle.objects.filter(duration_hours=24, is_active=True).first()
-        amount = bundle.price if bundle else settings.DAILY_ACCESS_PRICE
+        # Use default daily bundle (scoped to tenant)
+        if tenant:
+            bundle = Bundle.objects.filter(
+                tenant=tenant, duration_hours=24, is_active=True
+            ).first()
+        else:
+            bundle = Bundle.objects.filter(duration_hours=24, is_active=True).first()
+
+        if not bundle:
+            return Response(
+                {
+                    "success": False,
+                    "message": "No daily bundle configured for this network",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        amount = bundle.price
 
     # Generate unique order reference (alphanumeric only)
     order_reference = f"KITONGA{user.id}{uuid.uuid4().hex[:8].upper()}"
 
-    # Create payment record
+    # =========================================================================
+    # MULTI-TENANT: Create payment record WITH tenant association
+    # =========================================================================
     payment = Payment.objects.create(
+        tenant=tenant,  # Associate payment with tenant
         user=user,
         bundle=bundle,
         amount=amount,
@@ -4282,7 +4387,18 @@ def initiate_payment(request):
         status="pending",
     )
 
+    # =========================================================================
+    # PLATFORM PAYMENT: All payments go through platform's ClickPesa account
+    # Tenants receive payouts from the platform based on their revenue share
+    # =========================================================================
     clickpesa = ClickPesaAPI()
+    if tenant:
+        logger.info(
+            f"Processing payment for tenant {tenant.slug} via platform ClickPesa account"
+        )
+    else:
+        logger.info("Processing payment via platform ClickPesa account")
+
     result = clickpesa.initiate_payment(
         phone_number=phone_number, amount=amount, order_reference=order_reference
     )
@@ -4998,8 +5114,16 @@ def generate_vouchers(request):
 @permission_classes([AllowAny])
 def redeem_voucher(request):
     """
-    Redeem a voucher code and grant internet access
+    Redeem a voucher code and grant internet access (MULTI-TENANT AWARE)
     Creates user account if needed and enables device access
+
+    The tenant is resolved from the request context. Vouchers are scoped to tenants,
+    so a voucher from Tenant A cannot be redeemed on Tenant B's network.
+
+    Tenant resolution priority:
+    1. router_id (from MikroTik captive portal)
+    2. tenant param (explicit tenant slug)
+    3. Request middleware (API key, subdomain)
     """
     serializer = RedeemVoucherSerializer(data=request.data)
     if not serializer.is_valid():
@@ -5007,6 +5131,7 @@ def redeem_voucher(request):
 
     voucher_code = serializer.validated_data["voucher_code"]
     phone_number = serializer.validated_data["phone_number"]
+    router_id = serializer.validated_data.get("router_id")  # From captive portal
 
     # Extract comprehensive request information
     request_info = get_request_info(request, serializer.validated_data)
@@ -5014,8 +5139,62 @@ def redeem_voucher(request):
     mac_address = request_info["mac_address"]
     user_agent = request_info["user_agent"]
 
+    # =========================================================================
+    # MULTI-TENANT: Get tenant from request context
+    # Priority: 1. Middleware, 2. router_id, 3. tenant param
+    # =========================================================================
+    tenant = getattr(request, "tenant", None)
+
+    # If router_id provided, get tenant from router (captive portal flow)
+    if router_id and not tenant:
+        try:
+            router = Router.objects.get(id=router_id, is_active=True)
+            tenant = router.tenant
+            logger.info(
+                f"Voucher redemption: Tenant resolved from router_id {router_id}: {tenant.slug}"
+            )
+        except Router.DoesNotExist:
+            logger.warning(f"Voucher redemption: Router {router_id} not found")
+
+    if not tenant:
+        # Try to get tenant from request data (for captive portal integrations)
+        tenant_slug = request.data.get("tenant") or request.GET.get("tenant")
+        if tenant_slug:
+            try:
+                from .models import Tenant
+
+                tenant = Tenant.objects.get(slug=tenant_slug, is_active=True)
+            except Tenant.DoesNotExist:
+                pass
+
+    if tenant:
+        logger.info(f"Voucher redemption for tenant: {tenant.slug}")
+
     try:
-        voucher = Voucher.objects.get(code=voucher_code)
+        # =========================================================================
+        # MULTI-TENANT: Find voucher SCOPED to the tenant
+        # =========================================================================
+        if tenant:
+            # Multi-tenant: voucher must belong to this tenant
+            try:
+                voucher = Voucher.objects.get(code=voucher_code, tenant=tenant)
+            except Voucher.DoesNotExist:
+                # Check if voucher exists but belongs to different tenant
+                if Voucher.objects.filter(code=voucher_code).exists():
+                    logger.warning(
+                        f"Voucher {voucher_code} exists but not for tenant {tenant.slug}"
+                    )
+                    return Response(
+                        {
+                            "success": False,
+                            "message": "Voucher not valid for this network",
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                raise Voucher.DoesNotExist()
+        else:
+            # Legacy: find any voucher (for backwards compatibility)
+            voucher = Voucher.objects.get(code=voucher_code)
 
         # Check if voucher is already used
         if voucher.is_used:
@@ -5039,18 +5218,25 @@ def redeem_voucher(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Get or create user with normalized phone number
+        # =========================================================================
+        # MULTI-TENANT: Get or create user WITHIN this tenant's scope
+        # =========================================================================
         from .utils import get_or_create_user
 
+        # Use voucher's tenant (which we verified matches the request tenant)
+        voucher_tenant = voucher.tenant or tenant
+
         try:
-            user, created = get_or_create_user(phone_number, max_devices=1)
+            user, created = get_or_create_user(
+                phone_number, tenant=voucher_tenant, max_devices=1
+            )
             if created:
                 logger.info(
-                    f"Created new user {user.phone_number} (normalized from {phone_number}) via voucher redemption"
+                    f"Created new user {user.phone_number} for tenant {voucher_tenant.slug if voucher_tenant else 'GLOBAL'} via voucher redemption"
                 )
             else:
                 logger.info(
-                    f"Found existing user {user.phone_number} for voucher redemption"
+                    f"Found existing user {user.phone_number} for tenant {voucher_tenant.slug if voucher_tenant else 'GLOBAL'} for voucher redemption"
                 )
         except ValueError as e:
             return Response(
@@ -5764,11 +5950,61 @@ def health_check(request):
 @permission_classes([AllowAny])
 def list_bundles(request):
     """
-    List all active bundles
+    List all active bundles (MULTI-TENANT AWARE)
+
+    Returns bundles scoped to the current tenant if one is resolved.
+    This ensures captive portals show only the correct tenant's packages.
+
+    Tenant resolution priority:
+    1. router_id query param (from MikroTik captive portal)
+    2. tenant query param (explicit tenant slug)
+    3. Request middleware (API key, subdomain)
     """
-    bundles = Bundle.objects.filter(is_active=True)
+    # =========================================================================
+    # MULTI-TENANT: Get tenant from request context
+    # =========================================================================
+    tenant = getattr(request, "tenant", None)
+
+    # Priority 1: router_id from captive portal
+    router_id = request.GET.get("router_id")
+    if router_id and not tenant:
+        try:
+            router = Router.objects.get(id=router_id, is_active=True)
+            tenant = router.tenant
+            logger.info(
+                f"list_bundles: Tenant resolved from router_id {router_id}: {tenant.slug}"
+            )
+        except Router.DoesNotExist:
+            logger.warning(f"list_bundles: Router {router_id} not found")
+
+    # Priority 2: tenant slug query param
+    if not tenant:
+        tenant_slug = request.GET.get("tenant")
+        if tenant_slug:
+            try:
+                from .models import Tenant
+
+                tenant = Tenant.objects.get(slug=tenant_slug, is_active=True)
+            except Tenant.DoesNotExist:
+                pass
+
+    if tenant:
+        # Multi-tenant: return only this tenant's bundles
+        bundles = Bundle.objects.filter(tenant=tenant, is_active=True)
+        logger.debug(
+            f"Listing bundles for tenant {tenant.slug}: {bundles.count()} found"
+        )
+    else:
+        # Legacy: return all bundles (for backwards compatibility)
+        # Or you could return only global bundles (tenant=null)
+        bundles = Bundle.objects.filter(is_active=True)
+
     return Response(
-        {"success": True, "bundles": BundleSerializer(bundles, many=True).data}
+        {
+            "success": True,
+            "bundles": BundleSerializer(bundles, many=True).data,
+            "tenant": tenant.slug if tenant else None,
+        }
     )
 
 
