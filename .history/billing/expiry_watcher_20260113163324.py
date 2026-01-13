@@ -255,16 +255,13 @@ class AccessExpiryWatcher:
             from django.conf import settings
 
             phone_number = user.phone_number
-
+            
             if not phone_number:
                 logger.debug("User has no phone number, skipping SMS")
                 return
 
             # Check if NextSMS is configured globally
-            if (
-                not hasattr(settings, "NEXTSMS_USERNAME")
-                or not settings.NEXTSMS_USERNAME
-            ):
+            if not hasattr(settings, "NEXTSMS_USERNAME") or not settings.NEXTSMS_USERNAME:
                 logger.debug("Global NextSMS not configured, skipping SMS")
                 return
 
@@ -276,9 +273,8 @@ class AccessExpiryWatcher:
 
                 # Log the SMS
                 from .models import SMSLog
-
                 SMSLog.objects.create(
-                    tenant=user.tenant if hasattr(user, "tenant") else None,
+                    tenant=user.tenant if hasattr(user, 'tenant') else None,
                     phone_number=phone_number,
                     message="Access expired notification",
                     sms_type="expired",
@@ -289,9 +285,7 @@ class AccessExpiryWatcher:
                 logger.warning("Failed to send expiry SMS: %s", result.get("message"))
 
         except Exception as e:
-            logger.error(
-                "Failed to send expiry SMS to %s: %s", user.phone_number, str(e)
-            )
+            logger.error("Failed to send expiry SMS to %s: %s", user.phone_number, str(e))
 
 
 class MikroTikSessionEnforcer:

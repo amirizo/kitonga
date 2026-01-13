@@ -255,16 +255,13 @@ class AccessExpiryWatcher:
             from django.conf import settings
 
             phone_number = user.phone_number
-
+            
             if not phone_number:
                 logger.debug("User has no phone number, skipping SMS")
                 return
 
             # Check if NextSMS is configured globally
-            if (
-                not hasattr(settings, "NEXTSMS_USERNAME")
-                or not settings.NEXTSMS_USERNAME
-            ):
+            if not hasattr(settings, "NEXTSMS_USERNAME") or not settings.NEXTSMS_USERNAME:
                 logger.debug("Global NextSMS not configured, skipping SMS")
                 return
 
@@ -276,9 +273,8 @@ class AccessExpiryWatcher:
 
                 # Log the SMS
                 from .models import SMSLog
-
                 SMSLog.objects.create(
-                    tenant=user.tenant if hasattr(user, "tenant") else None,
+                    tenant=user.tenant if hasattr(user, 'tenant') else None,
                     phone_number=phone_number,
                     message="Access expired notification",
                     sms_type="expired",
@@ -289,9 +285,96 @@ class AccessExpiryWatcher:
                 logger.warning("Failed to send expiry SMS: %s", result.get("message"))
 
         except Exception as e:
-            logger.error(
-                "Failed to send expiry SMS to %s: %s", user.phone_number, str(e)
+            logger.error("Failed to send expiry SMS to %s: %s", user.phone_number, str(e))
+
+    def _send_direct_tenant_sms(self, user):
+        """Send SMS using tenant's own NextSMS credentials"""
+        try:
+            if not user.tenant:
+                return
+
+            tenant = user.tenant
+
+            # Check if tenant has NextSMS configured
+            if not tenant.nextsms_username or not tenant.nextsms_password:
+                logger.debug("Tenant %s has no SMS credentials configured", tenant.slug)
+                return
+
+            from .nextsms import TenantNextSMSAPI
+
+            sms_api = TenantNextSMSAPI(tenant)
+
+            # Compose expiry message
+            message = (
+                f"{tenant.business_name}: Your WiFi access has expired. "
+                f"Purchase a new package to continue enjoying our service. "
+                f"Visit our portal to renew."
             )
+
+            result = sms_api.send_sms(
+                user.phone_number, message, reference=f"EXPIRED-{user.phone_number}"
+            )
+
+            if result.get("success"):
+                logger.info(
+                    "📱 Sent expiry SMS to %s via tenant %s",
+                    user.phone_number,
+                    tenant.slug,
+                )
+
+                # Log the SMS
+                from .models import SMSLog
+
+                SMSLog.objects.create(
+                    tenant=tenant,
+                    phone_number=user.phone_number,
+                    message=message,
+                    sms_type="expired",
+                    success=True,
+                    response_data=result,
+                )
+            else:
+                logger.warning("Failed to send tenant SMS: %s", result.get("message"))
+
+        except Exception as e:
+            logger.error("Error sending tenant SMS: %s", str(e))
+
+    def _send_legacy_sms(self, user):
+        """Send SMS using global NextSMS settings (legacy/non-tenant mode)"""
+        try:
+            from .nextsms import NextSMSAPI
+            from django.conf import settings
+
+            # Check if NextSMS is configured globally
+            if (
+                not hasattr(settings, "NEXTSMS_USERNAME")
+                or not settings.NEXTSMS_USERNAME
+            ):
+                logger.debug("Global NextSMS not configured, skipping SMS")
+                return
+
+            sms_api = NextSMSAPI()
+            result = sms_api.send_access_expired(user.phone_number)
+
+            if result.get("success"):
+                logger.info("📱 Sent expiry SMS to %s (global SMS)", user.phone_number)
+
+                # Log the SMS
+                from .models import SMSLog
+
+                SMSLog.objects.create(
+                    tenant=None,
+                    phone_number=user.phone_number,
+                    message="Access expired notification",
+                    sms_type="expired",
+                    success=True,
+                    response_data=result,
+                )
+            else:
+                logger.warning("Failed to send global SMS: %s", result.get("message"))
+
+        except Exception as e:
+            logger.error("Error sending legacy SMS: %s", str(e))
 
 
 class MikroTikSessionEnforcer:
