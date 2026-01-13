@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kitonga WiFi - Status</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: 'Arial', sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 500px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+      }
+
+      .header {
+        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        color: white;
+        padding: 30px;
+        text-align: center;
+      }
+
+      .status-icon {
+        font-size: 48px;
+        margin-bottom: 10px;
+      }
+
+      .header h1 {
+        font-size: 24px;
+        margin-bottom: 5px;
+      }
+
+      .content {
+        padding: 30px;
+      }
+
+      .status-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 15px 0;
+        border-bottom: 1px solid #f0f0f0;
+      }
+
+      .status-item:last-child {
+        border-bottom: none;
+      }
+
+      .status-label {
+        font-weight: 600;
+        color: #333;
+      }
+
+      .status-value {
+        color: #666;
+        text-align: right;
+      }
+
+      .logout-btn {
+        width: 100%;
+        padding: 15px;
+        background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        margin-top: 20px;
+        transition: transform 0.2s;
+      }
+
+      .logout-btn:hover {
+        transform: translateY(-2px);
+      }
+
+      .refresh-btn {
+        width: 100%;
+        padding: 12px;
+        background: #f8f9fa;
+        color: #333;
+        border: 2px solid #e9ecef;
+        border-radius: 10px;
+        font-size: 14px;
+        cursor: pointer;
+        margin-top: 10px;
+      }
+
+      .time-remaining {
+        background: linear-gradient(135deg, #ffc107 0%, #ffb300 100%);
+        color: white;
+        padding: 15px;
+        border-radius: 10px;
+        text-align: center;
+        margin-bottom: 20px;
+      }
+
+      .connected-since {
+        background: #e3f2fd;
+        padding: 10px;
+        border-radius: 8px;
+        text-align: center;
+        color: #1976d2;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div class="status-icon">✅</div>
+        <h1>Connected Successfully</h1>
+        <p>You are now online</p>
+      </div>
+
+      <div class="content">
+        <div class="time-remaining">
+          <strong>⏰ Session Time Remaining</strong><br />
+          <span style="font-size: 18px">$(session-time-left)</span>
+        </div>
+
+        <div class="status-item">
+          <span class="status-label">📱 User</span>
+          <span class="status-value">$(username)</span>
+        </div>
+
+        <div class="status-item">
+          <span class="status-label">🌐 IP Address</span>
+          <span class="status-value">$(ip)</span>
+        </div>
+
+        <div class="status-item">
+          <span class="status-label">⬇️ Downloaded</span>
+          <span class="status-value">$(bytes-in-nice)</span>
+        </div>
+
+        <div class="status-item">
+          <span class="status-label">⬆️ Uploaded</span>
+          <span class="status-value">$(bytes-out-nice)</span>
+        </div>
+
+        <div class="status-item">
+          <span class="status-label">⏱️ Session Time</span>
+          <span class="status-value">$(uptime)</span>
+        </div>
+
+        <div class="connected-since">Connected since: $(uptime-secs) seconds ago</div>
+
+        <button class="refresh-btn" onclick="window.location.reload()">🔄 Refresh Status</button>
+
+        <button class="refresh-btn" style="background: #28a745; color: white; border-color: #28a745" onclick="buyMoreTime()">💳 Buy More Time</button>
+
+        <form action="$(link-logout)" method="post">
+          <button type="submit" class="logout-btn">🚪 Disconnect</button>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      // Get router_id from URL parameters
+      function getParams() {
+        var params = {}
+        var search = window.location.search.substring(1)
+        if (search) {
+          var pairs = search.split('&')
+          for (var i = 0; i < pairs.length; i++) {
+            var pair = pairs[i].split('=')
+            var key = decodeURIComponent(pair[0])
+            var value = decodeURIComponent(pair[1] || '')
+            params[key] = value
+            params[key.replace(/-/g, '_')] = value
+          }
+        }
+        return params
+      }
+
+      function buyMoreTime() {
+        var params = getParams()
+        var routerId = params['router-id'] || params['router_id'] || params['routerid'] || ''
+        var username = '$(username)'
+
+        var url = 'https://kitonga.klikcell.com/portal/?phone=' + encodeURIComponent(username)
+        if (routerId) {
+          url += '&router_id=' + encodeURIComponent(routerId)
+        }
+        window.open(url, '_blank')
+      }
+
+      // Auto-refresh every 30 seconds
+      setTimeout(function () {
+        window.location.reload()
+      }, 30000)
+    </script>
+  </body>
+</html>

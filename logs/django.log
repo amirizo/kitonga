@@ -2286,3 +2286,4 @@ ERROR 2026-01-06 03:27:14,066 basehttp 9251 6193459200 You're accessing the deve
 INFO 2026-01-06 03:27:23,233 autoreload 9251 8599265408 /Users/macbookair/Desktop/kitonga/billing/models.py changed, reloading.
 INFO 2026-01-06 03:27:23,825 autoreload 9445 8599265408 Watching for file changes with StatReloader
 INFO 2026-01-06 03:30:20,717 autoreload 9445 8599265408 /Users/macbookair/Desktop/kitonga/kitonga/settings.py changed, reloading.
+INFO 2026-01-13 05:43:24,369 autoreload 82234 8309842048 Watching for file changes with StatReloader
