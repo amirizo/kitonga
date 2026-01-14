@@ -1072,7 +1072,7 @@ def portal_router_active_users(request, router_id):
 def portal_router_disconnect_user(request, router_id):
     """
     Disconnect a specific user from a specific router (Tenant Portal)
-
+    
     Request Body:
     {
         "username": "+255712345678",  # Required: phone number
@@ -1108,10 +1108,7 @@ def portal_router_disconnect_user(request, router_id):
         user = User.objects.get(phone_number=username, tenant=tenant)
     except User.DoesNotExist:
         return Response(
-            {
-                "success": False,
-                "error": "User not found or does not belong to your tenant",
-            },
+            {"success": False, "error": "User not found or does not belong to your tenant"},
             status=status.HTTP_404_NOT_FOUND,
         )
 
@@ -1129,7 +1126,9 @@ def portal_router_disconnect_user(request, router_id):
     try:
         # Disconnect user from this specific router
         result = disconnect_user_with_api(
-            api=api, username=username, mac_address=mac_address
+            api=api,
+            username=username,
+            mac_address=mac_address
         )
 
         if result.get("success") or result.get("session_removed"):

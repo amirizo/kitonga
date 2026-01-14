@@ -702,6 +702,160 @@ def portal_export_data(request):
 # =============================================================================
 
 
+@api_view(["GET"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_router_next_vpn_ip(request):
+    """
+    Get the next available WireGuard VPN IP address for a new router
+    Helps tenants know which IP to use when configuring WireGuard
+    
+    Returns:
+    - next_ip: Next available IP in 10.100.0.0/24 range
+    - wireguard_config: Configuration details for setting up WireGuard
+    - mikrotik_commands: Ready-to-use MikroTik commands
+    """
+    from .models import Router
+    import ipaddress
+    
+    tenant = request.tenant
+    
+    try:
+        # Define WireGuard VPN network range
+        vpn_network = ipaddress.ip_network('10.100.0.0/24')
+        reserved_ips = {
+            ipaddress.ip_address('10.100.0.0'),   # Network address
+            ipaddress.ip_address('10.100.0.1'),   # VPS server
+            ipaddress.ip_address('10.100.0.255'), # Broadcast
+        }
+        
+        # Get all used IPs from existing routers
+        used_ips = set()
+        for router in Router.objects.all():
+            try:
+                # Extract IP from host field (could be IP or hostname)
+                ip_str = router.host.strip()
+                # Check if it's in the VPN range
+                ip_obj = ipaddress.ip_address(ip_str)
+                if ip_obj in vpn_network:
+                    used_ips.add(ip_obj)
+            except (ValueError, AttributeError):
+                # Skip if host is not a valid IP or is a hostname
+                continue
+        
+        # Find next available IP
+        next_ip = None
+        for ip in vpn_network.hosts():
+            if ip not in reserved_ips and ip not in used_ips:
+                next_ip = str(ip)
+                break
+        
+        if not next_ip:
+            return Response(
+                {
+                    "success": False,
+                    "error": "No available IP addresses in VPN range 10.100.0.0/24",
+                    "message": "All IPs are allocated. Please contact support."
+                },
+                status=status.HTTP_507_INSUFFICIENT_STORAGE
+            )
+        
+        # WireGuard server details (from your VPS)
+        wireguard_server_public_key = "0ItNRIAXdf090Z3RpIVsmrA1JjRJrZveYweNZXXo3mQ="
+        vps_public_ip = "66.29.143.116"
+        wireguard_port = 51820
+        
+        # Generate tenant-specific info
+        tenant_name = tenant.slug
+        
+        # MikroTik commands ready to copy-paste
+        mikrotik_commands = f"""# ============================================
+# WireGuard VPN Configuration for {tenant.business_name}
+# Router VPN IP: {next_ip}
+# ============================================
+
+# Step 1: Create WireGuard interface
+/interface wireguard add name=wg-kitonga listen-port={wireguard_port}
+
+# Step 2: Add VPS as peer
+/interface wireguard peers add \\
+    interface=wg-kitonga \\
+    public-key="{wireguard_server_public_key}" \\
+    endpoint-address={vps_public_ip} \\
+    endpoint-port={wireguard_port} \\
+    allowed-address=10.100.0.0/24 \\
+    persistent-keepalive=25
+
+# Step 3: Assign VPN IP address to your router
+/ip address add address={next_ip}/24 interface=wg-kitonga
+
+# Step 4: Allow Kitonga API access from VPN
+/ip firewall filter add \\
+    chain=input \\
+    src-address=10.100.0.0/24 \\
+    protocol=tcp \\
+    dst-port=8728 \\
+    action=accept \\
+    comment="Kitonga API Access"
+
+# Step 5: Verify connection
+/ping 10.100.0.1 count=5
+
+# ============================================
+# After running these commands:
+# 1. Contact Kitonga support to add your router to VPS
+# 2. Provide them with your router's WireGuard public key
+# 3. Get the public key with: /interface wireguard print
+# ============================================
+"""
+        
+        # Show which IPs are already used
+        used_ips_list = sorted([str(ip) for ip in used_ips])
+        
+        return Response(
+            {
+                "success": True,
+                "next_available_ip": next_ip,
+                "vpn_network": "10.100.0.0/24",
+                "vps_vpn_ip": "10.100.0.1",
+                "used_ips": used_ips_list,
+                "total_available": sum(1 for ip in vpn_network.hosts() if ip not in reserved_ips and ip not in used_ips),
+                "wireguard_config": {
+                    "router_vpn_ip": next_ip,
+                    "vps_public_ip": vps_public_ip,
+                    "vps_vpn_ip": "10.100.0.1",
+                    "wireguard_port": wireguard_port,
+                    "server_public_key": wireguard_server_public_key,
+                    "vpn_network": "10.100.0.0/24",
+                },
+                "mikrotik_commands": mikrotik_commands,
+                "setup_instructions": [
+                    f"1. Copy the MikroTik commands above",
+                    f"2. Connect to your MikroTik router via Winbox or SSH",
+                    f"3. Paste and run all commands",
+                    f"4. Get your router's WireGuard public key: /interface wireguard print",
+                    f"5. Contact Kitonga support to add your public key to the VPS",
+                    f"6. Once approved, add router in Kitonga portal using IP: {next_ip}"
+                ],
+                "important_notes": [
+                    f"⚠️  Use {next_ip} as the 'Host' when adding router in Kitonga portal",
+                    "⚠️  Your router must have internet access to reach VPS",
+                    "⚠️  Keep your WireGuard private key secure",
+                    "⚠️  Port 51820/UDP must be open on your router's firewall"
+                ]
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting next VPN IP for tenant {tenant.slug}: {str(e)}")
+        return Response(
+            {
+                "success": False,
+                "error": f"Error: {str(e)}"
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 @api_view(["POST"])
 @permission_classes([TenantAPIKeyPermission])
 def portal_router_test_connection(request):

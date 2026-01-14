@@ -2307,3 +2307,21 @@ INFO 2026-01-14 23:40:02,244 tasks 37152 8309842048 🔍 Found 0 expired users t
 INFO 2026-01-14 23:40:02,248 tasks 37152 8309842048 🎯 Expired user cleanup complete: 0 users disconnected, 0 devices deactivated, 0 SMS sent, 0 failures
 INFO 2026-01-14 23:45:02,550 tasks 37299 8309842048 🔍 Found 0 expired users to disconnect
 INFO 2026-01-14 23:45:02,552 tasks 37299 8309842048 🎯 Expired user cleanup complete: 0 users disconnected, 0 devices deactivated, 0 SMS sent, 0 failures
+ERROR 2026-01-14 23:50:02,759 tasks 37724 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-14 23:55:02,156 tasks 37969 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 00:00:03,291 tasks 38156 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 00:05:02,665 tasks 38352 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 00:10:01,816 tasks 38526 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 00:15:01,872 tasks 38685 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 00:20:02,087 tasks 38859 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 00:25:02,167 tasks 39024 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 00:30:02,378 tasks 39174 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 00:35:02,781 tasks 39941 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 00:40:02,252 tasks 40657 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 00:45:03,132 tasks 40916 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 00:50:02,502 tasks 41154 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 00:55:03,450 tasks 41419 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 01:00:02,928 tasks 41670 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 01:05:02,466 tasks 42305 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 01:10:03,063 tasks 42980 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-15 01:15:02,307 tasks 43224 8309842048 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")

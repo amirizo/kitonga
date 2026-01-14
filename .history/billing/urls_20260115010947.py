@@ -291,6 +291,11 @@ urlpatterns = [
     path("portal/export/", portal_views.portal_export_data, name="portal_export_data"),
     # Router Configuration Wizard
     path(
+        "portal/router/next-vpn-ip/",
+        portal_views.portal_router_next_vpn_ip,
+        name="portal_router_next_vpn_ip",
+    ),
+    path(
         "portal/router/test/",
         portal_views.portal_router_test_connection,
         name="portal_router_test_connection",

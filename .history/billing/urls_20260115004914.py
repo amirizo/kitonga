@@ -329,11 +329,6 @@ urlpatterns = [
         name="portal_router_active_users",
     ),
     path(
-        "portal/router/<int:router_id>/disconnect-user/",
-        portal_views.portal_router_disconnect_user,
-        name="portal_router_disconnect_user",
-    ),
-    path(
         "portal/router/<int:router_id>/collect-metrics/",
         portal_views.portal_router_collect_metrics,
         name="portal_router_collect_metrics",
