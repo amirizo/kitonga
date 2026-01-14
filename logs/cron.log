@@ -1,0 +1,7 @@
+Checking for expired users...
+INFO 2026-01-14 23:10:04,269 tasks 35453 8309842048 🔍 Found 0 expired users to disconnect
+INFO 2026-01-14 23:10:04,272 tasks 35453 8309842048 🎯 Expired user cleanup complete: 0 users disconnected, 0 devices deactivated, 0 SMS sent, 0 failures
+✓ Disconnected 0 expired users from MikroTik
+  Total users checked: 0
+
+Done!

@@ -27,12 +27,12 @@ def disconnect_expired_users():
     3. Disconnects them from MikroTik (removes active sessions, IP bindings, disables user)
     4. Deactivates their access in the database
     5. Marks their devices as inactive
-
+    
     IMPORTANT: This tracks which router each user is connected to for accurate disconnection
     """
     try:
         from .models import Router
-
+        
         now = timezone.now()
 
         # Find users whose access has expired
@@ -48,16 +48,8 @@ def disconnect_expired_users():
 
         for user in expired_users:
             try:
-                # Calculate how long they've been expired
-                time_expired = now - user.paid_until if user.paid_until else None
-                expired_hours = (
-                    int(time_expired.total_seconds() / 3600) if time_expired else 0
-                )
-
                 logger.info(
-                    f"⏰ Processing expired user: {user.phone_number} "
-                    f"(tenant: {user.tenant.slug if user.tenant else 'platform'}, "
-                    f"paid_until: {user.paid_until}, expired {expired_hours}h ago)"
+                    f"Processing expired user: {user.phone_number} (paid_until: {user.paid_until})"
                 )
 
                 # Send SMS notification BEFORE disconnecting
@@ -67,24 +59,8 @@ def disconnect_expired_users():
                 # Get all active devices for this user
                 devices = user.devices.filter(is_active=True)
 
-                # Track which routers this user's devices are connected to
-                user_routers = set()
-                for device in devices:
-                    if device.router:
-                        user_routers.add(device.router)
-                        logger.info(
-                            f"  📱 Device {device.mac_address} connected to router: {device.router.name} (ID: {device.router.id})"
-                        )
-                    else:
-                        logger.warning(
-                            f"  ⚠️  Device {device.mac_address} has no router association"
-                        )
-
                 # Check if user belongs to a tenant (multi-tenant mode)
                 if user.tenant:
-                    tenant_routers = list(
-                        Router.objects.filter(tenant=user.tenant, is_active=True)
-                    )
                     # Use tenant-aware disconnect for multi-tenant SaaS
                     for device in devices:
                         try:
@@ -122,16 +98,8 @@ def disconnect_expired_users():
                         pass
                 else:
                     # Fallback to legacy global router for users without tenant
-                    logger.info(
-                        f"  🌐 Using legacy global router for {user.phone_number}"
-                    )
-
                     for device in devices:
                         try:
-                            logger.info(
-                                f"  🔌 Disconnecting device {device.mac_address} from global router..."
-                            )
-
                             result = disconnect_user_from_mikrotik(
                                 username=user.phone_number,
                                 mac_address=device.mac_address,
@@ -139,63 +107,45 @@ def disconnect_expired_users():
 
                             if result.get("success"):
                                 logger.info(
-                                    f"  ✅ Successfully disconnected {user.phone_number} - {device.mac_address} from global MikroTik"
-                                )
-                                routers_processed["global"] = (
-                                    routers_processed.get("global", 0) + 1
+                                    f"Successfully disconnected {user.phone_number} - {device.mac_address} from MikroTik"
                                 )
                             else:
                                 logger.warning(
-                                    f"  ⚠️  Disconnect result for {user.phone_number} - {device.mac_address}: {result}"
+                                    f"Disconnect result for {user.phone_number} - {device.mac_address}: {result}"
                                 )
 
                             # Mark device as inactive in database
                             device.is_active = False
                             device.save()
                             devices_deactivated += 1
-                            logger.info(
-                                f"  ✅ Device {device.mac_address} marked as inactive"
-                            )
 
                         except Exception as device_error:
                             logger.error(
-                                f"  ❌ Error disconnecting device {device.mac_address} for {user.phone_number}: {str(device_error)}"
+                                f"Error disconnecting device {device.mac_address} for {user.phone_number}: {str(device_error)}"
                             )
                             failed_count += 1
 
                     # Also try to disconnect by username only (for orphaned sessions)
                     try:
-                        logger.info(
-                            f"  🧹 Cleaning up orphaned sessions for {user.phone_number}..."
-                        )
                         disconnect_user_from_mikrotik(
                             username=user.phone_number, mac_address=None
                         )
-                    except Exception as cleanup_error:
-                        logger.warning(
-                            f"  ⚠️  Orphaned session cleanup failed: {cleanup_error}"
-                        )
+                    except Exception:
+                        pass
 
                 # Deactivate user in database
                 user.deactivate_access()
                 disconnected_count += 1
-                logger.info(f"✅ User {user.phone_number} deactivated after expiration")
+                logger.info(f"User {user.phone_number} deactivated after expiration")
 
             except Exception as user_error:
                 logger.error(
-                    f"❌ Error processing expired user {user.phone_number}: {str(user_error)}"
+                    f"Error processing expired user {user.phone_number}: {str(user_error)}"
                 )
                 failed_count += 1
 
-        # Log router-level statistics
-        if routers_processed:
-            logger.info("📊 Router disconnect statistics:")
-            for router_key, count in routers_processed.items():
-                logger.info(f"  - {router_key}: {count} users disconnected")
-
         logger.info(
-            f"🎯 Expired user cleanup complete: {disconnected_count} users disconnected, "
-            f"{devices_deactivated} devices deactivated, {sms_sent} SMS sent, {failed_count} failures"
+            f"Expired user cleanup complete: {disconnected_count} users disconnected, {devices_deactivated} devices deactivated, {sms_sent} SMS sent, {failed_count} failures"
         )
 
         return {
@@ -205,7 +155,6 @@ def disconnect_expired_users():
             "sms_sent": sms_sent,
             "failed": failed_count,
             "total_checked": expired_users.count(),
-            "routers_processed": routers_processed,
         }
 
     except Exception as e:
@@ -301,8 +250,6 @@ def send_expiry_notifications():
     This should be run hourly via cron.
 
     Notifies users 1 hour before their access expires.
-
-    IMPORTANT: This only sends notifications. Actual disconnection happens in disconnect_expired_users()
     """
     try:
         from datetime import timedelta
@@ -322,10 +269,6 @@ def send_expiry_notifications():
             expiry_notification_sent=False,
         )
 
-        logger.info(
-            f"📢 Found {users_to_notify.count()} users to notify about upcoming expiry"
-        )
-
         notified_count = 0
         failed_count = 0
 
@@ -337,18 +280,8 @@ def send_expiry_notifications():
                 remaining = user.paid_until - now
                 remaining_minutes = int(remaining.total_seconds() / 60)
 
-                logger.info(
-                    f"⏰ Notifying {user.phone_number} "
-                    f"(tenant: {user.tenant.slug if user.tenant else 'platform'}, "
-                    f"expires in {remaining_minutes} minutes)"
-                )
-
-                # Customize message based on tenant
-                if user.tenant:
-                    business_name = user.tenant.business_name
-                    message = f"{business_name} WiFi: Your internet access expires in {remaining_minutes} minutes. To continue using WiFi, please make a payment or redeem a voucher."
-                else:
-                    message = f"Kitonga WiFi: Your internet access expires in {remaining_minutes} minutes. To continue using WiFi, please make a payment or redeem a voucher."
+                # Send SMS notification
+                message = f"Kitonga WiFi: Your internet access expires in {remaining_minutes} minutes. To continue using WiFi, please make a payment or redeem a voucher."
 
                 result = nextsms.send_sms(user.phone_number, message)
 
@@ -356,11 +289,10 @@ def send_expiry_notifications():
                     user.expiry_notification_sent = True
                     user.save()
                     notified_count += 1
-                    logger.info(f"✅ Sent expiry notification to {user.phone_number}")
+                    logger.info(f"Sent expiry notification to {user.phone_number}")
 
                     # Log SMS
                     SMSLog.objects.create(
-                        tenant=user.tenant if hasattr(user, "tenant") else None,
                         phone_number=user.phone_number,
                         message=message,
                         sms_type="expiry_notification",
@@ -370,25 +302,18 @@ def send_expiry_notifications():
                 else:
                     failed_count += 1
                     logger.warning(
-                        f"❌ Failed to send expiry notification to {user.phone_number}: {result}"
+                        f"Failed to send expiry notification to {user.phone_number}: {result}"
                     )
 
             except Exception as user_error:
                 failed_count += 1
                 logger.error(
-                    f"❌ Error sending notification to {user.phone_number}: {str(user_error)}"
+                    f"Error sending notification to {user.phone_number}: {str(user_error)}"
                 )
 
         logger.info(
-            f"📢 Expiry notifications complete: {notified_count} sent, {failed_count} failed"
+            f"Expiry notifications: {notified_count} sent, {failed_count} failed"
         )
-
-        # Show warning if users were notified but might not get disconnected
-        if notified_count > 0:
-            logger.warning(
-                f"⚠️  REMINDER: {notified_count} users were notified. "
-                f"Make sure disconnect_expired_users() task is running every 5 minutes to actually disconnect them!"
-            )
 
         return {
             "success": True,

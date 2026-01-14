@@ -2287,3 +2287,9 @@ INFO 2026-01-06 03:27:23,233 autoreload 9251 8599265408 /Users/macbookair/Deskto
 INFO 2026-01-06 03:27:23,825 autoreload 9445 8599265408 Watching for file changes with StatReloader
 INFO 2026-01-06 03:30:20,717 autoreload 9445 8599265408 /Users/macbookair/Desktop/kitonga/kitonga/settings.py changed, reloading.
 INFO 2026-01-13 05:43:24,369 autoreload 82234 8309842048 Watching for file changes with StatReloader
+INFO 2026-01-14 23:00:42,938 tasks 34907 8309842048 🔍 Found 0 expired users to disconnect
+INFO 2026-01-14 23:00:42,943 tasks 34907 8309842048 🎯 Expired user cleanup complete: 0 users disconnected, 0 devices deactivated, 0 SMS sent, 0 failures
+INFO 2026-01-14 23:10:04,269 tasks 35453 8309842048 🔍 Found 0 expired users to disconnect
+INFO 2026-01-14 23:10:04,272 tasks 35453 8309842048 🎯 Expired user cleanup complete: 0 users disconnected, 0 devices deactivated, 0 SMS sent, 0 failures
+INFO 2026-01-14 23:10:12,922 tasks 35514 8309842048 🔍 Found 0 expired users to disconnect
+INFO 2026-01-14 23:10:12,924 tasks 35514 8309842048 🎯 Expired user cleanup complete: 0 users disconnected, 0 devices deactivated, 0 SMS sent, 0 failures

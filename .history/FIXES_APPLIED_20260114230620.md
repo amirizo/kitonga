@@ -1,0 +1,354 @@
+# 🔧 FIXES APPLIED - User Disconnection Issue
+
+## Problem Summary
+
+Users were receiving expiry SMS notifications but **NOT being disconnected** from MikroTik routers. They could continue using internet even after their access expired.
+
+## Root Cause
+
+The `disconnect_expired_users()` background task was **NOT running automatically**. Without this task running every 5 minutes, expired users remain connected.
+
+---
+
+## ✅ Changes Made
+
+### 1. Enhanced `billing/tasks.py` (MAJOR UPDATE)
+
+#### **Added Router & Tenant Tracking**
+
+- Now tracks which specific router each device is connected to
+- Identifies which tenant the user belongs to
+- Shows router associations in logs
+
+#### **Improved Logging**
+
+- Added emoji-based log messages for easy scanning (🔍 ✅ ❌ ⚠️ 📡)
+- Shows how long users have been expired
+- Displays which routers users are disconnected from
+- Provides per-router disconnect statistics
+- Warns when no routers found for tenant
+
+#### **Better Error Handling**
+
+- Checks if tenant has active routers before attempting disconnect
+- Provides detailed error messages
+- Continues processing other users if one fails
+- Tracks success/failure rates per router
+
+#### **Example Enhanced Log Output:**
+
+```
+🔍 Found 3 expired users to disconnect
+⏰ Processing expired user: 255772236727 (tenant: hotel-abc, paid_until: 2026-01-14 06:00:00, expired 4h ago)
+  📱 Device AA:BB:CC:DD:EE:FF connected to router: HotelRouter1 (ID: 5)
+  🏢 Tenant mode: Hotel ABC (hotel-abc)
+  📡 Tenant has 2 active routers: ['HotelRouter1', 'HotelRouter2']
+  🔌 Disconnecting device AA:BB:CC:DD:EE:FF from tenant routers...
+  ✅ Successfully disconnected 255772236727 - AA:BB:CC:DD:EE:FF from 2/2 tenant routers
+  ✅ Device AA:BB:CC:DD:EE:FF marked as inactive
+✅ User 255772236727 deactivated after expiration
+📊 Router disconnect statistics:
+  - hotel-abc:HotelRouter1: 3 users disconnected
+  - hotel-abc:HotelRouter2: 3 users disconnected
+🎯 Expired user cleanup complete: 3 users disconnected, 3 devices deactivated, 3 SMS sent, 0 failures
+```
+
+#### **Tenant-Aware SMS Messages**
+
+- Expiry notifications now use tenant business name
+- Example: "Hotel ABC WiFi: Your internet access expires..." instead of generic "Kitonga WiFi"
+
+---
+
+### 2. Created Documentation
+
+#### **`docs/TASK_SCHEDULING_SETUP.md`**
+
+Complete guide covering:
+
+- Problem explanation
+- Setup instructions for cron/systemd
+- Manual testing procedures
+- Troubleshooting guide
+- Verification steps
+- Quick fix checklist
+
+---
+
+### 3. Created Helper Scripts
+
+#### **`billing/management/commands/check_task_status.py`**
+
+Django command to diagnose issues:
+
+- Shows expired users still active
+- Lists which routers they're connected to
+- Displays upcoming expirations
+- Provides router status
+- Shows statistics
+- Recommends actions
+
+**Usage:**
+
+```bash
+python manage.py check_task_status
+```
+
+#### **`setup_tasks.sh`**
+
+Automated setup script:
+
+- Detects Python environment
+- Generates correct cron entries
+- Offers to install cron jobs
+- Provides next steps
+
+**Usage:**
+
+```bash
+bash setup_tasks.sh
+```
+
+---
+
+## 🚀 Immediate Action Required
+
+### Step 1: Check Current Status
+
+```bash
+cd /Users/macbookair/Desktop/kitonga
+source venv/bin/activate
+python manage.py check_task_status
+```
+
+This will show if you have expired users still connected.
+
+### Step 2: Manual Disconnect (Immediate Fix)
+
+```bash
+python manage.py disconnect_expired_users
+```
+
+This will immediately disconnect all currently expired users.
+
+### Step 3: Setup Automatic Tasks
+
+```bash
+bash setup_tasks.sh
+```
+
+This will guide you through setting up cron jobs.
+
+**OR manually add to crontab:**
+
+```bash
+crontab -e
+```
+
+Add these lines:
+
+```bash
+# Disconnect expired users every 5 minutes (CRITICAL!)
+*/5 * * * * cd /Users/macbookair/Desktop/kitonga && /Users/macbookair/Desktop/kitonga/venv/bin/python manage.py disconnect_expired_users >> /Users/macbookair/Desktop/kitonga/logs/cron.log 2>&1
+
+# Send expiry warnings hourly
+0 * * * * cd /Users/macbookair/Desktop/kitonga && /Users/macbookair/Desktop/kitonga/venv/bin/python manage.py send_expiry_notifications >> /Users/macbookair/Desktop/kitonga/logs/cron.log 2>&1
+
+# Daily device cleanup
+0 3 * * * cd /Users/macbookair/Desktop/kitonga && /Users/macbookair/Desktop/kitonga/venv/bin/python manage.py cleanup_inactive_devices >> /Users/macbookair/Desktop/kitonga/logs/cron.log 2>&1
+```
+
+### Step 4: Verify It's Working
+
+Wait 5-10 minutes, then check logs:
+
+```bash
+tail -f logs/cron.log
+# Or
+tail -f logs/django.log
+```
+
+You should see entries like:
+
+```
+🔍 Found X expired users to disconnect
+...
+✅ User 255XXXXXXXXX deactivated after expiration
+```
+
+---
+
+## 🎯 What's Different Now?
+
+### Before (Problem):
+
+- ❌ Users got SMS: "expires in 58 minutes"
+- ❌ After 58 minutes passed, users stayed connected
+- ❌ No disconnect happened automatically
+- ❌ Users disabled only when buying access again
+- ❌ No way to know which router users were on
+
+### After (Fixed):
+
+- ✅ Users get SMS: "expires in 58 minutes"
+- ✅ Task runs every 5 minutes checking for expired users
+- ✅ Expired users automatically disconnected from MikroTik
+- ✅ Shows exactly which router/tenant each user is on
+- ✅ Detailed logs for troubleshooting
+- ✅ Statistics per router
+- ✅ Tenant-aware messages
+
+---
+
+## 🔍 Understanding the Task Flow
+
+### Task 1: `send_expiry_notifications()` (Runs every hour)
+
+**Purpose:** Warn users in advance
+**Action:** Send SMS "Your access expires in X minutes"
+**Does NOT disconnect** - just notifies
+
+### Task 2: `disconnect_expired_users()` (Runs every 5 minutes) ⚠️ CRITICAL
+
+**Purpose:** Actually disconnect expired users
+**Actions:**
+
+1. Find users where `paid_until` < now
+2. Check which tenant they belong to
+3. Get tenant's routers
+4. For each device:
+   - Disconnect from MikroTik (remove session, IP binding, disable user)
+   - Mark device as inactive
+5. Send expiry SMS (if not sent already)
+6. Deactivate user in database
+7. Log detailed results
+
+**This is the task that was missing!**
+
+---
+
+## 📊 Monitoring & Troubleshooting
+
+### Check if tasks are running:
+
+```bash
+# List cron jobs
+crontab -l
+
+# Check if cron service is running
+sudo systemctl status cron  # or 'crond' on some systems
+
+# View cron logs
+tail -f logs/cron.log
+grep "disconnect_expired" logs/cron.log
+```
+
+### Check for stuck users:
+
+```bash
+python manage.py check_task_status
+```
+
+### Manual intervention if needed:
+
+```bash
+# Force disconnect specific user
+python manage.py shell
+>>> from billing.tasks import disconnect_expired_users
+>>> result = disconnect_expired_users()
+>>> print(result)
+```
+
+### Check MikroTik connectivity:
+
+```bash
+# From admin panel: Settings > Test MikroTik Connection
+# Or via API: GET /api/admin/mikrotik/status/
+```
+
+---
+
+## ⚠️ Common Issues & Solutions
+
+### Issue: Cron job not running
+
+**Solution:**
+
+- Verify cron service: `sudo systemctl start cron`
+- Check cron logs: `grep CRON /var/log/syslog`
+- Verify paths in crontab are absolute
+- Check Python virtual environment path
+
+### Issue: Task runs but users not disconnected
+
+**Solution:**
+
+- Check MikroTik router connectivity
+- Verify router credentials in settings
+- Check tenant has active routers: `Router.objects.filter(tenant=X, is_active=True)`
+- Run manually to see detailed error logs
+
+### Issue: Device has no router association
+
+**Solution:**
+
+- Devices should be linked to router when user connects
+- Check `track_device_connection()` in `mikrotik.py`
+- Ensure router is passed when granting access
+- May need to re-connect user to populate router field
+
+---
+
+## 📝 Files Modified
+
+1. **billing/tasks.py** - Enhanced disconnect logic with router tracking
+2. **docs/TASK_SCHEDULING_SETUP.md** - Complete setup documentation
+3. **billing/management/commands/check_task_status.py** - Diagnostic tool
+4. **setup_tasks.sh** - Automated setup script
+
+---
+
+## ✅ Verification Checklist
+
+- [ ] Run `python manage.py check_task_status` - should show no expired active users
+- [ ] Run `python manage.py disconnect_expired_users` - test works
+- [ ] Add cron jobs using `bash setup_tasks.sh` or manually
+- [ ] Wait 5 minutes and check `logs/cron.log` - should see task running
+- [ ] Create a test user with expiry in 1 minute
+- [ ] Verify they get disconnected after expiry
+- [ ] Check MikroTik - user should be disabled
+- [ ] Check logs show router/tenant info
+
+---
+
+## 🎉 Success Indicators
+
+You'll know it's working when:
+
+1. ✅ No expired users appear in `check_task_status` output
+2. ✅ Cron logs show regular disconnect task execution
+3. ✅ MikroTik shows disabled users for expired accounts
+4. ✅ Logs show which router each user was disconnected from
+5. ✅ Users cannot access internet after expiry (try browsing)
+
+---
+
+## 📚 Additional Resources
+
+- **Full Setup Guide:** `docs/TASK_SCHEDULING_SETUP.md`
+- **MikroTik Setup:** `docs/MIKROTIK_MULTI_TENANT_SETUP.md`
+- **Deployment Guide:** `docs/DEPLOYMENT.md`
+
+---
+
+## Support
+
+If issues persist after following this guide:
+
+1. Check `logs/django.log` for detailed errors
+2. Run `python manage.py check_task_status` for diagnosis
+3. Verify router connectivity from admin panel
+4. Check tenant-router associations in database
+5. Test manual disconnect: `python manage.py disconnect_expired_users`
+
+The enhanced logging will help identify exactly where the issue is occurring (connection to router, permissions, tenant association, etc.).
