@@ -1148,8 +1148,9 @@ def portal_router_disconnect_user(request, router_id):
                     "details": {
                         "session_removed": result.get("session_removed", False),
                         "binding_removed": result.get("binding_removed", False),
-                        "user_disabled": result.get("user_disabled", False),
+                        "user_deleted": result.get("user_disabled", False),
                     },
+                    "note": "User must purchase new access or redeem voucher to reconnect"
                 }
             )
         else:

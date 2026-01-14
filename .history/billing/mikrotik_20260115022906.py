@@ -186,8 +186,11 @@ def get_tenant_mikrotik_api(router, retries: int = 3, timeout: int = 10):
 
 def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dict:
     """
-    Disconnect a user from MikroTik hotspot using a provided API connection.
-    Used for tenant-specific router disconnection.
+    Disconnect a user from MikroTik hotspot and DELETE their hotspot user account.
+    Used for tenant-specific router disconnection and expired user removal.
+    
+    After disconnection, user CANNOT reconnect until they purchase new access
+    or redeem a voucher (which recreates the hotspot user).
 
     Args:
         api: RouterOS API connection object
@@ -209,20 +212,26 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
         result["errors"].append("No API connection")
         return result
 
+    # Store MAC address from session for blocking if not provided
+    session_mac = None
+
     try:
-        # Step 1: Remove active sessions
+        # Step 1: Remove active sessions and capture MAC address
         try:
             active = api.get_resource("/ip/hotspot/active")
             all_sessions = active.get()
 
             for session in all_sessions:
                 session_user = session.get("user", "")
-                session_mac = session.get("mac-address", "")
+                current_mac = session.get("mac-address", "")
 
                 should_remove = False
                 if username and session_user == username:
                     should_remove = True
-                if mac_address and session_mac.upper() == mac_address.upper():
+                    # Capture MAC for blocking later
+                    if current_mac and not session_mac:
+                        session_mac = current_mac
+                if mac_address and current_mac.upper() == mac_address.upper():
                     should_remove = True
 
                 if should_remove:
@@ -232,7 +241,7 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
                             active.remove(id=session_id)
                             result["session_removed"] = True
                             logger.info(
-                                f"Removed active session for {username}: {session_mac}"
+                                f"🔌 Removed active session for {username}: {current_mac}"
                             )
                     except Exception as rem_err:
                         result["errors"].append(f"session_remove: {rem_err}")
@@ -240,20 +249,24 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
         except Exception as e:
             result["errors"].append(f"active_sessions: {e}")
 
-        # Step 2: Remove IP bindings
+        # Use provided MAC or the one we captured from session
+        target_mac = mac_address or session_mac
+
+        # Step 2: Remove existing IP bindings for this user/MAC
         try:
             bindings = api.get_resource("/ip/hotspot/ip-binding")
 
-            if mac_address:
-                binding_list = bindings.get(mac_address=mac_address)
+            if target_mac:
+                binding_list = bindings.get(mac_address=target_mac)
                 for binding in binding_list:
                     try:
                         bindings.remove(id=binding[".id"])
                         result["binding_removed"] = True
-                        logger.info(f"Removed IP binding for {mac_address}")
+                        logger.info(f"🗑️ Removed IP binding for {target_mac}")
                     except Exception:
                         pass
 
+            # Also remove bindings with username in comment
             all_bindings = bindings.get()
             for binding in all_bindings:
                 comment = binding.get("comment", "") or ""
@@ -267,21 +280,37 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
         except Exception as e:
             result["errors"].append(f"ip_bindings: {e}")
 
-        # Step 3: Disable hotspot user
+        # Step 3: DELETE hotspot user completely (try multiple formats)
         try:
             users = api.get_resource("/ip/hotspot/user")
+            
+            # Try exact username match
             user_list = users.get(name=username)
+            
+            # If not found, try with different phone formats
+            if not user_list:
+                # Try without + prefix
+                alt_username = username.replace("+", "")
+                user_list = users.get(name=alt_username)
+            
+            if not user_list:
+                # Try with + prefix
+                if not username.startswith("+"):
+                    user_list = users.get(name=f"+{username}")
+            
             for user in user_list:
                 try:
-                    users.set(id=user[".id"], disabled="yes")
+                    # DELETE the user completely - they cannot login anymore
+                    users.remove(id=user[".id"])
                     result["user_disabled"] = True
-                    logger.info(f"Disabled hotspot user: {username}")
-                except Exception:
-                    pass
+                    logger.info(f"�️ DELETED hotspot user: {username}")
+                except Exception as delete_err:
+                    result["errors"].append(f"delete_user: {delete_err}")
+                    
         except Exception as e:
-            result["errors"].append(f"disable_user: {e}")
+            result["errors"].append(f"delete_user: {e}")
 
-        # Consider success if any operation worked
+        # Consider success if session was removed or user was deleted
         result["success"] = (
             result["session_removed"]
             or result["binding_removed"]
@@ -815,6 +844,7 @@ def force_immediate_internet_access_on_tenant_routers(
 
             try:
                 # Step 1: Create/update hotspot user on this router
+                # This will RE-ENABLE the user if they were disabled from expired access
                 try:
                     user_created = create_hotspot_user_on_router(
                         api, user.phone_number, user.phone_number
@@ -822,7 +852,7 @@ def force_immediate_internet_access_on_tenant_routers(
                     router_result["hotspot_user_created"] = user_created
                     if user_created:
                         logger.info(
-                            f"✓ Hotspot user created on {router.name} for {user.phone_number}"
+                            f"✓ Hotspot user created/re-enabled on {router.name} for {user.phone_number}"
                         )
                 except Exception as user_error:
                     router_result["errors"].append(f"hotspot_user: {user_error}")
