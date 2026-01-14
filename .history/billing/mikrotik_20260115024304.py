@@ -273,16 +273,14 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
             # Get all users and filter manually - more reliable across API versions
             all_users = users.get()
             user_found = False
-
+            
             # Log all users for debugging
-            logger.debug(
-                f"Looking for username: '{username}' among {len(all_users)} hotspot users"
-            )
+            logger.debug(f"Looking for username: '{username}' among {len(all_users)} hotspot users")
 
             for user in all_users:
                 user_name = user.get("name", "")
                 # Try exact match first, then normalized match
-                if user_name == username or user_name == username.lstrip("+"):
+                if user_name == username or user_name == username.lstrip('+'):
                     user_found = True
                     try:
                         user_id = user.get(".id") or user.get("id")
@@ -300,12 +298,8 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
 
             if not user_found:
                 # Log available usernames to help debug
-                available_users = [
-                    u.get("name", "?") for u in all_users[:10]
-                ]  # First 10
-                logger.warning(
-                    f"Hotspot user not found: '{username}'. Available users (sample): {available_users}"
-                )
+                available_users = [u.get("name", "?") for u in all_users[:10]]  # First 10
+                logger.warning(f"Hotspot user not found: '{username}'. Available users (sample): {available_users}")
                 result["errors"].append(f"user_not_found: {username}")
 
         except Exception as e:

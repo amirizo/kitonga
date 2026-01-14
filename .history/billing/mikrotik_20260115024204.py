@@ -274,15 +274,9 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
             all_users = users.get()
             user_found = False
 
-            # Log all users for debugging
-            logger.debug(
-                f"Looking for username: '{username}' among {len(all_users)} hotspot users"
-            )
-
             for user in all_users:
                 user_name = user.get("name", "")
-                # Try exact match first, then normalized match
-                if user_name == username or user_name == username.lstrip("+"):
+                if user_name == username:
                     user_found = True
                     try:
                         user_id = user.get(".id") or user.get("id")
@@ -290,7 +284,7 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
                             users.set(id=user_id, disabled="yes")
                             result["user_disabled"] = True
                             logger.info(
-                                f"Disabled hotspot user: {username} (router user: {user_name}, id: {user_id})"
+                                f"Disabled hotspot user: {username} (id: {user_id})"
                             )
                     except Exception as disable_err:
                         logger.error(
@@ -299,13 +293,7 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
                         result["errors"].append(f"disable_user_set: {disable_err}")
 
             if not user_found:
-                # Log available usernames to help debug
-                available_users = [
-                    u.get("name", "?") for u in all_users[:10]
-                ]  # First 10
-                logger.warning(
-                    f"Hotspot user not found: '{username}'. Available users (sample): {available_users}"
-                )
+                logger.warning(f"Hotspot user not found: {username}")
                 result["errors"].append(f"user_not_found: {username}")
 
         except Exception as e:
