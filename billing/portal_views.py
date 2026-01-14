@@ -1129,7 +1129,7 @@ def portal_router_disconnect_user(request, router_id):
     try:
         # Disconnect user from this specific router
         result = disconnect_user_with_api(
-            api=api, username=username, mac_address=mac_address
+            api=api, username=username, mac_address=mac_address, block_user=True
         )
 
         if result.get("success") or result.get("session_removed"):
@@ -1140,7 +1140,7 @@ def portal_router_disconnect_user(request, router_id):
             return Response(
                 {
                     "success": True,
-                    "message": f"User {username} disconnected from {router.name}",
+                    "message": f"User {username} disconnected and blocked from {router.name}",
                     "router": {
                         "id": router.id,
                         "name": router.name,
@@ -1149,7 +1149,9 @@ def portal_router_disconnect_user(request, router_id):
                         "session_removed": result.get("session_removed", False),
                         "binding_removed": result.get("binding_removed", False),
                         "user_disabled": result.get("user_disabled", False),
+                        "user_blocked": result.get("user_blocked", False),
                     },
+                    "note": "User must purchase new access or redeem voucher to reconnect"
                 }
             )
         else:

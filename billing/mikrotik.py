@@ -184,15 +184,16 @@ def get_tenant_mikrotik_api(router, retries: int = 3, timeout: int = 10):
     return None
 
 
-def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dict:
+def disconnect_user_with_api(api, username: str, mac_address: str = None, block_user: bool = True) -> dict:
     """
-    Disconnect a user from MikroTik hotspot using a provided API connection.
-    Used for tenant-specific router disconnection.
+    Disconnect a user from MikroTik hotspot and BLOCK them from reconnecting.
+    Used for tenant-specific router disconnection and expired user removal.
 
     Args:
         api: RouterOS API connection object
         username: Phone number (hotspot username)
         mac_address: Optional MAC address for more targeted removal
+        block_user: If True, disable user and add blocked binding (default: True)
 
     Returns:
         dict with disconnect results
@@ -202,6 +203,7 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
         "session_removed": False,
         "binding_removed": False,
         "user_disabled": False,
+        "user_blocked": False,
         "errors": [],
     }
 
@@ -209,20 +211,26 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
         result["errors"].append("No API connection")
         return result
 
+    # Store MAC address from session for blocking if not provided
+    session_mac = None
+
     try:
-        # Step 1: Remove active sessions
+        # Step 1: Remove active sessions and capture MAC address
         try:
             active = api.get_resource("/ip/hotspot/active")
             all_sessions = active.get()
 
             for session in all_sessions:
                 session_user = session.get("user", "")
-                session_mac = session.get("mac-address", "")
+                current_mac = session.get("mac-address", "")
 
                 should_remove = False
                 if username and session_user == username:
                     should_remove = True
-                if mac_address and session_mac.upper() == mac_address.upper():
+                    # Capture MAC for blocking later
+                    if current_mac and not session_mac:
+                        session_mac = current_mac
+                if mac_address and current_mac.upper() == mac_address.upper():
                     should_remove = True
 
                 if should_remove:
@@ -232,7 +240,7 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
                             active.remove(id=session_id)
                             result["session_removed"] = True
                             logger.info(
-                                f"Removed active session for {username}: {session_mac}"
+                                f"🔌 Removed active session for {username}: {current_mac}"
                             )
                     except Exception as rem_err:
                         result["errors"].append(f"session_remove: {rem_err}")
@@ -240,20 +248,24 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
         except Exception as e:
             result["errors"].append(f"active_sessions: {e}")
 
-        # Step 2: Remove IP bindings
+        # Use provided MAC or the one we captured from session
+        target_mac = mac_address or session_mac
+
+        # Step 2: Remove existing IP bindings for this user/MAC
         try:
             bindings = api.get_resource("/ip/hotspot/ip-binding")
 
-            if mac_address:
-                binding_list = bindings.get(mac_address=mac_address)
+            if target_mac:
+                binding_list = bindings.get(mac_address=target_mac)
                 for binding in binding_list:
                     try:
                         bindings.remove(id=binding[".id"])
                         result["binding_removed"] = True
-                        logger.info(f"Removed IP binding for {mac_address}")
+                        logger.info(f"🗑️ Removed IP binding for {target_mac}")
                     except Exception:
                         pass
 
+            # Also remove bindings with username in comment
             all_bindings = bindings.get()
             for binding in all_bindings:
                 comment = binding.get("comment", "") or ""
@@ -267,25 +279,70 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
         except Exception as e:
             result["errors"].append(f"ip_bindings: {e}")
 
-        # Step 3: Disable hotspot user
+        # Step 3: Disable hotspot user (try multiple formats)
         try:
             users = api.get_resource("/ip/hotspot/user")
+            
+            # Try exact username match
             user_list = users.get(name=username)
+            
+            # If not found, try with different phone formats
+            if not user_list:
+                # Try without + prefix
+                alt_username = username.replace("+", "")
+                user_list = users.get(name=alt_username)
+            
+            if not user_list:
+                # Try with + prefix
+                if not username.startswith("+"):
+                    user_list = users.get(name=f"+{username}")
+            
             for user in user_list:
                 try:
                     users.set(id=user[".id"], disabled="yes")
                     result["user_disabled"] = True
-                    logger.info(f"Disabled hotspot user: {username}")
-                except Exception:
-                    pass
+                    logger.info(f"🚫 Disabled hotspot user: {username}")
+                except Exception as disable_err:
+                    result["errors"].append(f"disable_user_set: {disable_err}")
+                    
         except Exception as e:
             result["errors"].append(f"disable_user: {e}")
 
-        # Consider success if any operation worked
+        # Step 4: Add BLOCKED IP binding to prevent reconnection (CRITICAL!)
+        if block_user and target_mac:
+            try:
+                bindings = api.get_resource("/ip/hotspot/ip-binding")
+                
+                # Check if blocked binding already exists
+                existing = bindings.get(mac_address=target_mac)
+                already_blocked = any(
+                    b.get("type") == "blocked" for b in existing
+                )
+                
+                if not already_blocked:
+                    # Add blocked binding - user cannot login with this MAC
+                    bindings.add(
+                        **{
+                            "mac-address": target_mac,
+                            "type": "blocked",
+                            "comment": f"Blocked: {username} - Access expired - Kitonga"
+                        }
+                    )
+                    result["user_blocked"] = True
+                    logger.info(f"🚷 Added blocked binding for {username} ({target_mac})")
+                else:
+                    result["user_blocked"] = True
+                    logger.info(f"🚷 User {username} already blocked")
+                    
+            except Exception as e:
+                result["errors"].append(f"block_binding: {e}")
+
+        # Consider success if session was removed or user was blocked
         result["success"] = (
             result["session_removed"]
             or result["binding_removed"]
             or result["user_disabled"]
+            or result["user_blocked"]
         )
 
     except Exception as e:
@@ -371,6 +428,99 @@ def revoke_mac_on_router(api, mac_address: str) -> bool:
     except Exception as e:
         logger.error(f"revoke_mac_on_router failed for {mac_address}: {e}")
         return False
+
+
+def unblock_user_on_router(api, username: str, mac_address: str = None) -> dict:
+    """
+    Unblock a user on MikroTik - called when user purchases new access or redeems voucher.
+    
+    This function:
+    1. Removes any 'blocked' IP bindings for the user's MAC
+    2. Re-enables the hotspot user account
+    
+    Args:
+        api: RouterOS API connection object
+        username: Phone number (hotspot username)
+        mac_address: Optional MAC address to unblock
+        
+    Returns:
+        dict with unblock results
+    """
+    result = {
+        "success": False,
+        "user_enabled": False,
+        "blocked_bindings_removed": 0,
+        "errors": [],
+    }
+    
+    if api is None:
+        result["errors"].append("No API connection")
+        return result
+    
+    try:
+        # Step 1: Remove blocked IP bindings
+        try:
+            bindings = api.get_resource("/ip/hotspot/ip-binding")
+            
+            # Remove blocked bindings by MAC address
+            if mac_address:
+                binding_list = bindings.get(mac_address=mac_address)
+                for binding in binding_list:
+                    if binding.get("type") == "blocked":
+                        try:
+                            bindings.remove(id=binding[".id"])
+                            result["blocked_bindings_removed"] += 1
+                            logger.info(f"✅ Removed blocked binding for {mac_address}")
+                        except Exception:
+                            pass
+            
+            # Also remove blocked bindings with username in comment
+            all_bindings = bindings.get()
+            for binding in all_bindings:
+                comment = binding.get("comment", "") or ""
+                binding_type = binding.get("type", "")
+                if username in comment and binding_type == "blocked":
+                    try:
+                        bindings.remove(id=binding[".id"])
+                        result["blocked_bindings_removed"] += 1
+                        logger.info(f"✅ Removed blocked binding for {username}")
+                    except Exception:
+                        pass
+                        
+        except Exception as e:
+            result["errors"].append(f"remove_blocked_bindings: {e}")
+        
+        # Step 2: Re-enable the hotspot user
+        try:
+            users = api.get_resource("/ip/hotspot/user")
+            
+            # Try multiple username formats
+            user_list = users.get(name=username)
+            
+            if not user_list:
+                alt_username = username.replace("+", "")
+                user_list = users.get(name=alt_username)
+            
+            if not user_list and not username.startswith("+"):
+                user_list = users.get(name=f"+{username}")
+            
+            for user in user_list:
+                try:
+                    users.set(id=user[".id"], disabled="no")
+                    result["user_enabled"] = True
+                    logger.info(f"✅ Re-enabled hotspot user: {username}")
+                except Exception as enable_err:
+                    result["errors"].append(f"enable_user: {enable_err}")
+                    
+        except Exception as e:
+            result["errors"].append(f"enable_user: {e}")
+        
+        result["success"] = result["user_enabled"] or result["blocked_bindings_removed"] > 0
+        
+    except Exception as e:
+        result["errors"].append(f"general: {e}")
+    
+    return result
 
 
 def create_hotspot_user_on_router(
@@ -799,6 +949,7 @@ def force_immediate_internet_access_on_tenant_routers(
             "router_name": router.name,
             "router_host": router.host,
             "success": False,
+            "user_unblocked": False,
             "hotspot_user_created": False,
             "ip_binding_created": False,
             "errors": [],
@@ -814,6 +965,18 @@ def force_immediate_internet_access_on_tenant_routers(
                 continue
 
             try:
+                # Step 0: UNBLOCK user first (in case they were blocked from expired access)
+                try:
+                    unblock_result = unblock_user_on_router(api, user.phone_number, mac_address)
+                    router_result["user_unblocked"] = unblock_result.get("success", False)
+                    if unblock_result.get("blocked_bindings_removed", 0) > 0:
+                        logger.info(
+                            f"✓ Unblocked user on {router.name}: removed {unblock_result['blocked_bindings_removed']} blocked bindings"
+                        )
+                except Exception as unblock_error:
+                    router_result["errors"].append(f"unblock: {unblock_error}")
+                    # Continue even if unblock fails - try to create user anyway
+
                 # Step 1: Create/update hotspot user on this router
                 try:
                     user_created = create_hotspot_user_on_router(
