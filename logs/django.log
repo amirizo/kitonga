@@ -2293,3 +2293,5 @@ INFO 2026-01-14 23:10:04,269 tasks 35453 8309842048 🔍 Found 0 expired users t
 INFO 2026-01-14 23:10:04,272 tasks 35453 8309842048 🎯 Expired user cleanup complete: 0 users disconnected, 0 devices deactivated, 0 SMS sent, 0 failures
 INFO 2026-01-14 23:10:12,922 tasks 35514 8309842048 🔍 Found 0 expired users to disconnect
 INFO 2026-01-14 23:10:12,924 tasks 35514 8309842048 🎯 Expired user cleanup complete: 0 users disconnected, 0 devices deactivated, 0 SMS sent, 0 failures
+INFO 2026-01-14 23:15:02,396 tasks 36058 8309842048 🔍 Found 0 expired users to disconnect
+INFO 2026-01-14 23:15:02,399 tasks 36058 8309842048 🎯 Expired user cleanup complete: 0 users disconnected, 0 devices deactivated, 0 SMS sent, 0 failures
