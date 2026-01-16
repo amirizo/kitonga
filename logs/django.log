@@ -2440,3 +2440,6 @@ ERROR 2026-01-16 07:35:02,089 tasks 40963 8310910016 Error in disconnect_expired
 ERROR 2026-01-16 07:40:02,285 tasks 41144 8310910016 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
 ERROR 2026-01-16 07:45:02,339 tasks 41387 8310910016 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
 ERROR 2026-01-16 07:50:02,752 tasks 42770 8310910016 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-16 07:55:02,143 tasks 43700 8310910016 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-16 08:00:02,835 tasks 44596 8310910016 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-01-16 08:05:02,030 tasks 44924 8310910016 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")

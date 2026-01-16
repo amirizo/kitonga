@@ -3845,7 +3845,7 @@ def verify_access(request):
 
         if not user:
             logger.warning(
-                f"User not found during access verification: phone={phone_number}, tenant={tenant.slug if tenant else 'GLOBAL'}, router_id={router_id}"
+                f"User not found during access verification: phone={phone_number}, tenant={tenant.slug if tenant else 'GLOBAL'}"
             )
             return Response(
                 {
@@ -3854,8 +3854,6 @@ def verify_access(request):
                     "suggestion": "Make a payment or redeem a voucher to create account and get access",
                     "normalized_phone": phone_number,
                     "tenant": tenant.slug if tenant else None,
-                    "router_id": router_id,
-                    "router_name": router.name if router else None,
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )

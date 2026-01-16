@@ -3821,13 +3821,9 @@ def verify_access(request):
             router = Router.objects.get(id=router_id, is_active=True)
             if not tenant:
                 tenant = router.tenant
-            logger.info(
-                f"Router resolved: id={router_id}, name={router.name}, tenant={router.tenant.slug if router.tenant else 'NONE'}"
-            )
+            logger.info(f"Router resolved: id={router_id}, name={router.name}, tenant={router.tenant.slug if router.tenant else 'NONE'}")
         except Router.DoesNotExist:
-            logger.warning(
-                f"Router {router_id} not found or inactive during access verification"
-            )
+            logger.warning(f"Router {router_id} not found or inactive during access verification")
             router = None
 
     try:
@@ -3845,7 +3841,7 @@ def verify_access(request):
 
         if not user:
             logger.warning(
-                f"User not found during access verification: phone={phone_number}, tenant={tenant.slug if tenant else 'GLOBAL'}, router_id={router_id}"
+                f"User not found during access verification: phone={phone_number}, tenant={tenant.slug if tenant else 'GLOBAL'}"
             )
             return Response(
                 {
@@ -3854,8 +3850,6 @@ def verify_access(request):
                     "suggestion": "Make a payment or redeem a voucher to create account and get access",
                     "normalized_phone": phone_number,
                     "tenant": tenant.slug if tenant else None,
-                    "router_id": router_id,
-                    "router_name": router.name if router else None,
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )

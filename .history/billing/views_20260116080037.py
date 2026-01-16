@@ -84,6 +84,7 @@ from .mikrotik import (
     authorize_user_on_specific_router,
     revoke_user_on_specific_router,
 )
+import ipaddress
 
 logger = logging.getLogger(__name__)
 
@@ -3821,13 +3822,9 @@ def verify_access(request):
             router = Router.objects.get(id=router_id, is_active=True)
             if not tenant:
                 tenant = router.tenant
-            logger.info(
-                f"Router resolved: id={router_id}, name={router.name}, tenant={router.tenant.slug if router.tenant else 'NONE'}"
-            )
+            logger.info(f"Router resolved: id={router_id}, name={router.name}, tenant={router.tenant.slug if router.tenant else 'NONE'}")
         except Router.DoesNotExist:
-            logger.warning(
-                f"Router {router_id} not found or inactive during access verification"
-            )
+            logger.warning(f"Router {router_id} not found or inactive during access verification")
             router = None
 
     try:
@@ -3845,7 +3842,7 @@ def verify_access(request):
 
         if not user:
             logger.warning(
-                f"User not found during access verification: phone={phone_number}, tenant={tenant.slug if tenant else 'GLOBAL'}, router_id={router_id}"
+                f"User not found during access verification: phone={phone_number}, tenant={tenant.slug if tenant else 'GLOBAL'}"
             )
             return Response(
                 {
@@ -3854,8 +3851,6 @@ def verify_access(request):
                     "suggestion": "Make a payment or redeem a voucher to create account and get access",
                     "normalized_phone": phone_number,
                     "tenant": tenant.slug if tenant else None,
-                    "router_id": router_id,
-                    "router_name": router.name if router else None,
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )
@@ -3890,6 +3885,8 @@ def verify_access(request):
             elif not user.paid_until:
                 denial_reason = "No payment or voucher redemption found"
             else:
+                from django.utils import timezone
+
                 now = timezone.now()
                 if user.paid_until <= now:
                     expired_hours = int((now - user.paid_until).total_seconds() / 3600)
@@ -4216,26 +4213,13 @@ def verify_access(request):
         return Response(response_data)
 
     except User.DoesNotExist:
-        # This shouldn't be reached since find_user_by_phone returns None, but keep for safety
         return Response(
             {
                 "access_granted": False,
                 "message": "User not found. Please register and pay to access Wi-Fi.",
                 "suggestion": "Make a payment or redeem a voucher to create account and get access",
-                "router_id": router_id,
-                "tenant": tenant.slug if tenant else None,
             },
             status=status.HTTP_404_NOT_FOUND,
-        )
-    except Exception as e:
-        logger.error(f"Error in verify_access for {phone_number}: {str(e)}")
-        return Response(
-            {
-                "access_granted": False,
-                "message": f"Access verification failed: {str(e)}",
-                "error": str(e),
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
