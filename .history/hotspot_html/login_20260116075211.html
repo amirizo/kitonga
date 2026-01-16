@@ -218,7 +218,6 @@
       <div class="footer">
         <p><strong>Powered by Kitonga Wi-Fi</strong></p>
         <p>For support visit kitonga.klikcell.com</p>
-        <p id="router-info" style="font-size: 10px; color: #999; margin-top: 10px"></p>
       </div>
     </div>
 
@@ -228,7 +227,7 @@
       // =====================================================================
       // Find your Router ID in Kitonga Admin: https://kitonga.klikcell.com/admin/
       // Go to: Billing → Routers → Copy the ID number
-      const ROUTER_ID = 6 // <-- CHANGE THIS TO YOUR ROUTER ID
+      const ROUTER_ID = 6;  // <-- CHANGE THIS TO YOUR ROUTER ID
       // =====================================================================
 
       // API Configuration
@@ -301,7 +300,7 @@
         const params = getParams()
         const ip = params['ip'] || params['client-ip'] || ''
         const mac = params['mac'] || params['mac-address'] || ''
-        const routerId = getRouterId() // Uses ROUTER_ID constant
+        const routerId = getRouterId()  // Uses ROUTER_ID constant
         const tenant = getTenantSlug()
 
         let url = MAIN_PORTAL_URL + basePath + '?ip=' + encodeURIComponent(ip) + '&mac=' + encodeURIComponent(mac)
@@ -627,11 +626,6 @@
         var routerId = getRouterId()
         if (routerId) {
           console.log('📡 Connected to router ID:', routerId)
-          // Show in footer for verification
-          var routerInfoEl = document.getElementById('router-info')
-          if (routerInfoEl) {
-            routerInfoEl.textContent = 'Router: ' + routerId
-          }
         }
 
         // Focus username

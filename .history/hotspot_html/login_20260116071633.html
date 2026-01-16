@@ -218,19 +218,10 @@
       <div class="footer">
         <p><strong>Powered by Kitonga Wi-Fi</strong></p>
         <p>For support visit kitonga.klikcell.com</p>
-        <p id="router-info" style="font-size: 10px; color: #999; margin-top: 10px"></p>
       </div>
     </div>
 
     <script>
-      // =====================================================================
-      // ROUTER CONFIGURATION - CHANGE THIS FOR EACH MIKROTIK ROUTER
-      // =====================================================================
-      // Find your Router ID in Kitonga Admin: https://kitonga.klikcell.com/admin/
-      // Go to: Billing → Routers → Copy the ID number
-      const ROUTER_ID = 6 // <-- CHANGE THIS TO YOUR ROUTER ID
-      // =====================================================================
-
       // API Configuration
       const API_BASE_URL = 'https://api.kitonga.klikcell.com/api'
       const MAIN_PORTAL_URL = 'https://kitonga.klikcell.com'
@@ -277,15 +268,9 @@
         return params
       }
 
-      // Get router_id - PRIORITY: 1. Configured ROUTER_ID, 2. URL params
-      // The ROUTER_ID constant at the top of this file is the primary source
-      // URL params are fallback (in case MikroTik passes router-id in URL)
+      // Get router_id from URL params (CRITICAL for multi-tenant)
+      // MikroTik profile should have: login-url="https://api.kitonga.klikcell.com/hotspot/login.html?router-id=X"
       function getRouterId() {
-        // First, use the configured ROUTER_ID constant (set at top of file)
-        if (typeof ROUTER_ID !== 'undefined' && ROUTER_ID) {
-          return ROUTER_ID.toString()
-        }
-        // Fallback: check URL params (for backwards compatibility)
         const params = getParams()
         return params['router_id'] || params['router-id'] || params['routerid'] || null
       }
@@ -301,7 +286,7 @@
         const params = getParams()
         const ip = params['ip'] || params['client-ip'] || ''
         const mac = params['mac'] || params['mac-address'] || ''
-        const routerId = getRouterId() // Uses ROUTER_ID constant
+        const routerId = getRouterId()
         const tenant = getTenantSlug()
 
         let url = MAIN_PORTAL_URL + basePath + '?ip=' + encodeURIComponent(ip) + '&mac=' + encodeURIComponent(mac)
@@ -453,17 +438,9 @@
           showError('Please complete registration at our main portal first.')
           setTimeout(function () {
             const routerId = getRouterId()
-            const mac = params['mac'] || params['mac-address'] || ''
-            const ip = params['ip'] || params['client-ip'] || ''
             let redirectUrl = MAIN_PORTAL_URL + '/portal?phone=' + encodeURIComponent(normalizedPhone)
             if (routerId) {
               redirectUrl += '&router_id=' + encodeURIComponent(routerId)
-            }
-            if (mac) {
-              redirectUrl += '&mac=' + encodeURIComponent(mac)
-            }
-            if (ip) {
-              redirectUrl += '&ip=' + encodeURIComponent(ip)
             }
             window.location.href = redirectUrl
           }, 2000)
@@ -627,11 +604,6 @@
         var routerId = getRouterId()
         if (routerId) {
           console.log('📡 Connected to router ID:', routerId)
-          // Show in footer for verification
-          var routerInfoEl = document.getElementById('router-info')
-          if (routerInfoEl) {
-            routerInfoEl.textContent = 'Router: ' + routerId
-          }
         }
 
         // Focus username

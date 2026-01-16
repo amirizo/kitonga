@@ -4385,13 +4385,9 @@ def initiate_payment(request):
             if router.tenant and not user.tenant:
                 user.tenant = router.tenant
                 user.save(update_fields=["tenant"])
-                logger.info(
-                    f"Associated user {phone_number} with tenant {router.tenant.slug} from router"
-                )
+                logger.info(f"Associated user {phone_number} with tenant {router.tenant.slug} from router")
         except Router.DoesNotExist:
-            logger.warning(
-                f"Router {router_id} not found, payment will proceed without router context"
-            )
+            logger.warning(f"Router {router_id} not found, payment will proceed without router context")
 
     # =========================================================================
     # MULTI-TENANT: Create payment record WITH tenant AND router association
@@ -4407,7 +4403,7 @@ def initiate_payment(request):
         order_reference=order_reference,
         status="pending",
     )
-
+    
     logger.info(
         f"Payment created: order_ref={order_reference}, user={phone_number}, "
         f"tenant={tenant.slug if tenant else 'NONE'}, router={router.name if router else 'NONE'}, "
@@ -4568,17 +4564,6 @@ def clickpesa_webhook(request):
                     phone_number = payment.phone_number
                     devices = user.devices.filter(is_active=True)
 
-                    # IMPORTANT: Get the router where payment was initiated
-                    # This ensures we grant access on the CORRECT router
-                    payment_router = payment.router
-
-                    logger.info(
-                        f"Processing access grant for {phone_number}: "
-                        f"tenant={user.tenant.slug if user.tenant else 'NONE'}, "
-                        f"payment_router={payment_router.name if payment_router else 'NONE'}, "
-                        f"active_devices={devices.count()}"
-                    )
-
                     if devices.exists():
                         # Grant access for all active user devices (same as voucher)
                         for device in devices:
@@ -4605,23 +4590,8 @@ def clickpesa_webhook(request):
                                     )
 
                                 # Grant immediate access via MikroTik (creates hotspot user + IP binding)
-                                # PRIORITY: 1. Payment router, 2. All tenant routers, 3. Global router
-                                if payment_router:
-                                    # Grant access on the SPECIFIC router where payment was initiated
-                                    auto_access_result = (
-                                        authorize_user_on_specific_router(
-                                            user=user,
-                                            router_id=payment_router.id,
-                                            mac_address=mac_address,
-                                            ip_address=ip_address,
-                                            access_type="payment",
-                                        )
-                                    )
-                                    logger.info(
-                                        f"Granting access on specific payment router: {payment_router.name}"
-                                    )
-                                elif user.tenant:
-                                    # Fallback: Grant on ALL tenant routers
+                                # Use tenant-aware function for multi-tenant SaaS
+                                if user.tenant:
                                     auto_access_result = force_immediate_internet_access_on_tenant_routers(
                                         user=user,
                                         mac_address=mac_address,
@@ -4669,89 +4639,27 @@ def clickpesa_webhook(request):
                             "success": connection_success,
                             "immediate_login_success": immediate_login_success,
                             "devices_processed": devices.count(),
-                            "router_used": (
-                                payment_router.name
-                                if payment_router
-                                else "all_tenant_routers"
-                            ),
                         }
                     else:
                         # No devices yet - create hotspot user so they can connect immediately when they join WiFi
-                        # IMPORTANT: Create on the specific router if known, otherwise use global
-                        if payment_router:
-                            # Create hotspot user on the specific router where payment was made
-                            from .mikrotik import (
-                                get_tenant_mikrotik_api,
-                                create_hotspot_user_on_router,
-                                safe_close,
-                            )
-
-                            try:
-                                api = get_tenant_mikrotik_api(payment_router)
-                                if api:
-                                    try:
-                                        create_hotspot_user_on_router(
-                                            api, phone_number, phone_number
-                                        )
-                                        auto_access_result = {
-                                            "success": True,
-                                            "router": payment_router.name,
-                                        }
-                                        logger.info(
-                                            f"Created hotspot user on payment router {payment_router.name} for {phone_number}"
-                                        )
-                                    finally:
-                                        safe_close(api)
-                                else:
-                                    auto_access_result = {
-                                        "success": False,
-                                        "message": f"Cannot connect to router {payment_router.name}",
-                                    }
-                            except Exception as router_err:
-                                logger.error(
-                                    f"Error creating hotspot user on router {payment_router.name}: {router_err}"
-                                )
-                                auto_access_result = {
-                                    "success": False,
-                                    "message": str(router_err),
-                                }
-                        elif user.tenant:
-                            # Create on all tenant routers
-                            auto_access_result = (
-                                force_immediate_internet_access_on_tenant_routers(
-                                    user=user,
-                                    mac_address="",
-                                    ip_address="127.0.0.1",
-                                    access_type="payment",
-                                )
-                            )
-                        else:
-                            # Fallback to global router
-                            auto_access_result = create_hotspot_user_and_login(
-                                username=phone_number, password=phone_number
-                            )
-
+                        # Same as voucher when no MAC provided
+                        auto_access_result = create_hotspot_user_and_login(
+                            username=phone_number, password=phone_number
+                        )
                         mikrotik_auth_result = {
                             "success": auto_access_result.get("success", False),
                             "hotspot_user_created": True,
                             "immediate_login_success": False,
                             "message": "Hotspot user created - will connect when user joins WiFi",
-                            "router_used": (
-                                payment_router.name
-                                if payment_router
-                                else "tenant_routers" if user.tenant else "global"
-                            ),
                         }
                         logger.info(
-                            f"No active devices for {phone_number} - created hotspot user on "
-                            f"{payment_router.name if payment_router else 'tenant routers'}"
+                            f"No active devices for {phone_number} - created hotspot user for immediate connection"
                         )
 
                         # Create access log without device (same as voucher)
                         AccessLog.objects.create(
                             user=user,
                             device=None,
-                            router=payment_router,  # Track which router
                             ip_address="127.0.0.1",
                             mac_address="",
                             access_granted=True,
