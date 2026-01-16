@@ -59,8 +59,6 @@ add-tenant-router hotel_paradise 10
 # This assigns IP 10.100.0.10 to the router
 ```
 
-Kitonga WiFi 2
-
 This will output MikroTik commands and save config to `/etc/wireguard/tenants/<tenant_name>.conf`
 
 ### Step 2: Configure MikroTik Router
