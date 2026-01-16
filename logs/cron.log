@@ -1972,3 +1972,8 @@ ERROR 2026-01-16 08:05:02,030 tasks 44924 8310910016 Error in disconnect_expired
 ✗ Error: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
 
 Done!
+Checking for expired users...
+ERROR 2026-01-16 08:10:02,302 tasks 45222 8310910016 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+✗ Error: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+
+Done!
