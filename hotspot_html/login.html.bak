@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kitonga Wi-Fi Login</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 350px;
+            text-align: center;
+        }
+        .logo {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        h1 {
+            color: #1976d2;
+            margin: 0 0 5px 0;
+            font-size: 24px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        input[type="text"]:focus, input[type="password"]:focus {
+            border-color: #1976d2;
+            outline: none;
+        }
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background: #1976d2;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        .btn:hover {
+            background: #1565c0;
+        }
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .register-btn {
+            width: 100%;
+            padding: 10px;
+            background: white;
+            color: #1976d2;
+            border: 2px solid #1976d2;
+            border-radius: 5px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .register-btn:hover {
+            background: #1976d2;
+            color: white;
+        }
+        .error {
+            background: #ffebee;
+            border: 1px solid #e57373;
+            color: #c62828;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+        }
+        .success {
+            background: #e8f5e8;
+            border: 1px solid #4caf50;
+            color: #2e7d32;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+        }
+        .loading {
+            display: none;
+            margin: 20px 0;
+        }
+        .spinner {
+            width: 30px;
+            height: 30px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #1976d2;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            color: #999;
+            font-size: 12px;
+        }
+        .divider {
+            margin: 20px 0;
+            text-align: center;
+            color: #999;
+            font-size: 14px;
+        }
+        .divider:before {
+            content: '';
+            display: inline-block;
+            width: 30%;
+            height: 1px;
+            background: #ddd;
+            vertical-align: middle;
+            margin-right: 10px;
+        }
+        .divider:after {
+            content: '';
+            display: inline-block;
+            width: 30%;
+            height: 1px;
+            background: #ddd;
+            vertical-align: middle;
+            margin-left: 10px;
+        }
+        @media (max-width: 400px) {
+            .container {
+                padding: 20px;
+                margin: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">📶</div>
+        <h1>Kitonga Wi-Fi</h1>
+        <p class="subtitle">Connect to high-speed internet</p>
+
+        <div id="error" class="error"></div>
+        <div id="success" class="success"></div>
+
+        <form name="login" method="post" onsubmit="return doLogin()">
+            <div class="form-group">
+                <label for="username">Phone Number:</label>
+                <input type="text" name="username" id="username" placeholder="+255700123456" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" name="password" id="password" placeholder="Enter your phone number" required>
+            </div>
+            
+            <input type="hidden" name="dst" value="">
+            <input type="hidden" name="popup" value="">
+            
+            <button type="submit" class="btn" id="loginBtn">Connect to Internet</button>
+        </form>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Connecting you to the internet...</p>
+        </div>
+
+        <div class="divider">New user?</div>
+        
+        <button type="button" class="register-btn" onclick="openRegistration()">
+            Register for Wi-Fi Access
+        </button>
+
+        <div class="footer">
+            <p><strong>Powered by Kitonga Wi-Fi</strong></p>
+            <p>For support visit kitonga.klikcell.com</p>
+        </div>
+    </div>
+
+    <script>
+        // Get URL parameters
+        function getParams() {
+            var params = {};
+            var search = window.location.search.substring(1);
+            if (search) {
+                var pairs = search.split('&');
+                for (var i = 0; i < pairs.length; i++) {
+                    var pair = pairs[i].split('=');
+                    params[decodeURIComponent(pair[0])] = decodeURIComponent(pair[1] || '');
+                }
+            }
+            return params;
+        }
+
+        // Show error message
+        function showError(msg) {
+            var errorDiv = document.getElementById('error');
+            errorDiv.innerHTML = msg;
+            errorDiv.style.display = 'block';
+            document.getElementById('success').style.display = 'none';
+        }
+
+        // Show success message
+        function showSuccess(msg) {
+            var successDiv = document.getElementById('success');
+            successDiv.innerHTML = msg;
+            successDiv.style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+        }
+
+        // Hide messages
+        function hideMessages() {
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('success').style.display = 'none';
+        }
+
+        // Show loading
+        function showLoading() {
+            document.querySelector('form').style.display = 'none';
+            document.getElementById('loading').style.display = 'block';
+        }
+
+        // Hide loading
+        function hideLoading() {
+            document.querySelector('form').style.display = 'block';
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        // Open registration page
+        function openRegistration() {
+            window.open('https://kitonga.klikcell.com/', '_blank');
+        }
+
+        // Handle form submission
+        function doLogin() {
+            var username = document.getElementById('username').value.trim();
+            var password = document.getElementById('password').value.trim();
+            var params = getParams();
+
+            // Validation
+            if (!username || !password) {
+                showError('Please enter both phone number and password');
+                return false;
+            }
+
+            // Phone validation
+            if (!username.match(/^\+?[1-9]\d{8,14}$/)) {
+                showError('Please enter a valid phone number (e.g. +255700123456)');
+                return false;
+            }
+
+            hideMessages();
+            showLoading();
+
+            // Check if this is a MikroTik login
+            if (params['link-login'] || params['link_login']) {
+                // Proceed with MikroTik authentication
+                setTimeout(function() {
+                    submitToMikrotik(username, password, params);
+                }, 2000);
+            } else {
+                // Redirect to main system
+                setTimeout(function() {
+                    hideLoading();
+                    showError('Please complete registration at our main portal first');
+                    setTimeout(function() {
+                        window.location.href = 'https://kitonga.klikcell.com/?phone=' + encodeURIComponent(username);
+                    }, 3000);
+                }, 1000);
+            }
+            
+            return false;
+        }
+
+        // Submit to MikroTik
+        function submitToMikrotik(username, password, params) {
+            try {
+                var loginUrl = params['link-login'] || params['link_login'];
+                
+                if (!loginUrl) {
+                    throw new Error('No login URL available');
+                }
+
+                // Build form
+                var form = document.createElement('form');
+                form.method = 'post';
+                form.action = loginUrl;
+
+                // Add fields
+                var fields = {
+                    'username': username,
+                    'password': password
+                };
+
+                // Add CHAP if available
+                if (params['chap-id'] || params['chap_id']) {
+                    fields['chap_id'] = params['chap-id'] || params['chap_id'];
+                }
+                if (params['chap-challenge'] || params['chap_challenge']) {
+                    fields['chap_challenge'] = params['chap-challenge'] || params['chap_challenge'];
+                }
+
+                // Add other parameters
+                if (params['dst']) fields['dst'] = params['dst'];
+                if (params['popup']) fields['popup'] = params['popup'];
+
+                // Create hidden inputs
+                for (var key in fields) {
+                    var input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = key;
+                    input.value = fields[key];
+                    form.appendChild(input);
+                }
+
+                showSuccess('Authentication successful! Connecting...');
+                
+                // Submit form
+                document.body.appendChild(form);
+                setTimeout(function() {
+                    form.submit();
+                }, 1500);
+                
+            } catch (error) {
+                hideLoading();
+                showError('Connection failed. Please try again.');
+                console.error('Login error:', error);
+            }
+        }
+
+        // Initialize page
+        function init() {
+            var params = getParams();
+            
+            // Handle errors
+            if (params.error) {
+                var errorMsg = 'Authentication failed';
+                switch(params.error) {
+                    case 'invalid-user':
+                        errorMsg = 'Invalid username or password';
+                        break;
+                    case 'user-session-limit':
+                        errorMsg = 'Maximum device limit reached';
+                        break;
+                    case 'user-expired':
+                        errorMsg = 'Your access has expired. Please renew.';
+                        break;
+                    default:
+                        errorMsg = 'Login failed: ' + params.error;
+                }
+                showError(errorMsg);
+            }
+
+            // Set hidden fields
+            document.querySelector('input[name="dst"]').value = params.dst || '';
+            document.querySelector('input[name="popup"]').value = params.popup || '';
+
+            // Auto-fill password with username
+            document.getElementById('username').oninput = function() {
+                document.getElementById('password').value = this.value;
+            };
+
+            // Focus username
+            document.getElementById('username').focus();
+        }
+
+        // Run on page load
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    </script>
+</body>
+</html>

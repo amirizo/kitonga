@@ -1,0 +1,1123 @@
+{
+  "api_info": {
+    "title": "Kitonga WiFi Billing System API",
+    "version": "2.0.0",
+    "base_url": "http://your-server-ip:8000/api",
+    "description": "Complete API documentation for Kitonga WiFi Hotspot Billing System",
+    "last_updated": "2025-12-13"
+  },
+  "authentication": {
+    "type": "Token",
+    "header": "Authorization",
+    "format": "Token {your_token_here}",
+    "example": "Token 8d7ed4a9d0cd4848a68eeb4bea435d3f0d1ec9fd",
+    "note": "Include this header in all admin-protected endpoints"
+  },
+  "endpoints": {
+    "authentication": {
+      "login": {
+        "url": "/api/auth/login/",
+        "method": "POST",
+        "auth_required": false,
+        "description": "Login to get admin token",
+        "request": {
+          "username": "admin",
+          "password": "your_password"
+        },
+        "response": {
+          "success": true,
+          "token": "8d7ed4a9d0cd4848a68eeb4bea435d3f0d1ec9fd",
+          "user": {
+            "id": 1,
+            "username": "admin",
+            "email": "admin@example.com",
+            "is_superuser": true
+          }
+        }
+      },
+      "logout": {
+        "url": "/api/auth/logout/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Logout and invalidate token",
+        "response": {
+          "success": true,
+          "message": "Successfully logged out"
+        }
+      },
+      "profile": {
+        "url": "/api/auth/profile/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get current admin profile",
+        "response": {
+          "id": 1,
+          "username": "admin",
+          "email": "admin@example.com",
+          "first_name": "",
+          "last_name": "",
+          "is_superuser": true,
+          "date_joined": "2025-12-01T10:00:00Z",
+          "last_login": "2025-12-13T08:30:00Z"
+        }
+      },
+      "change_password": {
+        "url": "/api/auth/change-password/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Change admin password",
+        "request": {
+          "old_password": "current_password",
+          "new_password": "new_secure_password"
+        },
+        "response": {
+          "success": true,
+          "message": "Password changed successfully"
+        }
+      },
+      "create_admin": {
+        "url": "/api/auth/create-admin/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Create new admin user (superuser only)",
+        "request": {
+          "username": "new_admin",
+          "email": "newadmin@example.com",
+          "password": "secure_password"
+        },
+        "response": {
+          "success": true,
+          "message": "Admin user created successfully",
+          "user": {
+            "id": 2,
+            "username": "new_admin",
+            "email": "newadmin@example.com"
+          }
+        }
+      }
+    },
+    "user_management": {
+      "list_users": {
+        "url": "/api/admin/users/",
+        "alt_url": "/api/users/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "List all users with pagination and filters",
+        "query_params": {
+          "page": "Page number (default: 1)",
+          "page_size": "Items per page (default: 20, max: 100)",
+          "search": "Search by phone number",
+          "status": "Filter by status: active, inactive, expired",
+          "ordering": "Order by field: -created_at, phone_number, -access_expires_at"
+        },
+        "response": {
+          "success": true,
+          "users": [
+            {
+              "id": 27,
+              "phone_number": "255657777687",
+              "account_status": "active",
+              "access_status": "active",
+              "has_active_access": true,
+              "access_expires_at": "2025-12-13T18:30:00Z",
+              "time_remaining": "5 hours, 30 minutes",
+              "devices": [
+                {
+                  "id": 15,
+                  "mac_address": "0E:E5:45:24:BA:1E",
+                  "ip_address": "192.168.10.198",
+                  "device_name": "Unknown Device",
+                  "is_active": true,
+                  "last_seen": "2025-12-13T10:00:00Z"
+                }
+              ],
+              "device_count": 1,
+              "mac_addresses": ["0E:E5:45:24:BA:1E"],
+              "total_payments": 3,
+              "total_amount_paid": 15000,
+              "successful_payments": 3,
+              "last_payment_date": "2025-12-13T08:00:00Z",
+              "joined_date": "2025-12-01T10:00:00Z",
+              "created_at": "2025-12-01T10:00:00Z"
+            }
+          ],
+          "pagination": {
+            "count": 50,
+            "total_pages": 3,
+            "current_page": 1,
+            "page_size": 20,
+            "has_next": true,
+            "has_previous": false
+          }
+        }
+      },
+      "get_user_detail": {
+        "url": "/api/admin/users/{user_id}/",
+        "alt_url": "/api/users/{user_id}/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get detailed user information",
+        "url_params": {
+          "user_id": "Integer - User ID"
+        },
+        "response": {
+          "success": true,
+          "user": {
+            "id": 27,
+            "phone_number": "255657777687",
+            "account_status": "active",
+            "access_status": "active",
+            "has_active_access": true,
+            "access_expires_at": "2025-12-13T18:30:00Z",
+            "time_remaining": "5 hours, 30 minutes",
+            "created_at": "2025-12-01T10:00:00Z",
+            "updated_at": "2025-12-13T08:00:00Z",
+            "max_devices": 1,
+            "is_voucher_user": false
+          },
+          "devices": [
+            {
+              "id": 15,
+              "mac_address": "0E:E5:45:24:BA:1E",
+              "ip_address": "192.168.10.198",
+              "device_name": "Unknown Device",
+              "device_type": "mobile",
+              "is_active": true,
+              "first_seen": "2025-12-01T10:05:00Z",
+              "last_seen": "2025-12-13T10:00:00Z",
+              "connection_count": 45
+            }
+          ],
+          "payments": [
+            {
+              "id": 100,
+              "amount": 5000,
+              "bundle_name": "Daily Bundle",
+              "status": "successful",
+              "payment_method": "mobile_money",
+              "transaction_id": "TXN123456",
+              "created_at": "2025-12-13T08:00:00Z"
+            }
+          ],
+          "vouchers": [
+            {
+              "id": 10,
+              "code": "WIFI-ABC123",
+              "bundle_name": "Hourly Bundle",
+              "status": "used",
+              "redeemed_at": "2025-12-10T14:00:00Z"
+            }
+          ],
+          "access_logs": [
+            {
+              "id": 500,
+              "action": "login",
+              "mac_address": "0E:E5:45:24:BA:1E",
+              "ip_address": "192.168.10.198",
+              "timestamp": "2025-12-13T08:05:00Z"
+            }
+          ],
+          "statistics": {
+            "total_payments": 3,
+            "total_amount_paid": 15000,
+            "successful_payments": 3,
+            "failed_payments": 0,
+            "total_vouchers_used": 1,
+            "total_devices_used": 2,
+            "active_devices": 1,
+            "total_sessions": 45,
+            "first_payment_date": "2025-12-01T10:00:00Z",
+            "last_payment_date": "2025-12-13T08:00:00Z",
+            "account_age_days": 12
+          }
+        }
+      },
+      "update_user": {
+        "url": "/api/admin/users/{user_id}/update/",
+        "method": "PUT",
+        "auth_required": true,
+        "description": "Update user information",
+        "request": {
+          "is_active": true,
+          "max_devices": 2,
+          "access_expires_at": "2025-12-14T18:30:00Z"
+        },
+        "response": {
+          "success": true,
+          "message": "User updated successfully",
+          "user": {
+            "id": 27,
+            "phone_number": "255657777687",
+            "is_active": true,
+            "max_devices": 2
+          }
+        }
+      },
+      "delete_user": {
+        "url": "/api/admin/users/{user_id}/delete/",
+        "method": "DELETE",
+        "auth_required": true,
+        "description": "Delete a user (soft delete or hard delete)",
+        "response": {
+          "success": true,
+          "message": "User deleted successfully"
+        }
+      }
+    },
+    "payment_management": {
+      "list_payments": {
+        "url": "/api/admin/payments/",
+        "alt_url": "/api/payments/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "List all payments with pagination and filters",
+        "query_params": {
+          "page": "Page number",
+          "page_size": "Items per page",
+          "status": "Filter: pending, successful, failed",
+          "phone_number": "Filter by phone",
+          "date_from": "Filter from date (YYYY-MM-DD)",
+          "date_to": "Filter to date (YYYY-MM-DD)"
+        },
+        "response": {
+          "success": true,
+          "payments": [
+            {
+              "id": 100,
+              "user_id": 27,
+              "phone_number": "255657777687",
+              "amount": 5000,
+              "bundle": {
+                "id": 3,
+                "name": "Daily Bundle",
+                "duration_hours": 24,
+                "price": 5000
+              },
+              "status": "successful",
+              "payment_method": "mobile_money",
+              "transaction_id": "TXN123456",
+              "order_reference": "ORD-ABC123",
+              "created_at": "2025-12-13T08:00:00Z",
+              "completed_at": "2025-12-13T08:01:00Z"
+            }
+          ],
+          "pagination": {
+            "count": 200,
+            "total_pages": 10,
+            "current_page": 1,
+            "page_size": 20
+          },
+          "summary": {
+            "total_amount": 1500000,
+            "successful_count": 180,
+            "pending_count": 10,
+            "failed_count": 10
+          }
+        }
+      },
+      "get_payment_detail": {
+        "url": "/api/admin/payments/{payment_id}/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get payment details",
+        "response": {
+          "success": true,
+          "payment": {
+            "id": 100,
+            "user": {
+              "id": 27,
+              "phone_number": "255657777687"
+            },
+            "amount": 5000,
+            "bundle": {
+              "id": 3,
+              "name": "Daily Bundle",
+              "duration_hours": 24
+            },
+            "status": "successful",
+            "payment_method": "mobile_money",
+            "transaction_id": "TXN123456",
+            "order_reference": "ORD-ABC123",
+            "clickpesa_reference": "CP123456",
+            "created_at": "2025-12-13T08:00:00Z",
+            "completed_at": "2025-12-13T08:01:00Z",
+            "webhook_received": true
+          }
+        }
+      },
+      "refund_payment": {
+        "url": "/api/admin/payments/{payment_id}/refund/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Refund a payment (if supported)",
+        "request": {
+          "reason": "Customer request"
+        },
+        "response": {
+          "success": true,
+          "message": "Refund initiated successfully"
+        }
+      }
+    },
+    "bundle_management": {
+      "list_bundles": {
+        "url": "/api/bundles/",
+        "method": "GET",
+        "auth_required": false,
+        "description": "List available WiFi bundles (public)",
+        "response": {
+          "bundles": [
+            {
+              "id": 1,
+              "name": "1 Hour Bundle",
+              "duration_hours": 1,
+              "duration_display": "1 Hour",
+              "price": 500,
+              "price_display": "TZS 500",
+              "description": "1 hour of unlimited WiFi",
+              "is_active": true,
+              "speed_limit": "5M/5M"
+            },
+            {
+              "id": 2,
+              "name": "3 Hours Bundle",
+              "duration_hours": 3,
+              "duration_display": "3 Hours",
+              "price": 1000,
+              "price_display": "TZS 1,000",
+              "is_active": true
+            },
+            {
+              "id": 3,
+              "name": "Daily Bundle",
+              "duration_hours": 24,
+              "duration_display": "24 Hours",
+              "price": 5000,
+              "price_display": "TZS 5,000",
+              "is_active": true
+            },
+            {
+              "id": 4,
+              "name": "Weekly Bundle",
+              "duration_hours": 168,
+              "duration_display": "7 Days",
+              "price": 20000,
+              "price_display": "TZS 20,000",
+              "is_active": true
+            }
+          ]
+        }
+      },
+      "manage_bundles": {
+        "url": "/api/admin/bundles/",
+        "method": "GET | POST",
+        "auth_required": true,
+        "description": "List or create bundles (admin)",
+        "post_request": {
+          "name": "Monthly Bundle",
+          "duration_hours": 720,
+          "price": 50000,
+          "description": "30 days unlimited WiFi",
+          "is_active": true,
+          "speed_limit": "10M/10M"
+        },
+        "response": {
+          "success": true,
+          "bundle": {
+            "id": 5,
+            "name": "Monthly Bundle",
+            "duration_hours": 720,
+            "price": 50000,
+            "is_active": true
+          }
+        }
+      },
+      "manage_bundle": {
+        "url": "/api/admin/bundles/{bundle_id}/",
+        "method": "GET | PUT | DELETE",
+        "auth_required": true,
+        "description": "Get, update or delete a specific bundle"
+      }
+    },
+    "voucher_management": {
+      "generate_vouchers": {
+        "url": "/api/vouchers/generate/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Generate new vouchers",
+        "request": {
+          "bundle_id": 3,
+          "quantity": 10,
+          "prefix": "WIFI"
+        },
+        "response": {
+          "success": true,
+          "message": "10 vouchers generated successfully",
+          "vouchers": [
+            {
+              "id": 1,
+              "code": "WIFI-ABC123",
+              "bundle_name": "Daily Bundle",
+              "status": "unused",
+              "created_at": "2025-12-13T10:00:00Z",
+              "expires_at": "2025-12-20T10:00:00Z"
+            }
+          ]
+        }
+      },
+      "list_vouchers": {
+        "url": "/api/vouchers/list/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "List all vouchers",
+        "query_params": {
+          "status": "unused, used, expired",
+          "bundle_id": "Filter by bundle",
+          "page": "Page number"
+        },
+        "response": {
+          "success": true,
+          "vouchers": [
+            {
+              "id": 1,
+              "code": "WIFI-ABC123",
+              "bundle": {
+                "id": 3,
+                "name": "Daily Bundle",
+                "duration_hours": 24,
+                "price": 5000
+              },
+              "status": "unused",
+              "created_at": "2025-12-13T10:00:00Z",
+              "expires_at": "2025-12-20T10:00:00Z",
+              "used_by": null,
+              "used_at": null
+            }
+          ],
+          "pagination": {
+            "count": 50,
+            "page": 1,
+            "total_pages": 3
+          }
+        }
+      },
+      "redeem_voucher": {
+        "url": "/api/vouchers/redeem/",
+        "method": "POST",
+        "auth_required": false,
+        "description": "Redeem a voucher (from hotspot page)",
+        "request": {
+          "code": "WIFI-ABC123",
+          "mac_address": "0E:E5:45:24:BA:1E",
+          "ip_address": "192.168.10.100"
+        },
+        "response": {
+          "success": true,
+          "message": "Voucher redeemed successfully",
+          "access": {
+            "granted": true,
+            "expires_at": "2025-12-14T10:00:00Z",
+            "duration_hours": 24,
+            "bundle_name": "Daily Bundle"
+          }
+        }
+      }
+    },
+    "wifi_access": {
+      "verify_access": {
+        "url": "/api/verify/",
+        "method": "POST",
+        "auth_required": false,
+        "description": "Verify if device has WiFi access",
+        "request": {
+          "phone_number": "255657777687",
+          "mac_address": "0E:E5:45:24:BA:1E"
+        },
+        "response": {
+          "has_access": true,
+          "expires_at": "2025-12-13T18:30:00Z",
+          "time_remaining": "5 hours, 30 minutes",
+          "user": {
+            "phone_number": "255657777687",
+            "is_active": true
+          }
+        }
+      },
+      "initiate_payment": {
+        "url": "/api/initiate-payment/",
+        "method": "POST",
+        "auth_required": false,
+        "description": "Start payment process for WiFi bundle",
+        "request": {
+          "phone_number": "255657777687",
+          "bundle_id": 3,
+          "mac_address": "0E:E5:45:24:BA:1E",
+          "ip_address": "192.168.10.100"
+        },
+        "response": {
+          "success": true,
+          "message": "Payment initiated. Please complete payment on your phone.",
+          "order_reference": "ORD-ABC123",
+          "amount": 5000,
+          "bundle": "Daily Bundle"
+        }
+      },
+      "payment_status": {
+        "url": "/api/payment-status/{order_reference}/",
+        "method": "GET",
+        "auth_required": false,
+        "description": "Check payment status",
+        "response": {
+          "success": true,
+          "status": "successful",
+          "message": "Payment completed",
+          "access_granted": true,
+          "expires_at": "2025-12-14T08:00:00Z"
+        }
+      },
+      "user_status": {
+        "url": "/api/user-status/{phone_number}/",
+        "method": "GET",
+        "auth_required": false,
+        "description": "Get user's current access status",
+        "response": {
+          "success": true,
+          "user": {
+            "phone_number": "255657777687",
+            "has_access": true,
+            "access_expires_at": "2025-12-13T18:30:00Z",
+            "time_remaining": "5 hours, 30 minutes",
+            "devices": [
+              {
+                "mac_address": "0E:E5:45:24:BA:1E",
+                "is_active": true
+              }
+            ]
+          }
+        }
+      },
+      "list_user_devices": {
+        "url": "/api/devices/{phone_number}/",
+        "method": "GET",
+        "auth_required": false,
+        "description": "List user's registered devices",
+        "response": {
+          "success": true,
+          "devices": [
+            {
+              "id": 15,
+              "mac_address": "0E:E5:45:24:BA:1E",
+              "ip_address": "192.168.10.198",
+              "device_name": "Unknown Device",
+              "is_active": true,
+              "last_seen": "2025-12-13T10:00:00Z"
+            }
+          ],
+          "max_devices": 1,
+          "can_add_more": false
+        }
+      },
+      "remove_device": {
+        "url": "/api/devices/remove/",
+        "method": "POST",
+        "auth_required": false,
+        "description": "Remove a device from user's account",
+        "request": {
+          "phone_number": "255657777687",
+          "mac_address": "0E:E5:45:24:BA:1E"
+        },
+        "response": {
+          "success": true,
+          "message": "Device removed successfully"
+        }
+      }
+    },
+    "mikrotik_user_endpoints": {
+      "mikrotik_auth": {
+        "url": "/api/mikrotik/auth/",
+        "method": "POST",
+        "auth_required": false,
+        "description": "Authenticate user on MikroTik hotspot",
+        "request": {
+          "username": "255657777687",
+          "mac_address": "0E:E5:45:24:BA:1E",
+          "ip_address": "192.168.10.100"
+        },
+        "response": {
+          "success": true,
+          "message": "Authentication successful",
+          "access": {
+            "granted": true,
+            "expires_at": "2025-12-13T18:30:00Z"
+          }
+        }
+      },
+      "mikrotik_logout": {
+        "url": "/api/mikrotik/logout/",
+        "method": "POST",
+        "auth_required": false,
+        "description": "Logout user from MikroTik hotspot",
+        "request": {
+          "username": "255657777687",
+          "mac_address": "0E:E5:45:24:BA:1E"
+        },
+        "response": {
+          "success": true,
+          "message": "Logged out successfully"
+        }
+      },
+      "mikrotik_status": {
+        "url": "/api/mikrotik/status/",
+        "method": "GET",
+        "auth_required": false,
+        "description": "Check MikroTik connection status",
+        "response": {
+          "success": true,
+          "mikrotik_connected": true,
+          "router_ip": "10.50.0.2"
+        }
+      },
+      "mikrotik_user_status": {
+        "url": "/api/mikrotik/user-status/",
+        "method": "POST",
+        "auth_required": false,
+        "description": "Check if user is logged in on MikroTik",
+        "request": {
+          "username": "255657777687",
+          "mac_address": "0E:E5:45:24:BA:1E"
+        },
+        "response": {
+          "success": true,
+          "is_logged_in": true,
+          "session_info": {
+            "uptime": "2h30m",
+            "bytes_in": "150MB",
+            "bytes_out": "1.5GB"
+          }
+        }
+      }
+    },
+    "mikrotik_admin_endpoints": {
+      "config": {
+        "url": "/api/admin/mikrotik/config/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get MikroTik configuration",
+        "response": {
+          "success": true,
+          "configuration": {
+            "router_ip": "10.50.0.2",
+            "username": "admin",
+            "password_configured": true,
+            "api_port": 8728,
+            "use_ssl": false,
+            "default_profile": "default"
+          }
+        }
+      },
+      "test_connection": {
+        "url": "/api/admin/mikrotik/test-connection/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Test connection to MikroTik router",
+        "response": {
+          "success": true,
+          "message": "Connection successful",
+          "router_info": {
+            "ip": "10.50.0.2",
+            "port": 8728,
+            "status": "reachable",
+            "api_status": "api_ok"
+          },
+          "error": null
+        }
+      },
+      "router_info": {
+        "url": "/api/admin/mikrotik/router-info/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get router system information",
+        "response": {
+          "success": true,
+          "router_info": {
+            "uptime": "2h28m34s",
+            "version": "7.20.4 (stable)",
+            "board_name": "hAP lite",
+            "platform": "MikroTik",
+            "cpu_load": "62",
+            "free_memory": "10506240",
+            "total_memory": "33554432",
+            "connection_status": "connected"
+          }
+        }
+      },
+      "active_users": {
+        "url": "/api/admin/mikrotik/active-users/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "List all active hotspot users on router",
+        "response": {
+          "success": true,
+          "active_users": [
+            {
+              "user": "255657777687",
+              "address": "192.168.10.198",
+              "mac_address": "0E:E5:45:24:BA:1E",
+              "uptime": "2h21m39s",
+              "session_time_left": null,
+              "bytes_in": "95660203",
+              "bytes_out": "1697758892",
+              "database_info": {
+                "user_id": 27,
+                "is_active": true,
+                "has_active_access": true,
+                "device_count": 1
+              }
+            }
+          ],
+          "total_count": 1
+        }
+      },
+      "disconnect_user": {
+        "url": "/api/admin/mikrotik/disconnect-user/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Disconnect a specific user from hotspot",
+        "request": {
+          "username": "255657777687"
+        },
+        "response": {
+          "success": true,
+          "message": "User 255657777687 disconnected successfully"
+        }
+      },
+      "disconnect_all": {
+        "url": "/api/admin/mikrotik/disconnect-all/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Disconnect ALL users from hotspot (dangerous!)",
+        "response": {
+          "success": true,
+          "message": "All users disconnected",
+          "disconnected_count": 5
+        }
+      },
+      "reboot_router": {
+        "url": "/api/admin/mikrotik/reboot/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Reboot the MikroTik router (dangerous!)",
+        "request": {
+          "confirm": true
+        },
+        "response": {
+          "success": true,
+          "message": "Router reboot initiated"
+        }
+      },
+      "profiles": {
+        "url": "/api/admin/mikrotik/profiles/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "List hotspot profiles",
+        "response": {
+          "success": true,
+          "profiles": [
+            {
+              "name": "default",
+              "rate_limit": null,
+              "shared_users": "1",
+              "session_timeout": null,
+              "idle_timeout": "none"
+            }
+          ]
+        }
+      },
+      "create_profile": {
+        "url": "/api/admin/mikrotik/profiles/create/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Create new hotspot profile",
+        "request": {
+          "name": "premium",
+          "rate_limit": "10M/10M",
+          "session_timeout": "24h",
+          "idle_timeout": "30m"
+        },
+        "response": {
+          "success": true,
+          "message": "Hotspot profile \"premium\" created successfully",
+          "profile": {
+            "name": "premium",
+            "rate_limit": "10M/10M"
+          }
+        }
+      },
+      "system_resources": {
+        "url": "/api/admin/mikrotik/resources/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get router system resources (CPU, memory, etc.)",
+        "response": {
+          "success": true,
+          "system_resources": {
+            "uptime": "2h29m40s",
+            "version": "7.20.4 (stable)",
+            "board_name": "hAP lite",
+            "platform": "MikroTik",
+            "cpu_load": "37",
+            "free_memory": "7995392",
+            "total_memory": "33554432",
+            "connection_status": "connected"
+          }
+        }
+      }
+    },
+    "dashboard_and_stats": {
+      "dashboard_stats": {
+        "url": "/api/dashboard-stats/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get dashboard statistics",
+        "response": {
+          "success": true,
+          "stats": {
+            "total_users": 150,
+            "active_users": 45,
+            "expired_users": 100,
+            "new_users_today": 5,
+            "total_revenue": 2500000,
+            "revenue_today": 75000,
+            "revenue_this_month": 850000,
+            "active_sessions": 12,
+            "total_payments": 500,
+            "successful_payments": 480,
+            "failed_payments": 20,
+            "pending_payments": 5,
+            "total_vouchers": 100,
+            "used_vouchers": 65,
+            "unused_vouchers": 35,
+            "router_status": "connected",
+            "router_uptime": "5d 12h 30m"
+          },
+          "charts": {
+            "revenue_last_7_days": [
+              {"date": "2025-12-07", "amount": 50000},
+              {"date": "2025-12-08", "amount": 65000},
+              {"date": "2025-12-09", "amount": 45000},
+              {"date": "2025-12-10", "amount": 80000},
+              {"date": "2025-12-11", "amount": 70000},
+              {"date": "2025-12-12", "amount": 55000},
+              {"date": "2025-12-13", "amount": 75000}
+            ],
+            "users_by_status": {
+              "active": 45,
+              "expired": 100,
+              "never_paid": 5
+            },
+            "popular_bundles": [
+              {"name": "Daily Bundle", "count": 200},
+              {"name": "Weekly Bundle", "count": 150},
+              {"name": "3 Hours Bundle", "count": 100},
+              {"name": "1 Hour Bundle", "count": 50}
+            ]
+          }
+        }
+      },
+      "webhook_logs": {
+        "url": "/api/webhook-logs/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "View payment webhook logs",
+        "query_params": {
+          "page": "Page number",
+          "status": "Filter by status"
+        },
+        "response": {
+          "success": true,
+          "logs": [
+            {
+              "id": 100,
+              "transaction_id": "TXN123456",
+              "order_reference": "ORD-ABC123",
+              "status": "successful",
+              "amount": 5000,
+              "phone_number": "255657777687",
+              "raw_payload": {},
+              "created_at": "2025-12-13T08:00:00Z"
+            }
+          ]
+        }
+      }
+    },
+    "system": {
+      "system_settings": {
+        "url": "/api/admin/settings/",
+        "method": "GET | PUT",
+        "auth_required": true,
+        "description": "Get or update system settings",
+        "response": {
+          "success": true,
+          "settings": {
+            "mikrotik_ip": "10.50.0.2",
+            "mikrotik_port": 8728,
+            "mikrotik_username": "admin",
+            "default_max_devices": 1,
+            "sms_notifications_enabled": true,
+            "auto_disconnect_enabled": true
+          }
+        }
+      },
+      "system_status": {
+        "url": "/api/admin/status/",
+        "method": "GET",
+        "auth_required": true,
+        "description": "Get overall system status",
+        "response": {
+          "success": true,
+          "status": {
+            "database": "connected",
+            "mikrotik": "connected",
+            "payment_gateway": "connected",
+            "sms_gateway": "connected",
+            "cron_jobs": "running",
+            "last_disconnect_check": "2025-12-13T10:00:00Z"
+          }
+        }
+      },
+      "health_check": {
+        "url": "/api/health/",
+        "method": "GET",
+        "auth_required": false,
+        "description": "Basic health check endpoint",
+        "response": {
+          "status": "healthy",
+          "timestamp": "2025-12-13T10:00:00Z"
+        }
+      },
+      "force_logout": {
+        "url": "/api/force-logout/",
+        "method": "POST",
+        "auth_required": true,
+        "description": "Force logout a user from MikroTik",
+        "request": {
+          "phone_number": "255657777687"
+        },
+        "response": {
+          "success": true,
+          "message": "User logged out successfully"
+        }
+      }
+    }
+  },
+  "error_responses": {
+    "authentication_error": {
+      "status_code": 401,
+      "response": {
+        "detail": "Authentication credentials were not provided."
+      }
+    },
+    "invalid_token": {
+      "status_code": 401,
+      "response": {
+        "detail": "Invalid token."
+      }
+    },
+    "permission_denied": {
+      "status_code": 403,
+      "response": {
+        "detail": "You do not have permission to perform this action."
+      }
+    },
+    "not_found": {
+      "status_code": 404,
+      "response": {
+        "success": false,
+        "error": "Resource not found"
+      }
+    },
+    "validation_error": {
+      "status_code": 400,
+      "response": {
+        "success": false,
+        "error": "Validation failed",
+        "details": {
+          "field_name": ["Error message"]
+        }
+      }
+    },
+    "server_error": {
+      "status_code": 500,
+      "response": {
+        "success": false,
+        "error": "Internal server error"
+      }
+    }
+  },
+  "frontend_integration_examples": {
+    "javascript_fetch": {
+      "login": "const response = await fetch('/api/auth/login/', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({ username: 'admin', password: 'password' })\n});\nconst data = await response.json();\nlocalStorage.setItem('token', data.token);",
+      "authenticated_request": "const response = await fetch('/api/admin/users/', {\n  headers: {\n    'Authorization': `Token ${localStorage.getItem('token')}`,\n    'Content-Type': 'application/json'\n  }\n});\nconst data = await response.json();"
+    },
+    "axios_setup": "import axios from 'axios';\n\nconst api = axios.create({\n  baseURL: 'http://your-server:8000/api',\n  headers: { 'Content-Type': 'application/json' }\n});\n\n// Add auth token to all requests\napi.interceptors.request.use(config => {\n  const token = localStorage.getItem('token');\n  if (token) config.headers.Authorization = `Token ${token}`;\n  return config;\n});",
+    "axios_usage_examples": {
+      "list_users": "const { data } = await api.get('/admin/users/');",
+      "get_user_detail": "const { data } = await api.get(`/admin/users/${userId}/`);",
+      "disconnect_user": "const { data } = await api.post('/admin/mikrotik/disconnect-user/', { username: '255657777687' });",
+      "get_router_info": "const { data } = await api.get('/admin/mikrotik/router-info/');",
+      "get_active_users": "const { data } = await api.get('/admin/mikrotik/active-users/');"
+    }
+  },
+  "quick_reference": {
+    "public_endpoints": [
+      "GET /api/bundles/",
+      "POST /api/verify/",
+      "POST /api/initiate-payment/",
+      "GET /api/payment-status/{order_reference}/",
+      "GET /api/user-status/{phone_number}/",
+      "GET /api/devices/{phone_number}/",
+      "POST /api/devices/remove/",
+      "POST /api/vouchers/redeem/",
+      "POST /api/mikrotik/auth/",
+      "POST /api/mikrotik/logout/",
+      "GET /api/mikrotik/status/",
+      "POST /api/mikrotik/user-status/",
+      "GET /api/health/"
+    ],
+    "admin_endpoints": [
+      "POST /api/auth/login/",
+      "POST /api/auth/logout/",
+      "GET /api/auth/profile/",
+      "POST /api/auth/change-password/",
+      "POST /api/auth/create-admin/",
+      "GET /api/admin/users/",
+      "GET /api/admin/users/{user_id}/",
+      "PUT /api/admin/users/{user_id}/update/",
+      "DELETE /api/admin/users/{user_id}/delete/",
+      "GET /api/admin/payments/",
+      "GET /api/admin/payments/{payment_id}/",
+      "POST /api/admin/payments/{payment_id}/refund/",
+      "GET|POST /api/admin/bundles/",
+      "GET|PUT|DELETE /api/admin/bundles/{bundle_id}/",
+      "POST /api/vouchers/generate/",
+      "GET /api/vouchers/list/",
+      "GET /api/webhook-logs/",
+      "GET /api/dashboard-stats/",
+      "POST /api/force-logout/",
+      "GET|PUT /api/admin/settings/",
+      "GET /api/admin/status/"
+    ],
+    "mikrotik_admin_endpoints": [
+      "GET /api/admin/mikrotik/config/",
+      "POST /api/admin/mikrotik/test-connection/",
+      "GET /api/admin/mikrotik/router-info/",
+      "GET /api/admin/mikrotik/active-users/",
+      "POST /api/admin/mikrotik/disconnect-user/",
+      "POST /api/admin/mikrotik/disconnect-all/",
+      "POST /api/admin/mikrotik/reboot/",
+      "GET /api/admin/mikrotik/profiles/",
+      "POST /api/admin/mikrotik/profiles/create/",
+      "GET /api/admin/mikrotik/resources/"
+    ]
+  }
+}

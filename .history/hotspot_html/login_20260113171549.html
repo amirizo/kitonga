@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kitonga Wi-Fi Login</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f0f2f5;
+        margin: 0;
+        padding: 20px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+      }
+      .container {
+        background: #ffffff;
+        padding: 28px;
+        border-radius: 10px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+        width: 100%;
+        max-width: 360px;
+        text-align: center;
+      }
+      .logo {
+        font-size: 46px;
+        margin-bottom: 8px;
+      }
+      h1 {
+        color: #1976d2;
+        margin: 0 0 6px;
+        font-size: 24px;
+      }
+      .subtitle {
+        color: #666;
+        margin-bottom: 26px;
+        font-size: 14px;
+      }
+      .form-group {
+        margin-bottom: 18px;
+        text-align: left;
+      }
+      label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 600;
+        color: #333;
+      }
+      .phone-input {
+        display: flex;
+        align-items: center;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        background: #fff;
+        overflow: hidden;
+      }
+      .phone-input:focus-within {
+        border-color: #1976d2;
+      }
+      .phone-prefix {
+        background: #f5f5f5;
+        padding: 12px 14px;
+        font-size: 15px;
+        font-weight: bold;
+        color: #333;
+        border-right: 1px solid #ddd;
+      }
+      .phone-input input {
+        border: none;
+        outline: none;
+        padding: 12px;
+        font-size: 16px;
+        flex: 1;
+      }
+      .btn {
+        width: 100%;
+        padding: 12px;
+        background: #1976d2;
+        color: #fff;
+        border: none;
+        border-radius: 5px;
+        font-size: 16px;
+        font-weight: bold;
+        cursor: pointer;
+      }
+      .btn:disabled {
+        background: #bdbdbd;
+        cursor: not-allowed;
+      }
+      .register-btn {
+        width: 100%;
+        padding: 10px;
+        background: #ffffff;
+        color: #1976d2;
+        border: 2px solid #1976d2;
+        border-radius: 5px;
+        font-size: 14px;
+        font-weight: bold;
+        cursor: pointer;
+      }
+      .register-btn:hover {
+        background: #1976d2;
+        color: #fff;
+      }
+      .error,
+      .success {
+        padding: 10px;
+        border-radius: 5px;
+        margin-bottom: 16px;
+        font-size: 14px;
+        display: none;
+      }
+      .error {
+        background: #ffebee;
+        border: 1px solid #e57373;
+        color: #c62828;
+      }
+      .success {
+        background: #e8f5e9;
+        border: 1px solid #4caf50;
+        color: #2e7d32;
+      }
+      .loading {
+        display: none;
+        margin: 20px 0;
+      }
+      .spinner {
+        width: 28px;
+        height: 28px;
+        border: 3px solid #eee;
+        border-top: 3px solid #1976d2;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 10px;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .divider {
+        margin: 18px 0;
+        text-align: center;
+        color: #999;
+        font-size: 14px;
+      }
+      .divider::before,
+      .divider::after {
+        content: '';
+        display: inline-block;
+        width: 30%;
+        height: 1px;
+        background: #ddd;
+        vertical-align: middle;
+        margin: 0 8px;
+      }
+      .footer {
+        margin-top: 26px;
+        padding-top: 16px;
+        border-top: 1px solid #eee;
+        color: #999;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="logo">📶</div>
+      <h1>Kitonga Wi-Fi</h1>
+      <p class="subtitle">Connect to high-speed internet</p>
+
+      <div id="error" class="error"></div>
+      <div id="success" class="success"></div>
+
+      <form onsubmit="return doLogin()">
+        <div class="form-group">
+          <label>Phone Number</label>
+          <div class="phone-input">
+            <span class="phone-prefix">+255</span>
+            <input id="username" type="tel" placeholder="712345678" maxlength="9" inputmode="numeric" required oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,9)" />
+          </div>
+        </div>
+        <button id="loginBtn" class="btn" type="submit">Connect to Internet</button>
+      </form>
+
+      <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <p id="loadingText">Verifying access…</p>
+      </div>
+
+      <div class="divider">New user?</div>
+
+      <button class="register-btn" onclick="openRegistration()">Register for Wi-Fi Access</button>
+
+      <div class="footer">
+        <strong>Powered by Kitonga Wi-Fi</strong><br />
+        Support: kitonga.klikcell.com
+      </div>
+    </div>
+
+    <script>
+      const API_BASE_URL = 'https://api.kitonga.klikcell.com'
+      const FRONTEND_URL = 'https://kitonga.klikcell.com/portal/'
+
+      function getParams() {
+        const params = {}
+        const query = window.location.search.substring(1).split('&')
+        query.forEach(p => {
+          const [k, v] = p.split('=')
+          if (k) params[decodeURIComponent(k)] = decodeURIComponent(v || '')
+        })
+        return params
+      }
+
+      function showError(msg) {
+        const el = document.getElementById('error')
+        el.innerHTML = msg
+        el.style.display = 'block'
+        document.getElementById('success').style.display = 'none'
+      }
+
+      function showSuccess(msg) {
+        const el = document.getElementById('success')
+        el.innerHTML = msg
+        el.style.display = 'block'
+        document.getElementById('error').style.display = 'none'
+      }
+
+      function showLoading(text) {
+        document.querySelector('form').style.display = 'none'
+        document.getElementById('loading').style.display = 'block'
+        document.getElementById('loadingText').textContent = text
+      }
+
+      function hideLoading() {
+        document.querySelector('form').style.display = 'block'
+        document.getElementById('loading').style.display = 'none'
+      }
+
+      function normalizePhone(v) {
+        return '255' + v.replace(/[^0-9]/g, '').slice(-9)
+      }
+
+      function openRegistration() {
+        const p = getParams()
+        let url = FRONTEND_URL
+        if (p['router-id']) url += '?router_id=' + p['router-id']
+        window.location.href = url
+      }
+
+      function doLogin() {
+        const input = document.getElementById('username').value
+        if (input.length !== 9) {
+          showError('Enter a valid 9-digit phone number')
+          return false
+        }
+
+        showLoading('Verifying access…')
+
+        const phone = normalizePhone(input)
+        const params = getParams()
+
+        fetch(API_BASE_URL + '/api/verify/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone_number: phone,
+            mac_address: params.mac || '',
+            ip_address: params.ip || '',
+            router_id: params['router-id'] ? parseInt(params['router-id']) : null
+          })
+        })
+          .then(r => r.json())
+          .then(res => {
+            if (res.access_granted) {
+              showSuccess('Access granted. Connecting…')
+              setTimeout(() => {
+                window.location.href = FRONTEND_URL + '?phone=' + phone
+              }, 1200)
+            } else {
+              hideLoading()
+              showError((res.denial_reason || 'Access denied') + '<br><br>Redirecting to payment…')
+              setTimeout(() => {
+                window.location.href = FRONTEND_URL + '?phone=' + phone
+              }, 1800)
+            }
+          })
+          .catch(() => {
+            hideLoading()
+            showError('Network error. Please try again.')
+          })
+
+        return false
+      }
+    </script>
+  </body>
+</html>
