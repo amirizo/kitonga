@@ -488,11 +488,6 @@ urlpatterns = [
         portal_views.portal_user_extend_access,
         name="portal_user_extend_access",
     ),
-    path(
-        "portal/users/<int:user_id>/hotspot/",
-        portal_views.portal_user_hotspot_enable,
-        name="portal_user_hotspot_enable",
-    ),
     # Payment Management
     path("portal/payments/", portal_views.portal_payments, name="portal_payments"),
     path("portal/balance/", portal_views.portal_balance, name="portal_balance"),

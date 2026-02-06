@@ -191,14 +191,14 @@ Add these settings to MikroTik for better performance:
 /interface wireguard set wg-kitonga mtu=1420
 ```
 
-## SSL/TLS with Certbot (Let's Encrypt)
+## SSL/TLS with Warden (Let's Encrypt)
 
 ### Domain Configuration
 
-| Domain                     | Purpose           |
-| -------------------------- | ----------------- |
+| Domain | Purpose |
+|--------|---------|
 | `api.kitonga.klikcell.com` | Main API endpoint |
-| `kitonga.klikcell.com`     | Admin dashboard   |
+| `kitonga.klikcell.com` | Admin dashboard |
 
 ### Install Certbot (if not installed)
 
@@ -236,7 +236,7 @@ server {
 
     ssl_certificate /etc/letsencrypt/live/api.kitonga.klikcell.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/api.kitonga.klikcell.com/privkey.pem;
-
+    
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256;
     ssl_prefer_server_ciphers off;
@@ -265,121 +265,6 @@ certbot certificates
 
 # Check expiry date
 openssl x509 -enddate -noout -in /etc/letsencrypt/live/api.kitonga.klikcell.com/fullchain.pem
-```
-
-## Walled Garden Configuration
-
-The Walled Garden allows unauthenticated hotspot users to access specific domains (like payment gateways and the login API) before they log in.
-
-### Required Walled Garden Entries
-
-These domains must be accessible for Kitonga to work properly:
-
-| Domain                     | Purpose                                |
-| -------------------------- | -------------------------------------- |
-| `api.kitonga.klikcell.com` | Kitonga API (login, payments, bundles) |
-| `kitonga.klikcell.com`     | Admin dashboard                        |
-| `*.clickpesa.com`          | ClickPesa payment gateway              |
-| `*.tigopesa.com`           | Tigo Pesa payments                     |
-| `*.mpesa.com`              | M-Pesa payments                        |
-| `*.vodacom.co.tz`          | Vodacom M-Pesa                         |
-| `*.airtel.com`             | Airtel Money                           |
-| `*.halopesa.com`           | Halo Pesa payments                     |
-
-### MikroTik Walled Garden Setup
-
-Run these commands on each MikroTik router:
-
-```routeros
-# Add Kitonga API domain
-/ip hotspot walled-garden add dst-host="api.kitonga.klikcell.com" action=allow comment="Kitonga API"
-/ip hotspot walled-garden add dst-host="kitonga.klikcell.com" action=allow comment="Kitonga Dashboard"
-
-# Add ClickPesa payment gateway
-/ip hotspot walled-garden add dst-host="*.clickpesa.com" action=allow comment="ClickPesa Gateway"
-/ip hotspot walled-garden add dst-host="clickpesa.com" action=allow comment="ClickPesa"
-
-# Add Mobile Money payment gateways
-/ip hotspot walled-garden add dst-host="*.tigopesa.com" action=allow comment="Tigo Pesa"
-/ip hotspot walled-garden add dst-host="*.vodacom.co.tz" action=allow comment="Vodacom M-Pesa"
-/ip hotspot walled-garden add dst-host="*.mpesa.com" action=allow comment="M-Pesa"
-/ip hotspot walled-garden add dst-host="*.airtel.com" action=allow comment="Airtel Money"
-/ip hotspot walled-garden add dst-host="*.halopesa.com" action=allow comment="Halo Pesa"
-
-# Add IP-based walled garden for VPS (backup)
-/ip hotspot walled-garden ip add dst-address=66.29.143.116 action=accept comment="Kitonga VPS IP"
-```
-
-### Verify Walled Garden Configuration
-
-```routeros
-# View all walled garden entries
-/ip hotspot walled-garden print
-
-# View IP-based walled garden entries
-/ip hotspot walled-garden ip print
-
-# Test if domain is in walled garden (from router terminal)
-/ip hotspot walled-garden print where dst-host~"kitonga"
-```
-
-### Troubleshooting Walled Garden
-
-If users can't access the login page or payment gateway:
-
-1. **Check entries exist**:
-
-```routeros
-/ip hotspot walled-garden print
-```
-
-2. **Check DNS resolution**:
-
-```routeros
-/ip dns print
-:put [:resolve "api.kitonga.klikcell.com"]
-```
-
-3. **Add by IP if DNS fails**:
-
-```routeros
-# Get the IP and add it
-/ip hotspot walled-garden ip add dst-address=66.29.143.116 action=accept
-```
-
-4. **Check hotspot profile has walled garden enabled**:
-
-```routeros
-/ip hotspot profile print
-```
-
-### Complete Walled Garden Script
-
-Copy and paste this complete script to set up all walled garden entries at once:
-
-```routeros
-# Remove old entries (optional - be careful!)
-# /ip hotspot walled-garden remove [find]
-
-# Kitonga domains
-/ip hotspot walled-garden add dst-host="api.kitonga.klikcell.com" action=allow comment="Kitonga API"
-/ip hotspot walled-garden add dst-host="kitonga.klikcell.com" action=allow comment="Kitonga Dashboard"
-/ip hotspot walled-garden add dst-host="*.klikcell.com" action=allow comment="Klikcell All"
-
-# Payment gateways
-/ip hotspot walled-garden add dst-host="*.clickpesa.com" action=allow comment="ClickPesa"
-/ip hotspot walled-garden add dst-host="clickpesa.com" action=allow comment="ClickPesa Root"
-/ip hotspot walled-garden add dst-host="*.tigopesa.com" action=allow comment="Tigo Pesa"
-/ip hotspot walled-garden add dst-host="*.vodacom.co.tz" action=allow comment="M-Pesa Vodacom"
-/ip hotspot walled-garden add dst-host="*.mpesa.com" action=allow comment="M-Pesa"
-/ip hotspot walled-garden add dst-host="*.airtel.com" action=allow comment="Airtel Money"
-/ip hotspot walled-garden add dst-host="*.halopesa.com" action=allow comment="Halo Pesa"
-
-# VPS IP (backup)
-/ip hotspot walled-garden ip add dst-address=66.29.143.116 action=accept comment="Kitonga VPS"
-
-# Verify
-/ip hotspot walled-garden print
 ```
 
 ## Security Best Practices

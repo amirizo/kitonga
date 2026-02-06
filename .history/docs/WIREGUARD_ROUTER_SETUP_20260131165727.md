@@ -195,10 +195,10 @@ Add these settings to MikroTik for better performance:
 
 ### Domain Configuration
 
-| Domain                     | Purpose           |
-| -------------------------- | ----------------- |
+| Domain | Purpose |
+|--------|---------|
 | `api.kitonga.klikcell.com` | Main API endpoint |
-| `kitonga.klikcell.com`     | Admin dashboard   |
+| `kitonga.klikcell.com` | Admin dashboard |
 
 ### Install Certbot (if not installed)
 
@@ -236,7 +236,7 @@ server {
 
     ssl_certificate /etc/letsencrypt/live/api.kitonga.klikcell.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/api.kitonga.klikcell.com/privkey.pem;
-
+    
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256;
     ssl_prefer_server_ciphers off;
@@ -275,16 +275,16 @@ The Walled Garden allows unauthenticated hotspot users to access specific domain
 
 These domains must be accessible for Kitonga to work properly:
 
-| Domain                     | Purpose                                |
-| -------------------------- | -------------------------------------- |
+| Domain | Purpose |
+|--------|---------|
 | `api.kitonga.klikcell.com` | Kitonga API (login, payments, bundles) |
-| `kitonga.klikcell.com`     | Admin dashboard                        |
-| `*.clickpesa.com`          | ClickPesa payment gateway              |
-| `*.tigopesa.com`           | Tigo Pesa payments                     |
-| `*.mpesa.com`              | M-Pesa payments                        |
-| `*.vodacom.co.tz`          | Vodacom M-Pesa                         |
-| `*.airtel.com`             | Airtel Money                           |
-| `*.halopesa.com`           | Halo Pesa payments                     |
+| `kitonga.klikcell.com` | Admin dashboard |
+| `*.clickpesa.com` | ClickPesa payment gateway |
+| `*.tigopesa.com` | Tigo Pesa payments |
+| `*.mpesa.com` | M-Pesa payments |
+| `*.vodacom.co.tz` | Vodacom M-Pesa |
+| `*.airtel.com` | Airtel Money |
+| `*.halopesa.com` | Halo Pesa payments |
 
 ### MikroTik Walled Garden Setup
 
@@ -328,27 +328,23 @@ Run these commands on each MikroTik router:
 If users can't access the login page or payment gateway:
 
 1. **Check entries exist**:
-
 ```routeros
 /ip hotspot walled-garden print
 ```
 
 2. **Check DNS resolution**:
-
 ```routeros
 /ip dns print
 :put [:resolve "api.kitonga.klikcell.com"]
 ```
 
 3. **Add by IP if DNS fails**:
-
 ```routeros
 # Get the IP and add it
 /ip hotspot walled-garden ip add dst-address=66.29.143.116 action=accept
 ```
 
 4. **Check hotspot profile has walled garden enabled**:
-
 ```routeros
 /ip hotspot profile print
 ```
