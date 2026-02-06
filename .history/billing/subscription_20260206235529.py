@@ -1,6 +1,6 @@
 """
 Subscription Management for Kitonga SaaS Platform
-Handles tenant subscription payments via ClickPesa, usage metering, and limits
+Handles tenant subscription payments via ClickPesa or Snippe, usage metering, and limits
 """
 
 import logging
@@ -22,6 +22,7 @@ from .models import (
     Device,
 )
 from .clickpesa import ClickPesaAPI
+from .snippe import SnippeAPI
 
 logger = logging.getLogger(__name__)
 

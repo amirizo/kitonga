@@ -1,6 +1,6 @@
 """
 Subscription Management for Kitonga SaaS Platform
-Handles tenant subscription payments via ClickPesa, usage metering, and limits
+Handles tenant subscription payments via ClickPesa or Snippe, usage metering, and limits
 """
 
 import logging
@@ -22,6 +22,7 @@ from .models import (
     Device,
 )
 from .clickpesa import ClickPesaAPI
+from .snippe import SnippeAPI
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +39,14 @@ class SubscriptionManager:
 
     def __init__(self, tenant: Tenant):
         self.tenant = tenant
-        # Use platform ClickPesa API (uses settings for credentials)
-        self.clickpesa = ClickPesaAPI()
+        # Select payment gateway based on settings.PAYMENT_GATEWAY
+        gateway_setting = getattr(settings, "PAYMENT_GATEWAY", "clickpesa").lower()
+        if gateway_setting == "snippe":
+            self.gateway = SnippeAPI()
+            self.gateway_name = "snippe"
+        else:
+            self.gateway = ClickPesaAPI()
+            self.gateway_name = "clickpesa"
 
     def create_subscription_payment(
         self, plan: SubscriptionPlan, billing_cycle: str = "monthly"

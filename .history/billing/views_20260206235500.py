@@ -55,6 +55,7 @@ from .serializers import (
     RevenueReportSerializer,
 )
 from .clickpesa import ClickPesaAPI
+from .snippe import SnippeAPI
 from .utils import get_active_users_count, get_revenue_statistics
 from .permissions import (
     SimpleAdminTokenPermission,
@@ -86,6 +87,18 @@ from .mikrotik import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def get_payment_gateway():
+    """
+    Factory function to get the active payment gateway client.
+    Returns either ClickPesaAPI or SnippeAPI based on settings.PAYMENT_GATEWAY
+    Both share a compatible interface: initiate_payment(phone, amount, order_ref)
+    """
+    gateway = getattr(settings, "PAYMENT_GATEWAY", "clickpesa").lower()
+    if gateway == "snippe":
+        return SnippeAPI(), "snippe"
+    return ClickPesaAPI(), "clickpesa"
 
 
 def get_client_ip(request):
@@ -4440,18 +4453,19 @@ def initiate_payment(request):
     )
 
     # =========================================================================
-    # PLATFORM PAYMENT: All payments go through platform's ClickPesa account
+    # PLATFORM PAYMENT: All payments go through platform payment gateway
+    # Supports both ClickPesa and Snippe based on PAYMENT_GATEWAY setting
     # Tenants receive payouts from the platform based on their revenue share
     # =========================================================================
-    clickpesa = ClickPesaAPI()
+    gateway, gateway_name = get_payment_gateway()
     if tenant:
         logger.info(
-            f"Processing payment for tenant {tenant.slug} via platform ClickPesa account"
+            f"Processing payment for tenant {tenant.slug} via platform {gateway_name} account"
         )
     else:
-        logger.info("Processing payment via platform ClickPesa account")
+        logger.info(f"Processing payment via platform {gateway_name} account")
 
-    result = clickpesa.initiate_payment(
+    result = gateway.initiate_payment(
         phone_number=phone_number, amount=amount, order_reference=order_reference
     )
 
@@ -5007,23 +5021,334 @@ def clickpesa_payout_webhook(request):
         )
 
 
+# =============================================================================
+# SNIPPE PAYMENT WEBHOOK
+# =============================================================================
+
+
+@csrf_exempt
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def snippe_webhook(request):
+    """
+    Snippe Payment webhook endpoint.
+    Receives payment.completed and payment.failed events from Snippe.
+    Verifies HMAC-SHA256 signature before processing.
+
+    Webhook Headers:
+        X-Webhook-Event: payment.completed | payment.failed
+        X-Webhook-Timestamp: Unix timestamp
+        X-Webhook-Signature: HMAC-SHA256 signature
+    """
+    webhook_log = None
+
+    try:
+        # ====================================================================
+        # 1. VERIFY WEBHOOK SIGNATURE
+        # ====================================================================
+        snippe = SnippeAPI()
+        signature = request.headers.get("X-Webhook-Signature", "")
+        timestamp = request.headers.get("X-Webhook-Timestamp", "")
+        event_type_header = request.headers.get("X-Webhook-Event", "")
+
+        raw_body = request.body.decode("utf-8") if isinstance(request.body, bytes) else str(request.body)
+
+        if not snippe.verify_webhook_signature(raw_body, signature, timestamp):
+            logger.warning("Snippe webhook signature verification failed")
+            return Response(
+                {"success": False, "message": "Invalid signature"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # ====================================================================
+        # 2. PARSE WEBHOOK DATA
+        # ====================================================================
+        webhook_data = request.data
+        logger.info(f"Snippe webhook received: event={event_type_header}, data={json.dumps(webhook_data)}")
+
+        parsed = SnippeAPI.parse_webhook_data(webhook_data)
+        order_reference = parsed["order_reference"]
+        payment_status = parsed["status"]
+        snippe_reference = parsed["reference"]
+        amount = parsed["amount"]
+        channel = f"{parsed['channel_type']}:{parsed['channel_provider']}"
+
+        # Map Snippe event type to internal format
+        if event_type_header == "payment.completed" or payment_status == "completed":
+            event_type = "PAYMENT RECEIVED"
+            status_code = "PAYMENT RECEIVED"
+        elif event_type_header == "payment.failed" or payment_status == "failed":
+            event_type = "PAYMENT FAILED"
+            status_code = "FAILED"
+        else:
+            event_type = "OTHER"
+            status_code = payment_status.upper() if payment_status else "UNKNOWN"
+
+        # ====================================================================
+        # 3. CREATE WEBHOOK LOG
+        # ====================================================================
+        request_info = get_request_info(request)
+
+        from .models import PaymentWebhook
+
+        webhook_log = PaymentWebhook.objects.create(
+            event_type=(
+                event_type
+                if event_type in dict(PaymentWebhook.WEBHOOK_EVENT_CHOICES)
+                else "OTHER"
+            ),
+            order_reference=order_reference or "UNKNOWN",
+            transaction_id=snippe_reference or "",
+            payment_status=status_code or "UNKNOWN",
+            channel=channel or "snippe",
+            amount=amount,
+            raw_payload=webhook_data,
+            source_ip=request_info["ip_address"],
+            user_agent=request_info["user_agent"],
+        )
+
+        if not order_reference:
+            error_msg = "No order reference in Snippe webhook data"
+            logger.error(error_msg)
+            webhook_log.mark_failed(error_msg)
+            return Response({"success": False, "message": "Missing order reference"})
+
+        # Check for duplicates
+        if webhook_log.is_duplicate:
+            webhook_log.mark_ignored("Duplicate Snippe webhook - already processed")
+            logger.info(f"Duplicate Snippe webhook ignored: {order_reference}")
+            return Response({"success": True, "message": "Duplicate webhook ignored"})
+
+        # ====================================================================
+        # 4. ROUTE: SUBSCRIPTION vs WIFI PAYMENT
+        # ====================================================================
+        if order_reference and order_reference.startswith("SUB"):
+            logger.info(
+                f"Snippe subscription payment detected ({order_reference}), "
+                f"routing to subscription handler"
+            )
+            webhook_log.mark_ignored("Routed to subscription webhook handler")
+            # Process subscription payment directly
+            return _process_snippe_subscription_payment(
+                order_reference, status_code, snippe_reference, channel, webhook_log
+            )
+
+        # ====================================================================
+        # 5. PROCESS WIFI PAYMENT
+        # ====================================================================
+        try:
+            payment = Payment.objects.get(order_reference=order_reference)
+
+            if event_type == "PAYMENT RECEIVED":
+                payment.mark_completed(
+                    payment_reference=snippe_reference, channel=channel
+                )
+                logger.info(
+                    f"Snippe payment completed: {order_reference} - {snippe_reference}"
+                )
+
+                # === AUTO-CONNECT USER (same logic as ClickPesa webhook) ===
+                _auto_connect_user_after_payment(payment, webhook_log)
+
+                if webhook_log:
+                    webhook_log.mark_processed()
+                return Response({"success": True, "message": "Payment processed"})
+
+            elif event_type == "PAYMENT FAILED":
+                payment.mark_failed()
+                logger.info(
+                    f"Snippe payment failed: {order_reference} - "
+                    f"reason: {parsed.get('failure_reason', 'unknown')}"
+                )
+                if webhook_log:
+                    webhook_log.mark_processed()
+                return Response({"success": True, "message": "Payment failure recorded"})
+
+            else:
+                logger.warning(f"Snippe webhook unhandled event: {event_type_header}")
+                if webhook_log:
+                    webhook_log.mark_ignored(f"Unhandled event: {event_type_header}")
+                return Response({"success": True, "message": "Event acknowledged"})
+
+        except Payment.DoesNotExist:
+            # Check subscription payments as fallback
+            try:
+                from .models import TenantSubscriptionPayment
+
+                sub_payment = TenantSubscriptionPayment.objects.get(
+                    transaction_id=order_reference
+                )
+                logger.info(
+                    f"Snippe webhook: found subscription payment {order_reference}"
+                )
+                return _process_snippe_subscription_payment(
+                    order_reference, status_code, snippe_reference, channel, webhook_log
+                )
+            except TenantSubscriptionPayment.DoesNotExist:
+                error_msg = f"Snippe webhook: No payment found for {order_reference}"
+                logger.error(error_msg)
+                if webhook_log:
+                    webhook_log.mark_failed(error_msg)
+                return Response(
+                    {"success": False, "message": "Payment not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+    except Exception as e:
+        error_msg = f"Error processing Snippe webhook: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        if webhook_log:
+            webhook_log.mark_failed(error_msg)
+        return Response(
+            {"success": False, "message": "Webhook processing failed"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+def _process_snippe_subscription_payment(
+    order_reference, status_code, snippe_reference, channel, webhook_log
+):
+    """
+    Process a subscription payment from Snippe webhook.
+    Delegates to SubscriptionManager.process_payment_callback().
+    """
+    from .subscription import SubscriptionManager
+    from .models import TenantSubscriptionPayment
+
+    try:
+        sub_payment = TenantSubscriptionPayment.objects.get(
+            transaction_id=order_reference
+        )
+        manager = SubscriptionManager(sub_payment.tenant)
+
+        # Map Snippe status to SubscriptionManager expected format
+        if status_code in ["PAYMENT RECEIVED", "COMPLETED", "SUCCESS"]:
+            callback_status = "PAYMENT RECEIVED"
+        else:
+            callback_status = "FAILED"
+
+        result = manager.process_payment_callback(
+            transaction_id=order_reference,
+            status=callback_status,
+            payment_reference=snippe_reference,
+            channel=channel,
+        )
+
+        if webhook_log:
+            webhook_log.mark_processed()
+
+        return Response({
+            "success": True,
+            "message": "Subscription payment processed",
+            "activated": result,
+        })
+
+    except TenantSubscriptionPayment.DoesNotExist:
+        error_msg = f"Subscription payment not found: {order_reference}"
+        logger.error(error_msg)
+        if webhook_log:
+            webhook_log.mark_failed(error_msg)
+        return Response(
+            {"success": False, "message": "Subscription payment not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    except Exception as e:
+        error_msg = f"Error processing Snippe subscription payment: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        if webhook_log:
+            webhook_log.mark_failed(error_msg)
+        return Response(
+            {"success": False, "message": "Subscription webhook processing failed"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+def _auto_connect_user_after_payment(payment, webhook_log=None):
+    """
+    Auto-connect user after successful payment.
+    Shared logic for both ClickPesa and Snippe webhooks.
+    """
+    try:
+        user = payment.user
+        phone_number = payment.phone_number
+        devices = user.devices.filter(is_active=True)
+        payment_router = payment.router
+
+        logger.info(
+            f"Auto-connect for {phone_number}: "
+            f"tenant={user.tenant.slug if user.tenant else 'NONE'}, "
+            f"payment_router={payment_router.name if payment_router else 'NONE'}, "
+            f"active_devices={devices.count()}"
+        )
+
+        if devices.exists():
+            for device in devices:
+                try:
+                    mac_address = device.mac_address
+                    ip_address = device.ip_address
+
+                    enhance_device_tracking_for_payment(
+                        payment_user=user,
+                        mac_address=mac_address,
+                        ip_address=ip_address,
+                    )
+
+                    if payment_router:
+                        auto_access_result = authorize_user_on_specific_router(
+                            user=user,
+                            router_id=payment_router.id,
+                            mac_address=mac_address,
+                            ip_address=ip_address,
+                            access_type="payment",
+                        )
+                    elif user.tenant:
+                        auto_access_result = (
+                            force_immediate_internet_access_on_tenant_routers(
+                                user=user,
+                                mac_address=mac_address,
+                                ip_address=ip_address,
+                                access_type="payment",
+                            )
+                        )
+                    else:
+                        auto_access_result = force_immediate_internet_access(
+                            username=phone_number,
+                            mac_address=mac_address,
+                            ip_address=ip_address,
+                            access_type="payment",
+                        )
+
+                    if auto_access_result.get("success"):
+                        logger.info(
+                            f"Auto-access granted for {phone_number} on device {mac_address}"
+                        )
+
+                except Exception as dev_err:
+                    logger.error(
+                        f"Error auto-connecting device {device.mac_address}: {dev_err}"
+                    )
+
+    except Exception as e:
+        logger.error(f"Error in auto-connect after payment: {e}")
+
+
 @api_view(["GET", "POST"])
 @permission_classes([AllowAny])
 def query_payment_status(request, order_reference):
     """
-    Query payment status from ClickPesa
+    Query payment status from active payment gateway (ClickPesa or Snippe)
     """
     try:
         payment = Payment.objects.get(order_reference=order_reference)
 
-        # Query ClickPesa for latest status
-        clickpesa = ClickPesaAPI()
-        result = clickpesa.query_payment_status(order_reference)
+        # Query active gateway for latest status
+        gateway, gateway_name = get_payment_gateway()
+        result = gateway.query_payment_status(order_reference)
 
         if result["success"]:
             payment_data = result["data"]
             logger.info(
-                f"ClickPesa returned data type: {type(payment_data)}, data: {payment_data}"
+                f"{gateway_name} returned data type: {type(payment_data)}, data: {payment_data}"
             )
 
             # Handle case where ClickPesa returns a list of payments
@@ -8308,7 +8633,9 @@ def renew_subscription(request):
                         else None
                     ),
                     "period_end": (
-                        pending.period_end.isoformat() if pending.period_end else None
+                        pending.period_end.isoformat()
+                        if pending.period_end
+                        else None
                     ),
                     "already_pending": True,
                 }
@@ -8319,7 +8646,8 @@ def renew_subscription(request):
 
     if result.get("success"):
         result["is_renewal"] = bool(
-            tenant.subscription_ends_at and tenant.subscription_ends_at > timezone.now()
+            tenant.subscription_ends_at
+            and tenant.subscription_ends_at > timezone.now()
         )
         return Response(result)
     else:

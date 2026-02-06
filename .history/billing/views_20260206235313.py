@@ -55,6 +55,7 @@ from .serializers import (
     RevenueReportSerializer,
 )
 from .clickpesa import ClickPesaAPI
+from .snippe import SnippeAPI
 from .utils import get_active_users_count, get_revenue_statistics
 from .permissions import (
     SimpleAdminTokenPermission,
@@ -86,6 +87,18 @@ from .mikrotik import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def get_payment_gateway():
+    """
+    Factory function to get the active payment gateway client.
+    Returns either ClickPesaAPI or SnippeAPI based on settings.PAYMENT_GATEWAY
+    Both share a compatible interface: initiate_payment(phone, amount, order_ref)
+    """
+    gateway = getattr(settings, "PAYMENT_GATEWAY", "clickpesa").lower()
+    if gateway == "snippe":
+        return SnippeAPI(), "snippe"
+    return ClickPesaAPI(), "clickpesa"
 
 
 def get_client_ip(request):
@@ -8308,7 +8321,9 @@ def renew_subscription(request):
                         else None
                     ),
                     "period_end": (
-                        pending.period_end.isoformat() if pending.period_end else None
+                        pending.period_end.isoformat()
+                        if pending.period_end
+                        else None
                     ),
                     "already_pending": True,
                 }
@@ -8319,7 +8334,8 @@ def renew_subscription(request):
 
     if result.get("success"):
         result["is_renewal"] = bool(
-            tenant.subscription_ends_at and tenant.subscription_ends_at > timezone.now()
+            tenant.subscription_ends_at
+            and tenant.subscription_ends_at > timezone.now()
         )
         return Response(result)
     else:

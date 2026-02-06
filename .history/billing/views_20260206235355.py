@@ -55,6 +55,7 @@ from .serializers import (
     RevenueReportSerializer,
 )
 from .clickpesa import ClickPesaAPI
+from .snippe import SnippeAPI
 from .utils import get_active_users_count, get_revenue_statistics
 from .permissions import (
     SimpleAdminTokenPermission,
@@ -86,6 +87,18 @@ from .mikrotik import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def get_payment_gateway():
+    """
+    Factory function to get the active payment gateway client.
+    Returns either ClickPesaAPI or SnippeAPI based on settings.PAYMENT_GATEWAY
+    Both share a compatible interface: initiate_payment(phone, amount, order_ref)
+    """
+    gateway = getattr(settings, "PAYMENT_GATEWAY", "clickpesa").lower()
+    if gateway == "snippe":
+        return SnippeAPI(), "snippe"
+    return ClickPesaAPI(), "clickpesa"
 
 
 def get_client_ip(request):
@@ -4440,18 +4453,19 @@ def initiate_payment(request):
     )
 
     # =========================================================================
-    # PLATFORM PAYMENT: All payments go through platform's ClickPesa account
+    # PLATFORM PAYMENT: All payments go through platform payment gateway
+    # Supports both ClickPesa and Snippe based on PAYMENT_GATEWAY setting
     # Tenants receive payouts from the platform based on their revenue share
     # =========================================================================
-    clickpesa = ClickPesaAPI()
+    gateway, gateway_name = get_payment_gateway()
     if tenant:
         logger.info(
-            f"Processing payment for tenant {tenant.slug} via platform ClickPesa account"
+            f"Processing payment for tenant {tenant.slug} via platform {gateway_name} account"
         )
     else:
-        logger.info("Processing payment via platform ClickPesa account")
+        logger.info(f"Processing payment via platform {gateway_name} account")
 
-    result = clickpesa.initiate_payment(
+    result = gateway.initiate_payment(
         phone_number=phone_number, amount=amount, order_reference=order_reference
     )
 
@@ -5011,19 +5025,19 @@ def clickpesa_payout_webhook(request):
 @permission_classes([AllowAny])
 def query_payment_status(request, order_reference):
     """
-    Query payment status from ClickPesa
+    Query payment status from active payment gateway (ClickPesa or Snippe)
     """
     try:
         payment = Payment.objects.get(order_reference=order_reference)
 
-        # Query ClickPesa for latest status
-        clickpesa = ClickPesaAPI()
-        result = clickpesa.query_payment_status(order_reference)
+        # Query active gateway for latest status
+        gateway, gateway_name = get_payment_gateway()
+        result = gateway.query_payment_status(order_reference)
 
         if result["success"]:
             payment_data = result["data"]
             logger.info(
-                f"ClickPesa returned data type: {type(payment_data)}, data: {payment_data}"
+                f"{gateway_name} returned data type: {type(payment_data)}, data: {payment_data}"
             )
 
             # Handle case where ClickPesa returns a list of payments
@@ -8308,7 +8322,9 @@ def renew_subscription(request):
                         else None
                     ),
                     "period_end": (
-                        pending.period_end.isoformat() if pending.period_end else None
+                        pending.period_end.isoformat()
+                        if pending.period_end
+                        else None
                     ),
                     "already_pending": True,
                 }
@@ -8319,7 +8335,8 @@ def renew_subscription(request):
 
     if result.get("success"):
         result["is_renewal"] = bool(
-            tenant.subscription_ends_at and tenant.subscription_ends_at > timezone.now()
+            tenant.subscription_ends_at
+            and tenant.subscription_ends_at > timezone.now()
         )
         return Response(result)
     else:

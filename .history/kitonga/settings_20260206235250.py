@@ -319,11 +319,20 @@ CORS_ALLOW_METHODS = [
     "PUT",
 ]
 
+# Payment Gateway Selection: 'clickpesa' or 'snippe'
+PAYMENT_GATEWAY = config("PAYMENT_GATEWAY", default="clickpesa")
+
 # ClickPesa Configuration
 CLICKPESA_CLIENT_ID = config("CLICKPESA_CLIENT_ID", default="")
 CLICKPESA_API_KEY = config("CLICKPESA_API_KEY", default="")
 CLICKPESA_BASE_URL = config("CLICKPESA_BASE_URL", default="https://api.clickpesa.com")
 CLICKPESA_WEBHOOK_URL = config("CLICKPESA_WEBHOOK_URL", default="")
+
+# Snippe Payment Configuration
+SNIPPE_API_KEY = config("SNIPPE_API_KEY", default="")
+SNIPPE_BASE_URL = config("SNIPPE_BASE_URL", default="https://api.snippe.sh")
+SNIPPE_WEBHOOK_URL = config("SNIPPE_WEBHOOK_URL", default="")
+SNIPPE_WEBHOOK_SIGNING_KEY = config("SNIPPE_WEBHOOK_SIGNING_KEY", default="")
 
 # NEXTSMS Configuration
 NEXTSMS_USERNAME = config("NEXTSMS_USERNAME", default="")
