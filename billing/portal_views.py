@@ -3654,12 +3654,12 @@ def portal_balance(request):
     completed_payments = Payment.objects.filter(tenant=tenant, status="completed")
     total_revenue = completed_payments.aggregate(total=Sum("amount"))["total"] or 0
 
-    # Platform fee (5% default)
-    platform_fee_percent = 5
+    # Platform fee (0% default)
+    platform_fee_percent = 0
     if tenant.subscription_plan and hasattr(
         tenant.subscription_plan, "revenue_share_percent"
     ):
-        platform_fee_percent = tenant.subscription_plan.revenue_share_percent or 5
+        platform_fee_percent = tenant.subscription_plan.revenue_share_percent or 0
 
     platform_fee = float(total_revenue) * (platform_fee_percent / 100)
     net_revenue = float(total_revenue) - platform_fee

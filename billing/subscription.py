@@ -65,7 +65,7 @@ class SubscriptionManager:
         # Generate unique transaction ID (alphanumeric only for ClickPesa)
         # ClickPesa requires orderReference ≤ 20 characters
         # Format: "SUB" (3) + slug (up to 9) + uuid (8) = max 20 chars
-        slug_part = self.tenant.slug.replace('-', '').upper()[:9]
+        slug_part = self.tenant.slug.replace("-", "").upper()[:9]
         transaction_id = f"SUB{slug_part}{uuid.uuid4().hex[:8].upper()}"
 
         # Calculate subscription period
@@ -533,7 +533,7 @@ class RevenueCalculator:
     def get_revenue_share_percentage(self) -> Decimal:
         """Get the revenue share percentage for this tenant's plan"""
         if not self.plan:
-            return Decimal("5.00")  # Default 5% for no plan
+            return Decimal("0.00")  # Default 0% for no plan
         return self.plan.revenue_share_percentage
 
     def calculate_platform_share(self, payment_amount: Decimal) -> dict:

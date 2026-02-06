@@ -66,7 +66,7 @@ class Command(BaseCommand):
                 'priority_support': False,
                 'analytics_dashboard': True,
                 'sms_notifications': True,
-                'revenue_share_percentage': Decimal('5.00'),
+                'revenue_share_percentage': Decimal('0.00'),
                 'display_order': 1,
             },
             {
@@ -88,7 +88,7 @@ class Command(BaseCommand):
                 'priority_support': True,
                 'analytics_dashboard': True,
                 'sms_notifications': True,
-                'revenue_share_percentage': Decimal('3.00'),
+                'revenue_share_percentage': Decimal('0.00'),
                 'display_order': 2,
             },
             {
@@ -110,7 +110,7 @@ class Command(BaseCommand):
                 'priority_support': True,
                 'analytics_dashboard': True,
                 'sms_notifications': True,
-                'revenue_share_percentage': Decimal('2.00'),
+                'revenue_share_percentage': Decimal('0.00'),
                 'display_order': 3,
             },
         ]
