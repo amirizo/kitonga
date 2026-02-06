@@ -4881,7 +4881,9 @@ def clickpesa_webhook(request):
                 logger.info(
                     f"Payment {order_reference} found in subscriptions, routing to subscription handler"
                 )
-                webhook_log.mark_ignored("Routed to subscription webhook handler (fallback)")
+                webhook_log.mark_ignored(
+                    "Routed to subscription webhook handler (fallback)"
+                )
                 return subscription_payment_webhook(request)
             except TenantSubscriptionPayment.DoesNotExist:
                 pass
@@ -8168,6 +8170,160 @@ def create_subscription_payment(request):
     )
 
     if result.get("success"):
+        return Response(result)
+    else:
+        return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([TenantAPIKeyPermission])
+def renew_subscription(request):
+    """
+    Subscription renewal endpoint for tenants.
+
+    GET  - Returns current subscription status and renewal info
+    POST - Initiates a renewal payment via ClickPesa USSD push
+
+    POST body (all optional):
+        plan_id: int        - Plan to renew with (defaults to current plan)
+        billing_cycle: str  - 'monthly' or 'yearly' (defaults to current cycle)
+    """
+    tenant = getattr(request, "tenant", None)
+    if not tenant:
+        return Response(
+            {"success": False, "message": "Tenant not found"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    from .subscription import SubscriptionManager
+
+    mgr = SubscriptionManager(tenant)
+
+    # ── GET: Return renewal info ──
+    if request.method == "GET":
+        sub_status = mgr.check_subscription_status()
+        reminder = mgr.get_renewal_reminder()
+
+        # Get available plans
+        plans = SubscriptionPlan.objects.filter(is_active=True).values(
+            "id", "name", "display_name", "monthly_price", "yearly_price", "currency"
+        )
+
+        return Response(
+            {
+                "success": True,
+                "subscription": sub_status,
+                "renewal_reminder": reminder,
+                "current_plan_id": (
+                    tenant.subscription_plan.id if tenant.subscription_plan else None
+                ),
+                "current_billing_cycle": getattr(tenant, "billing_cycle", "monthly"),
+                "subscription_ends_at": (
+                    tenant.subscription_ends_at.isoformat()
+                    if tenant.subscription_ends_at
+                    else None
+                ),
+                "available_plans": list(plans),
+            }
+        )
+
+    # ── POST: Initiate renewal payment ──
+    plan_id = request.data.get("plan_id")
+    billing_cycle = request.data.get("billing_cycle")
+
+    # Default to current plan if not specified
+    if plan_id:
+        try:
+            plan = SubscriptionPlan.objects.get(id=plan_id, is_active=True)
+        except SubscriptionPlan.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Invalid subscription plan"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    else:
+        plan = tenant.subscription_plan
+        if not plan:
+            return Response(
+                {
+                    "success": False,
+                    "message": "No current plan found. Please provide plan_id.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Make sure the plan is still active
+        if not plan.is_active:
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        f"Plan '{plan.display_name}' is no longer available. "
+                        "Please choose a different plan."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    # Default to current billing cycle
+    if not billing_cycle:
+        billing_cycle = getattr(tenant, "billing_cycle", "monthly") or "monthly"
+
+    if billing_cycle not in ("monthly", "yearly"):
+        return Response(
+            {
+                "success": False,
+                "message": "billing_cycle must be 'monthly' or 'yearly'",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Check for pending renewal payments (prevent double-pay)
+    pending = (
+        TenantSubscriptionPayment.objects.filter(
+            tenant=tenant, status="pending", plan=plan
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+    if pending:
+        # If there's a pending payment less than 10 minutes old, return it
+        age_minutes = (timezone.now() - pending.created_at).total_seconds() / 60
+        if age_minutes < 10:
+            return Response(
+                {
+                    "success": True,
+                    "message": (
+                        "A renewal payment is already pending. "
+                        "Please complete the payment on your phone."
+                    ),
+                    "payment_id": pending.id,
+                    "transaction_id": pending.transaction_id,
+                    "amount": float(pending.amount),
+                    "currency": pending.currency,
+                    "plan": plan.display_name,
+                    "billing_cycle": pending.billing_cycle,
+                    "period_start": (
+                        pending.period_start.isoformat()
+                        if pending.period_start
+                        else None
+                    ),
+                    "period_end": (
+                        pending.period_end.isoformat()
+                        if pending.period_end
+                        else None
+                    ),
+                    "already_pending": True,
+                }
+            )
+
+    # Create the renewal payment via SubscriptionManager
+    result = mgr.create_subscription_payment(plan=plan, billing_cycle=billing_cycle)
+
+    if result.get("success"):
+        result["is_renewal"] = bool(
+            tenant.subscription_ends_at
+            and tenant.subscription_ends_at > timezone.now()
+        )
         return Response(result)
     else:
         return Response(result, status=status.HTTP_400_BAD_REQUEST)

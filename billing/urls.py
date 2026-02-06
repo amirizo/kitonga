@@ -217,6 +217,11 @@ urlpatterns = [
         name="create_subscription_payment",
     ),
     path(
+        "saas/renew/",
+        views.renew_subscription,
+        name="renew_subscription",
+    ),
+    path(
         "saas/subscription-history/",
         views.tenant_subscription_history,
         name="tenant_subscription_history",
