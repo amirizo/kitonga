@@ -29,14 +29,6 @@ class ClickPesaAPI:
         Generate JWT Authorization token
         Token is valid for 1 hour from issuance
         """
-        # Validate credentials are configured
-        if not self.client_id or not self.api_key:
-            logger.error(
-                "ClickPesa credentials not configured. "
-                "Set CLICKPESA_CLIENT_ID and CLICKPESA_API_KEY in environment."
-            )
-            return None
-
         # Check if we have a valid cached token
         if self.token and self.token_expires_at:
             if datetime.now() < self.token_expires_at:
@@ -47,7 +39,7 @@ class ClickPesaAPI:
         headers = {"client-id": self.client_id, "api-key": self.api_key}
 
         try:
-            response = requests.post(url, headers=headers, timeout=15)
+            response = requests.post(url, headers=headers)
             response.raise_for_status()
 
             result = response.json()
@@ -63,11 +55,6 @@ class ClickPesaAPI:
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to get ClickPesa access token: {str(e)}")
-            if e.response is not None:
-                try:
-                    logger.error(f"ClickPesa token response: {e.response.text}")
-                except Exception:
-                    pass
             return None
 
     def preview_payment(self, phone_number, amount, order_reference):

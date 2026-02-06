@@ -29,14 +29,6 @@ class ClickPesaAPI:
         Generate JWT Authorization token
         Token is valid for 1 hour from issuance
         """
-        # Validate credentials are configured
-        if not self.client_id or not self.api_key:
-            logger.error(
-                "ClickPesa credentials not configured. "
-                "Set CLICKPESA_CLIENT_ID and CLICKPESA_API_KEY in environment."
-            )
-            return None
-
         # Check if we have a valid cached token
         if self.token and self.token_expires_at:
             if datetime.now() < self.token_expires_at:
@@ -47,7 +39,7 @@ class ClickPesaAPI:
         headers = {"client-id": self.client_id, "api-key": self.api_key}
 
         try:
-            response = requests.post(url, headers=headers, timeout=15)
+            response = requests.post(url, headers=headers)
             response.raise_for_status()
 
             result = response.json()
@@ -63,11 +55,6 @@ class ClickPesaAPI:
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to get ClickPesa access token: {str(e)}")
-            if e.response is not None:
-                try:
-                    logger.error(f"ClickPesa token response: {e.response.text}")
-                except Exception:
-                    pass
             return None
 
     def preview_payment(self, phone_number, amount, order_reference):
@@ -92,11 +79,7 @@ class ClickPesaAPI:
 
         url = f"{self.base_url}/third-parties/payments/preview-ussd-push-request"
 
-        phone_number = str(phone_number).strip()
-
         # Format phone number (ensure it starts with 255)
-        if phone_number.startswith("+"):
-            phone_number = phone_number[1:]
         if phone_number.startswith("0"):
             phone_number = "255" + phone_number[1:]
         elif not phone_number.startswith("255"):
@@ -113,21 +96,17 @@ class ClickPesaAPI:
         }
 
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            response = requests.post(url, json=payload, headers=headers)
             response.raise_for_status()
 
             result = response.json()
             return {"success": True, "data": result}
 
         except requests.exceptions.RequestException as e:
-            error_detail = str(e)
-            if e.response is not None:
-                try:
-                    logger.error(f"Response: {e.response.text}")
-                except Exception:
-                    pass
-            logger.error(f"ClickPesa preview request failed: {error_detail}")
-            return {"success": False, "message": f"Failed to preview payment: {error_detail}"}
+            logger.error(f"ClickPesa preview request failed: {str(e)}")
+            if hasattr(e.response, "text"):
+                logger.error(f"Response: {e.response.text}")
+            return {"success": False, "message": "Failed to preview payment"}
 
     def initiate_payment(self, phone_number, amount, order_reference):
         """
