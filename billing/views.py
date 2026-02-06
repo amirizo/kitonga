@@ -4560,7 +4560,19 @@ def clickpesa_webhook(request):
             logger.info(f"Duplicate webhook ignored: {order_reference} - {event_type}")
             return Response({"success": True, "message": "Duplicate webhook ignored"})
 
-        # Find payment by order reference
+        # ================================================================
+        # ROUTE SUBSCRIPTION PAYMENTS (order_reference starts with "SUB")
+        # ClickPesa sends ALL webhooks to one URL, so we detect
+        # subscription payments here and delegate to the subscription handler.
+        # ================================================================
+        if order_reference and order_reference.startswith("SUB"):
+            logger.info(
+                f"Subscription payment detected ({order_reference}), routing to subscription webhook handler"
+            )
+            webhook_log.mark_ignored("Routed to subscription webhook handler")
+            return subscription_payment_webhook(request)
+
+        # Find WiFi bundle payment by order reference
         try:
             payment = Payment.objects.get(order_reference=order_reference)
 
@@ -4860,6 +4872,20 @@ def clickpesa_webhook(request):
             )
 
         except Payment.DoesNotExist:
+            # WiFi payment not found — try subscription payment as fallback
+            # (in case order_reference didn't start with "SUB" but is still a subscription)
+            try:
+                sub_payment = TenantSubscriptionPayment.objects.get(
+                    transaction_id=order_reference
+                )
+                logger.info(
+                    f"Payment {order_reference} found in subscriptions, routing to subscription handler"
+                )
+                webhook_log.mark_ignored("Routed to subscription webhook handler (fallback)")
+                return subscription_payment_webhook(request)
+            except TenantSubscriptionPayment.DoesNotExist:
+                pass
+
             error_msg = f"Payment not found for order reference: {order_reference}"
             logger.error(error_msg)
             webhook_log.mark_failed(error_msg)
@@ -8218,16 +8244,43 @@ def subscription_payment_webhook(request):
         data = request.data
         logger.info(f"Subscription payment webhook received: {data}")
 
-        # Extract webhook data
+        # Extract webhook data - handle both ClickPesa formats
+        # Format 1 (direct): data contains fields at root level
+        # Format 2 (nested): ClickPesa wraps in data.data or data.payment
+        payment_data = data.get("data", data.get("payment", {}))
+
+        # Extract transaction_id (= our order_reference / transaction_id starting with "SUB")
         transaction_id = (
             data.get("external_reference")
             or data.get("merchant_reference")
             or data.get("order_reference")
+            or data.get("orderReference")
+            or payment_data.get("orderReference")
+            or payment_data.get("order_reference")
+            or payment_data.get("id")
         )
-        payment_status = data.get("payment_status", "") or data.get("status", "")
-        payment_reference = data.get("order_reference", "")
-        channel = data.get("channel", "")
-        amount = data.get("amount")
+
+        # Extract payment status
+        payment_status = (
+            data.get("payment_status")
+            or data.get("status")
+            or payment_data.get("status")
+            or ""
+        )
+
+        # Extract payment reference / channel
+        payment_reference = (
+            data.get("order_reference")
+            or payment_data.get("orderReference")
+            or payment_data.get("paymentId")
+            or ""
+        )
+        channel = data.get("channel") or payment_data.get("channel") or ""
+        amount = (
+            data.get("amount")
+            or payment_data.get("collectedAmount")
+            or payment_data.get("amount")
+        )
 
         # Convert amount to decimal if it's a string
         if amount and isinstance(amount, str):
