@@ -27,3 +27,4 @@ next-env.d.tsdb.sqlite3
 
 
 db.sqlite3
+.history/
