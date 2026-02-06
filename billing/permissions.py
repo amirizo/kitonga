@@ -154,7 +154,8 @@ class TenantAPIKeyPermission(permissions.BasePermission):
             saas_paths = [
                 '/saas/subscribe', '/saas/plans', '/saas/dashboard', 
                 '/saas/usage', '/saas/routers', '/saas/subscription-history',
-                '/saas/revenue', '/saas/renew', '/platform/'
+                '/saas/revenue', '/saas/renew', '/saas/payment-status',
+                '/platform/'
             ]
             if any(x in request.path for x in saas_paths):
                 return True

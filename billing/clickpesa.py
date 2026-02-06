@@ -175,7 +175,7 @@ class ClickPesaAPI:
         headers = {"Authorization": token, "Content-Type": "application/json"}
 
         payload = {
-            "amount": str(amount),
+            "amount": str(int(amount)) if float(amount) == int(amount) else str(amount),
             "currency": "TZS",
             "orderReference": order_reference,
             "phoneNumber": phone_number,

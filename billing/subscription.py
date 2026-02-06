@@ -63,7 +63,10 @@ class SubscriptionManager:
             period_days = 30
 
         # Generate unique transaction ID (alphanumeric only for ClickPesa)
-        transaction_id = f"SUB{self.tenant.slug.replace('-', '').upper()}{uuid.uuid4().hex[:8].upper()}"
+        # ClickPesa requires orderReference ≤ 20 characters
+        # Format: "SUB" (3) + slug (up to 9) + uuid (8) = max 20 chars
+        slug_part = self.tenant.slug.replace('-', '').upper()[:9]
+        transaction_id = f"SUB{slug_part}{uuid.uuid4().hex[:8].upper()}"
 
         # Calculate subscription period
         now = timezone.now()
