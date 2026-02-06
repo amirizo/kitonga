@@ -22,6 +22,7 @@ urlpatterns = [
     path("bundles/", views.list_bundles, name="list_bundles"),
     path("initiate-payment/", views.initiate_payment, name="initiate_payment"),
     path("clickpesa-webhook/", views.clickpesa_webhook, name="clickpesa_webhook"),
+    path("snippe-webhook/", views.snippe_webhook, name="snippe_webhook"),
     path(
         "clickpesa-payout-webhook/",
         views.clickpesa_payout_webhook,
