@@ -253,7 +253,7 @@ REST_FRAMEWORK = {
         "rest_framework.parsers.MultiPartParser",
         "rest_framework.parsers.FormParser",
     ],
-    "EXCEPTION_HANDLER": "rest_framework.views.exception_handler",
+    "EXCEPTION_HANDLER": "billing.exception_handler.custom_exception_handler",
 }
 
 # CORS settings - Environment Aware

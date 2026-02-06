@@ -8140,14 +8140,23 @@ def create_subscription_payment(request):
     tenant = getattr(request, "tenant", None)
     if not tenant:
         return Response(
-            {"success": False, "message": "Tenant not found"},
+            {"success": False, "error": "Tenant not found. Provide a valid X-API-Key header."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
     serializer = CreateSubscriptionPaymentSerializer(data=request.data)
     if not serializer.is_valid():
+        # Build a single human-readable error string from field errors
+        error_messages = []
+        for field, msgs in serializer.errors.items():
+            for msg in msgs:
+                error_messages.append(f"{field}: {msg}")
         return Response(
-            {"success": False, "errors": serializer.errors},
+            {
+                "success": False,
+                "error": "; ".join(error_messages),
+                "errors": serializer.errors,
+            },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -8157,7 +8166,7 @@ def create_subscription_payment(request):
         )
     except SubscriptionPlan.DoesNotExist:
         return Response(
-            {"success": False, "message": "Invalid subscription plan"},
+            {"success": False, "error": "Invalid subscription plan"},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -8191,7 +8200,7 @@ def renew_subscription(request):
     tenant = getattr(request, "tenant", None)
     if not tenant:
         return Response(
-            {"success": False, "message": "Tenant not found"},
+            {"success": False, "error": "Tenant not found. Provide a valid X-API-Key header."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
@@ -8237,7 +8246,7 @@ def renew_subscription(request):
             plan = SubscriptionPlan.objects.get(id=plan_id, is_active=True)
         except SubscriptionPlan.DoesNotExist:
             return Response(
-                {"success": False, "message": "Invalid subscription plan"},
+                {"success": False, "error": "Invalid subscription plan"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
     else:
@@ -8246,7 +8255,7 @@ def renew_subscription(request):
             return Response(
                 {
                     "success": False,
-                    "message": "No current plan found. Please provide plan_id.",
+                    "error": "No current plan found. Please provide plan_id.",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -8255,7 +8264,7 @@ def renew_subscription(request):
             return Response(
                 {
                     "success": False,
-                    "message": (
+                    "error": (
                         f"Plan '{plan.display_name}' is no longer available. "
                         "Please choose a different plan."
                     ),
@@ -8271,7 +8280,7 @@ def renew_subscription(request):
         return Response(
             {
                 "success": False,
-                "message": "billing_cycle must be 'monthly' or 'yearly'",
+                "error": "billing_cycle must be 'monthly' or 'yearly'",
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
@@ -8336,7 +8345,7 @@ def subscription_payment_status(request, transaction_id):
     tenant = getattr(request, "tenant", None)
     if not tenant:
         return Response(
-            {"success": False, "message": "Tenant not found"},
+            {"success": False, "error": "Tenant not found. Provide a valid X-API-Key header."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
@@ -8368,7 +8377,7 @@ def subscription_payment_status(request, transaction_id):
                     "Payment completed successfully!"
                     if payment.status == "completed"
                     else (
-                        "Payment failed"
+                        "Payment failed. Please try again."
                         if payment.status == "failed"
                         else "Waiting for payment confirmation..."
                     )
@@ -8378,7 +8387,7 @@ def subscription_payment_status(request, transaction_id):
 
     except TenantSubscriptionPayment.DoesNotExist:
         return Response(
-            {"success": False, "message": "Payment not found"},
+            {"success": False, "error": "Payment not found"},
             status=status.HTTP_404_NOT_FOUND,
         )
 
