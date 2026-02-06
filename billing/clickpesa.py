@@ -127,7 +127,10 @@ class ClickPesaAPI:
                 except Exception:
                     pass
             logger.error(f"ClickPesa preview request failed: {error_detail}")
-            return {"success": False, "message": f"Failed to preview payment: {error_detail}"}
+            return {
+                "success": False,
+                "message": f"Failed to preview payment: {error_detail}",
+            }
 
     def initiate_payment(self, phone_number, amount, order_reference):
         """
@@ -144,7 +147,9 @@ class ClickPesaAPI:
         """
         # Validate phone number before proceeding
         if not phone_number or not str(phone_number).strip():
-            logger.error("ClickPesa payment initiation failed: phone_number is empty or None")
+            logger.error(
+                "ClickPesa payment initiation failed: phone_number is empty or None"
+            )
             return {
                 "success": False,
                 "message": "Phone number is required to initiate payment.",

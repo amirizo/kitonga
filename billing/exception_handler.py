@@ -51,7 +51,9 @@ def custom_exception_handler(exc, context):
 
         response.data = {
             "success": False,
-            "error": "; ".join(error_messages) if error_messages else "Validation error",
+            "error": (
+                "; ".join(error_messages) if error_messages else "Validation error"
+            ),
             "errors": data,
         }
 

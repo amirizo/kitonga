@@ -4257,12 +4257,14 @@ def initiate_payment(request):
     if not serializer.is_valid():
         error_messages = []
         for field, msgs in serializer.errors.items():
-            for msg in (msgs if isinstance(msgs, list) else [msgs]):
+            for msg in msgs if isinstance(msgs, list) else [msgs]:
                 error_messages.append(f"{field}: {msg}")
         return Response(
             {
                 "success": False,
-                "error": "; ".join(error_messages) if error_messages else "Validation error",
+                "error": (
+                    "; ".join(error_messages) if error_messages else "Validation error"
+                ),
                 "errors": serializer.errors,
             },
             status=status.HTTP_400_BAD_REQUEST,
@@ -8151,7 +8153,10 @@ def create_subscription_payment(request):
     tenant = getattr(request, "tenant", None)
     if not tenant:
         return Response(
-            {"success": False, "error": "Tenant not found. Provide a valid X-API-Key header."},
+            {
+                "success": False,
+                "error": "Tenant not found. Provide a valid X-API-Key header.",
+            },
             status=status.HTTP_403_FORBIDDEN,
         )
 
@@ -8211,7 +8216,10 @@ def renew_subscription(request):
     tenant = getattr(request, "tenant", None)
     if not tenant:
         return Response(
-            {"success": False, "error": "Tenant not found. Provide a valid X-API-Key header."},
+            {
+                "success": False,
+                "error": "Tenant not found. Provide a valid X-API-Key header.",
+            },
             status=status.HTTP_403_FORBIDDEN,
         )
 
@@ -8356,7 +8364,10 @@ def subscription_payment_status(request, transaction_id):
     tenant = getattr(request, "tenant", None)
     if not tenant:
         return Response(
-            {"success": False, "error": "Tenant not found. Provide a valid X-API-Key header."},
+            {
+                "success": False,
+                "error": "Tenant not found. Provide a valid X-API-Key header.",
+            },
             status=status.HTTP_403_FORBIDDEN,
         )
 
