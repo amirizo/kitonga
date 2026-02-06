@@ -4482,7 +4482,7 @@ def initiate_payment(request):
     else:
         payment.mark_failed()
         return Response(
-            {"success": False, "error": result["message"]},
+            {"success": False, "message": result["message"]},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -4563,7 +4563,7 @@ def clickpesa_webhook(request):
             error_msg = "No order reference in webhook data"
             logger.error(error_msg)
             webhook_log.mark_failed(error_msg)
-            return Response({"success": False, "error": "Missing order reference"})
+            return Response({"success": False, "message": "Missing order reference"})
 
         # Check for duplicates
         if webhook_log.is_duplicate:
@@ -4903,7 +4903,7 @@ def clickpesa_webhook(request):
             logger.error(error_msg)
             webhook_log.mark_failed(error_msg)
             return Response(
-                {"success": False, "error": "Payment not found"},
+                {"success": False, "message": "Payment not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -4913,7 +4913,7 @@ def clickpesa_webhook(request):
         if webhook_log:
             webhook_log.mark_failed(error_msg)
         return Response(
-            {"success": False, "error": "Webhook processing failed"},
+            {"success": False, "message": "Webhook processing failed"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
@@ -5005,7 +5005,7 @@ def clickpesa_payout_webhook(request):
         except TenantPayout.DoesNotExist:
             logger.error(f"Payout not found for reference: {order_reference}")
             return Response(
-                {"success": False, "error": "Payout not found"},
+                {"success": False, "message": "Payout not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -5013,7 +5013,7 @@ def clickpesa_payout_webhook(request):
         error_msg = f"Error processing payout webhook: {str(e)}"
         logger.error(error_msg)
         return Response(
-            {"success": False, "error": "Webhook processing failed"},
+            {"success": False, "message": "Webhook processing failed"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
@@ -5193,7 +5193,7 @@ def query_payment_status(request, order_reference):
 
     except Payment.DoesNotExist:
         return Response(
-            {"success": False, "error": "Payment not found"},
+            {"success": False, "message": "Payment not found"},
             status=status.HTTP_404_NOT_FOUND,
         )
 

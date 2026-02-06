@@ -5005,7 +5005,7 @@ def clickpesa_payout_webhook(request):
         except TenantPayout.DoesNotExist:
             logger.error(f"Payout not found for reference: {order_reference}")
             return Response(
-                {"success": False, "error": "Payout not found"},
+                {"success": False, "message": "Payout not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -5013,7 +5013,7 @@ def clickpesa_payout_webhook(request):
         error_msg = f"Error processing payout webhook: {str(e)}"
         logger.error(error_msg)
         return Response(
-            {"success": False, "error": "Webhook processing failed"},
+            {"success": False, "message": "Webhook processing failed"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 

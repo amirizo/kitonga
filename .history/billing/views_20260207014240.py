@@ -4255,18 +4255,7 @@ def initiate_payment(request):
     """
     serializer = InitiatePaymentSerializer(data=request.data)
     if not serializer.is_valid():
-        error_messages = []
-        for field, msgs in serializer.errors.items():
-            for msg in (msgs if isinstance(msgs, list) else [msgs]):
-                error_messages.append(f"{field}: {msg}")
-        return Response(
-            {
-                "success": False,
-                "error": "; ".join(error_messages) if error_messages else "Validation error",
-                "errors": serializer.errors,
-            },
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     phone_number = serializer.validated_data["phone_number"]
     bundle_id = serializer.validated_data.get("bundle_id")
@@ -4330,7 +4319,7 @@ def initiate_payment(request):
             )
     except ValueError as e:
         return Response(
-            {"success": False, "error": f"Invalid phone number: {str(e)}"},
+            {"success": False, "message": f"Invalid phone number: {str(e)}"},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -4383,7 +4372,7 @@ def initiate_payment(request):
             return Response(
                 {
                     "success": False,
-                    "error": "Invalid bundle selected for this network",
+                    "message": "Invalid bundle selected for this network",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -4400,7 +4389,7 @@ def initiate_payment(request):
             return Response(
                 {
                     "success": False,
-                    "error": "No daily bundle configured for this network",
+                    "message": "No daily bundle configured for this network",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -4482,7 +4471,7 @@ def initiate_payment(request):
     else:
         payment.mark_failed()
         return Response(
-            {"success": False, "error": result["message"]},
+            {"success": False, "message": result["message"]},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -4563,7 +4552,7 @@ def clickpesa_webhook(request):
             error_msg = "No order reference in webhook data"
             logger.error(error_msg)
             webhook_log.mark_failed(error_msg)
-            return Response({"success": False, "error": "Missing order reference"})
+            return Response({"success": False, "message": "Missing order reference"})
 
         # Check for duplicates
         if webhook_log.is_duplicate:
@@ -4903,7 +4892,7 @@ def clickpesa_webhook(request):
             logger.error(error_msg)
             webhook_log.mark_failed(error_msg)
             return Response(
-                {"success": False, "error": "Payment not found"},
+                {"success": False, "message": "Payment not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -4913,7 +4902,7 @@ def clickpesa_webhook(request):
         if webhook_log:
             webhook_log.mark_failed(error_msg)
         return Response(
-            {"success": False, "error": "Webhook processing failed"},
+            {"success": False, "message": "Webhook processing failed"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
@@ -5005,7 +4994,7 @@ def clickpesa_payout_webhook(request):
         except TenantPayout.DoesNotExist:
             logger.error(f"Payout not found for reference: {order_reference}")
             return Response(
-                {"success": False, "error": "Payout not found"},
+                {"success": False, "message": "Payout not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -5013,7 +5002,7 @@ def clickpesa_payout_webhook(request):
         error_msg = f"Error processing payout webhook: {str(e)}"
         logger.error(error_msg)
         return Response(
-            {"success": False, "error": "Webhook processing failed"},
+            {"success": False, "message": "Webhook processing failed"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
@@ -5193,7 +5182,7 @@ def query_payment_status(request, order_reference):
 
     except Payment.DoesNotExist:
         return Response(
-            {"success": False, "error": "Payment not found"},
+            {"success": False, "message": "Payment not found"},
             status=status.HTTP_404_NOT_FOUND,
         )
 
@@ -8356,7 +8345,7 @@ def subscription_payment_status(request, transaction_id):
     tenant = getattr(request, "tenant", None)
     if not tenant:
         return Response(
-            {"success": False, "error": "Tenant not found. Provide a valid X-API-Key header."},
+            {"success": False, "message": "Tenant not found"},
             status=status.HTTP_403_FORBIDDEN,
         )
 
@@ -8388,7 +8377,7 @@ def subscription_payment_status(request, transaction_id):
                     "Payment completed successfully!"
                     if payment.status == "completed"
                     else (
-                        "Payment failed. Please try again."
+                        "Payment failed"
                         if payment.status == "failed"
                         else "Waiting for payment confirmation..."
                     )
@@ -8398,7 +8387,7 @@ def subscription_payment_status(request, transaction_id):
 
     except TenantSubscriptionPayment.DoesNotExist:
         return Response(
-            {"success": False, "error": "Payment not found"},
+            {"success": False, "message": "Payment not found"},
             status=status.HTTP_404_NOT_FOUND,
         )
 

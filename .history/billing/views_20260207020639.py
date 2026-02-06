@@ -5005,7 +5005,7 @@ def clickpesa_payout_webhook(request):
         except TenantPayout.DoesNotExist:
             logger.error(f"Payout not found for reference: {order_reference}")
             return Response(
-                {"success": False, "error": "Payout not found"},
+                {"success": False, "message": "Payout not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
