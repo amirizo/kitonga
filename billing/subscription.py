@@ -1,6 +1,6 @@
 """
 Subscription Management for Kitonga SaaS Platform
-Handles tenant subscription payments via ClickPesa, usage metering, and limits
+Handles tenant subscription payments via ClickPesa or Snippe, usage metering, and limits
 """
 
 import logging
@@ -34,12 +34,18 @@ logger = logging.getLogger(__name__)
 class SubscriptionManager:
     """
     Manages tenant subscriptions: payments, renewals, and status updates
+    Supports both ClickPesa and Snippe payment gateways.
     """
 
     def __init__(self, tenant: Tenant):
         self.tenant = tenant
-        # Use platform ClickPesa API (uses settings for credentials)
-        self.clickpesa = ClickPesaAPI()
+        self.preferred_gateway = getattr(tenant, "preferred_payment_gateway", "clickpesa") or "clickpesa"
+        # Initialise the appropriate gateway client
+        if self.preferred_gateway == "snippe":
+            from .snippe import SnippeAPI
+            self.gateway = SnippeAPI()
+        else:
+            self.gateway = ClickPesaAPI()
 
     def create_subscription_payment(
         self, plan: SubscriptionPlan, billing_cycle: str = "monthly"
@@ -92,9 +98,9 @@ class SubscriptionManager:
             status="pending",
         )
 
-        # Create ClickPesa payment request
+        # Create payment via preferred gateway
         try:
-            # Validate phone number before calling ClickPesa
+            # Validate phone number before calling gateway
             phone = self.tenant.business_phone
             if not phone or not str(phone).strip():
                 payment.status = "failed"
@@ -111,38 +117,88 @@ class SubscriptionManager:
                     ),
                 }
 
-            response = self.clickpesa.initiate_payment(
-                phone_number=phone,
-                amount=float(amount),
-                order_reference=transaction_id,
-            )
+            if self.preferred_gateway == "snippe":
+                # ── Snippe gateway ──
+                from .snippe import SnippeAPI
 
-            if response.get("success"):
-                payment.payment_reference = response.get("order_reference", "")
-                payment.save()
+                snippe = self.gateway if isinstance(self.gateway, SnippeAPI) else SnippeAPI()
+                response = snippe.create_mobile_payment(
+                    phone_number=phone,
+                    amount=int(amount),
+                    metadata={
+                        "order_reference": transaction_id,
+                        "tenant": self.tenant.slug,
+                        "type": "subscription",
+                    },
+                    webhook_url=getattr(settings, "SNIPPE_WEBHOOK_URL", ""),
+                )
 
-                return {
-                    "success": True,
-                    "payment_id": payment.id,
-                    "transaction_id": transaction_id,
-                    "amount": float(amount),
-                    "currency": plan.currency,
-                    "order_reference": response.get("order_reference"),
-                    "plan": plan.display_name,
-                    "billing_cycle": billing_cycle,
-                    "period_start": period_start.isoformat(),
-                    "period_end": period_end.isoformat(),
-                    "message": response.get(
-                        "message", "Payment request sent to your phone"
-                    ),
-                }
+                if response.get("success"):
+                    payment.payment_reference = response.get("reference", "")
+                    payment.payment_method = "snippe"
+                    payment.save()
+
+                    return {
+                        "success": True,
+                        "payment_id": payment.id,
+                        "transaction_id": transaction_id,
+                        "amount": float(amount),
+                        "currency": plan.currency,
+                        "order_reference": transaction_id,
+                        "snippe_reference": response.get("reference"),
+                        "plan": plan.display_name,
+                        "billing_cycle": billing_cycle,
+                        "period_start": period_start.isoformat(),
+                        "period_end": period_end.isoformat(),
+                        "message": response.get(
+                            "message", "Payment request sent to your phone"
+                        ),
+                        "gateway": "snippe",
+                    }
+                else:
+                    payment.status = "failed"
+                    payment.save()
+                    return {
+                        "success": False,
+                        "error": response.get("message", "Payment initiation failed"),
+                        "gateway": "snippe",
+                    }
             else:
-                payment.status = "failed"
-                payment.save()
-                return {
-                    "success": False,
-                    "error": response.get("message", "Payment initiation failed"),
-                }
+                # ── ClickPesa gateway (default) ──
+                response = self.gateway.initiate_payment(
+                    phone_number=phone,
+                    amount=float(amount),
+                    order_reference=transaction_id,
+                )
+
+                if response.get("success"):
+                    payment.payment_reference = response.get("order_reference", "")
+                    payment.save()
+
+                    return {
+                        "success": True,
+                        "payment_id": payment.id,
+                        "transaction_id": transaction_id,
+                        "amount": float(amount),
+                        "currency": plan.currency,
+                        "order_reference": response.get("order_reference"),
+                        "plan": plan.display_name,
+                        "billing_cycle": billing_cycle,
+                        "period_start": period_start.isoformat(),
+                        "period_end": period_end.isoformat(),
+                        "message": response.get(
+                            "message", "Payment request sent to your phone"
+                        ),
+                        "gateway": "clickpesa",
+                    }
+                else:
+                    payment.status = "failed"
+                    payment.save()
+                    return {
+                        "success": False,
+                        "error": response.get("message", "Payment initiation failed"),
+                        "gateway": "clickpesa",
+                    }
 
         except Exception as e:
             payment.status = "failed"
@@ -160,7 +216,7 @@ class SubscriptionManager:
         channel: str = None,
     ) -> bool:
         """
-        Process payment callback from ClickPesa
+        Process payment callback from ClickPesa or Snippe
 
         Returns:
             bool: True if subscription was activated/renewed
@@ -202,7 +258,11 @@ class SubscriptionManager:
         payment.status = "completed"
         payment.completed_at = timezone.now()
         payment.payment_reference = payment_reference or payment.payment_reference
-        payment.payment_method = channel or "clickpesa"
+        # Determine payment method from channel or tenant's preferred gateway
+        if channel:
+            payment.payment_method = channel
+        else:
+            payment.payment_method = getattr(payment.tenant, "preferred_payment_gateway", "clickpesa") or "clickpesa"
         payment.save()
 
         # Update tenant subscription

@@ -10,6 +10,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
+from django.conf import settings
 from django.http import HttpResponse
 from django.db.models import Sum, Count, Q
 from django.db import transaction, models
@@ -3860,8 +3861,12 @@ def portal_payouts(request):
 
         logger.info(f"Tenant {tenant.slug} requested payout of TSh {amount}")
 
-        # Auto-process payout via ClickPesa
-        clickpesa_result = None
+        # Determine which payment gateway to use for this payout
+        use_snippe = (
+            getattr(tenant, "preferred_payment_gateway", "clickpesa") == "snippe"
+        )
+        gateway_result = None
+        gateway_name = "snippe" if use_snippe else "clickpesa"
 
         # Mobile Money payouts
         if payout_method in [
@@ -3871,95 +3876,198 @@ def portal_payouts(request):
             "airtel_money",
             "halopesa",
         ]:
-            try:
-                from .clickpesa import ClickPesaAPI
+            if use_snippe:
+                # ============================================================
+                # SNIPPE MOBILE MONEY PAYOUT
+                # ============================================================
+                try:
+                    from .snippe import SnippeAPI
 
-                clickpesa = ClickPesaAPI()
+                    snippe = SnippeAPI()
 
-                # Step 1: Check account balance
-                balance_result = clickpesa.get_account_balance()
-                if not balance_result.get("success"):
-                    logger.warning(
-                        f"Could not check ClickPesa balance: {balance_result.get('message')}"
-                    )
-                    clickpesa_result = {
-                        "processed": False,
-                        "reason": "balance_check_failed",
-                        "message": balance_result.get(
-                            "message", "Could not verify platform balance"
-                        ),
-                    }
-                else:
-                    tzs_balance = balance_result.get("balances", {}).get("TZS", 0)
-                    if tzs_balance < amount:
+                    # Step 1: Check Snippe account balance
+                    balance_result = snippe.get_account_balance()
+                    if not balance_result.get("success"):
                         logger.warning(
-                            f"Insufficient ClickPesa balance: {tzs_balance} < {amount}"
+                            f"Could not check Snippe balance: {balance_result.get('message')}"
                         )
-                        payout.error_message = f"Insufficient platform balance (TSh {tzs_balance:,.0f}). Will be processed manually."
-                        payout.save()
-                        clickpesa_result = {
+                        gateway_result = {
                             "processed": False,
-                            "reason": "insufficient_platform_balance",
-                            "platform_balance": float(tzs_balance),
-                            "required_amount": float(amount),
-                            "message": "Platform does not have enough funds. Payout will be processed manually.",
+                            "reason": "balance_check_failed",
+                            "message": balance_result.get(
+                                "message", "Could not verify platform balance"
+                            ),
                         }
                     else:
-                        # Step 2: Preview payout
-                        preview_result = clickpesa.preview_mobile_money_payout(
-                            phone_number=account_number,
-                            amount=amount,
-                            order_reference=payout.reference,
-                        )
+                        snippe_balance = balance_result.get("available", 0)
+                        if snippe_balance < amount:
+                            logger.warning(
+                                f"Insufficient Snippe balance: {snippe_balance} < {amount}"
+                            )
+                            payout.error_message = f"Insufficient Snippe balance (TSh {snippe_balance:,.0f}). Will be processed manually."
+                            payout.save()
+                            gateway_result = {
+                                "processed": False,
+                                "reason": "insufficient_platform_balance",
+                                "platform_balance": float(snippe_balance),
+                                "required_amount": float(amount),
+                                "message": "Platform does not have enough funds. Payout will be processed manually.",
+                            }
+                        else:
+                            # Step 2: Calculate fee (optional preview)
+                            fee_result = snippe.calculate_payout_fee(int(amount))
+                            fee_info = {}
+                            if fee_result.get("success"):
+                                fee_info = {
+                                    "fee": fee_result.get("fee_amount"),
+                                    "total": fee_result.get("total_amount"),
+                                }
 
-                        if preview_result.get("success"):
-                            # Step 3: Create payout
-                            payout_result = clickpesa.create_mobile_money_payout(
+                            # Step 3: Create mobile payout
+                            webhook_url = (
+                                getattr(settings, "SNIPPE_WEBHOOK_URL", "") or ""
+                            )
+                            payout_result = snippe.create_mobile_payout(
                                 phone_number=account_number,
-                                amount=amount,
-                                order_reference=payout.reference,
+                                amount=int(amount),
+                                recipient_name=account_name or tenant.business_name,
+                                narration=f"Payout to {tenant.business_name} ({payout.reference})",
+                                webhook_url=webhook_url,
+                                metadata={
+                                    "payout_reference": payout.reference,
+                                    "tenant": tenant.slug,
+                                },
+                                idempotency_key=payout.reference,
                             )
 
                             if payout_result.get("success"):
                                 payout.mark_processing()
-                                payout.transaction_id = payout_result.get("payout_id")
+                                payout.transaction_id = payout_result.get(
+                                    "reference", ""
+                                )
                                 payout.save()
-                                clickpesa_result = {
+                                gateway_result = {
                                     "processed": True,
                                     "status": payout_result.get("status"),
                                     "channel_provider": payout_result.get(
                                         "channel_provider"
                                     ),
-                                    "fee": payout_result.get("fee"),
+                                    "fee": payout_result.get("fees"),
+                                    "snippe_reference": payout_result.get("reference"),
+                                    **fee_info,
                                 }
                                 logger.info(
-                                    f"Payout {payout.reference} submitted to ClickPesa: {payout_result.get('status')}"
+                                    f"Payout {payout.reference} submitted to Snippe: {payout_result.get('status')}"
                                 )
                             else:
                                 payout.error_message = payout_result.get(
-                                    "message", "ClickPesa payout failed"
+                                    "message", "Snippe payout failed"
                                 )
                                 payout.save()
-                                clickpesa_result = {
+                                gateway_result = {
                                     "processed": False,
                                     "error": payout_result.get("message"),
                                 }
-                        else:
-                            payout.error_message = preview_result.get(
-                                "message", "Payout preview failed"
-                            )
-                            payout.save()
-                            clickpesa_result = {
-                                "processed": False,
-                                "error": preview_result.get("message"),
-                            }
-            except Exception as e:
-                logger.error(f"Error processing payout via ClickPesa: {e}")
-                payout.error_message = f"Auto-processing failed: {str(e)}"
-                payout.save()
-                clickpesa_result = {"processed": False, "error": str(e)}
+                except Exception as e:
+                    logger.error(f"Error processing payout via Snippe: {e}")
+                    payout.error_message = f"Snippe auto-processing failed: {str(e)}"
+                    payout.save()
+                    gateway_result = {"processed": False, "error": str(e)}
+            else:
+                # ============================================================
+                # CLICKPESA MOBILE MONEY PAYOUT (existing logic)
+                # ============================================================
+                try:
+                    from .clickpesa import ClickPesaAPI
 
-        # Bank Transfer payouts
+                    clickpesa = ClickPesaAPI()
+
+                    # Step 1: Check account balance
+                    balance_result = clickpesa.get_account_balance()
+                    if not balance_result.get("success"):
+                        logger.warning(
+                            f"Could not check ClickPesa balance: {balance_result.get('message')}"
+                        )
+                        gateway_result = {
+                            "processed": False,
+                            "reason": "balance_check_failed",
+                            "message": balance_result.get(
+                                "message", "Could not verify platform balance"
+                            ),
+                        }
+                    else:
+                        tzs_balance = balance_result.get("balances", {}).get("TZS", 0)
+                        if tzs_balance < amount:
+                            logger.warning(
+                                f"Insufficient ClickPesa balance: {tzs_balance} < {amount}"
+                            )
+                            payout.error_message = f"Insufficient platform balance (TSh {tzs_balance:,.0f}). Will be processed manually."
+                            payout.save()
+                            gateway_result = {
+                                "processed": False,
+                                "reason": "insufficient_platform_balance",
+                                "platform_balance": float(tzs_balance),
+                                "required_amount": float(amount),
+                                "message": "Platform does not have enough funds. Payout will be processed manually.",
+                            }
+                        else:
+                            # Step 2: Preview payout
+                            preview_result = clickpesa.preview_mobile_money_payout(
+                                phone_number=account_number,
+                                amount=amount,
+                                order_reference=payout.reference,
+                            )
+
+                            if preview_result.get("success"):
+                                # Step 3: Create payout
+                                payout_result = clickpesa.create_mobile_money_payout(
+                                    phone_number=account_number,
+                                    amount=amount,
+                                    order_reference=payout.reference,
+                                )
+
+                                if payout_result.get("success"):
+                                    payout.mark_processing()
+                                    payout.transaction_id = payout_result.get(
+                                        "payout_id"
+                                    )
+                                    payout.save()
+                                    gateway_result = {
+                                        "processed": True,
+                                        "status": payout_result.get("status"),
+                                        "channel_provider": payout_result.get(
+                                            "channel_provider"
+                                        ),
+                                        "fee": payout_result.get("fee"),
+                                    }
+                                    logger.info(
+                                        f"Payout {payout.reference} submitted to ClickPesa: {payout_result.get('status')}"
+                                    )
+                                else:
+                                    payout.error_message = payout_result.get(
+                                        "message", "ClickPesa payout failed"
+                                    )
+                                    payout.save()
+                                    gateway_result = {
+                                        "processed": False,
+                                        "error": payout_result.get("message"),
+                                    }
+                            else:
+                                payout.error_message = preview_result.get(
+                                    "message", "Payout preview failed"
+                                )
+                                payout.save()
+                                gateway_result = {
+                                    "processed": False,
+                                    "error": preview_result.get("message"),
+                                }
+                except Exception as e:
+                    logger.error(f"Error processing payout via ClickPesa: {e}")
+                    payout.error_message = f"Auto-processing failed: {str(e)}"
+                    payout.save()
+                    gateway_result = {"processed": False, "error": str(e)}
+
+        # Bank Transfer payouts (ClickPesa only — Snippe does not support bank transfers)
         elif payout_method == "bank_transfer":
             try:
                 from .clickpesa import ClickPesaAPI
@@ -3972,7 +4080,7 @@ def portal_payouts(request):
                     logger.warning(
                         f"Could not check ClickPesa balance: {balance_result.get('message')}"
                     )
-                    clickpesa_result = {
+                    gateway_result = {
                         "processed": False,
                         "reason": "balance_check_failed",
                         "message": balance_result.get(
@@ -3987,7 +4095,7 @@ def portal_payouts(request):
                         )
                         payout.error_message = f"Insufficient platform balance (TSh {tzs_balance:,.0f}). Will be processed manually."
                         payout.save()
-                        clickpesa_result = {
+                        gateway_result = {
                             "processed": False,
                             "reason": "insufficient_platform_balance",
                             "platform_balance": float(tzs_balance),
@@ -4019,7 +4127,7 @@ def portal_payouts(request):
                                 payout.mark_processing()
                                 payout.transaction_id = payout_result.get("payout_id")
                                 payout.save()
-                                clickpesa_result = {
+                                gateway_result = {
                                     "processed": True,
                                     "status": payout_result.get("status"),
                                     "channel_provider": payout_result.get(
@@ -4037,7 +4145,7 @@ def portal_payouts(request):
                                     "message", "ClickPesa bank payout failed"
                                 )
                                 payout.save()
-                                clickpesa_result = {
+                                gateway_result = {
                                     "processed": False,
                                     "error": payout_result.get("message"),
                                 }
@@ -4046,7 +4154,7 @@ def portal_payouts(request):
                                 "message", "Bank payout preview failed"
                             )
                             payout.save()
-                            clickpesa_result = {
+                            gateway_result = {
                                 "processed": False,
                                 "error": preview_result.get("message"),
                             }
@@ -4054,7 +4162,7 @@ def portal_payouts(request):
                 logger.error(f"Error processing bank payout via ClickPesa: {e}")
                 payout.error_message = f"Auto-processing failed: {str(e)}"
                 payout.save()
-                clickpesa_result = {"processed": False, "error": str(e)}
+                gateway_result = {"processed": False, "error": str(e)}
 
         return Response(
             {
@@ -4067,7 +4175,8 @@ def portal_payouts(request):
                     "status": payout.status,
                 },
                 "new_available_balance": round(available_balance - amount, 2),
-                "clickpesa": clickpesa_result,
+                "gateway": gateway_name,
+                "gateway_result": gateway_result,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -4139,7 +4248,7 @@ def portal_payout_detail(request, payout_id):
 @permission_classes([TenantAPIKeyPermission])
 def portal_payout_refresh_status(request, payout_id):
     """
-    Refresh payout status from ClickPesa
+    Refresh payout status from payment provider (ClickPesa or Snippe)
     """
     tenant = getattr(request, "tenant", None)
     if not tenant:
@@ -4169,8 +4278,7 @@ def portal_payout_refresh_status(request, payout_id):
             }
         )
 
-    # Check if this payout was ever submitted to ClickPesa
-    # If no transaction_id, it was never created in ClickPesa (e.g., insufficient balance)
+    # Check if this payout was ever submitted to a payment provider
     if not payout.transaction_id:
         return Response(
             {
@@ -4187,51 +4295,114 @@ def portal_payout_refresh_status(request, payout_id):
             }
         )
 
+    # Determine which gateway to query based on tenant preference
+    use_snippe = getattr(tenant, "preferred_payment_gateway", "clickpesa") == "snippe"
+
     try:
-        from .clickpesa import ClickPesaAPI
+        if use_snippe:
+            # ---- Snippe payout status refresh ----
+            from .snippe import SnippeAPI
 
-        clickpesa = ClickPesaAPI()
-        result = clickpesa.query_payout_status(payout.reference)
+            snippe = SnippeAPI()
+            result = snippe.get_payout_status(payout.transaction_id)
 
-        if result.get("success"):
-            clickpesa_status = result.get("status", "").upper()
-            old_status = payout.status
+            if result.get("success"):
+                snippe_data = result.get("data", {})
+                snippe_status = snippe_data.get("status", "").lower()
+                old_status = payout.status
 
-            # Map ClickPesa status to our status
-            if clickpesa_status == "SUCCESS":
-                payout.mark_completed(result.get("payout_id"))
-            elif clickpesa_status in ["FAILED", "REVERSED", "REFUNDED"]:
-                payout.mark_failed(f"ClickPesa status: {clickpesa_status}")
-            elif clickpesa_status in ["PROCESSING", "PENDING", "AUTHORIZED"]:
-                payout.status = "processing"
-                payout.save()
+                if snippe_status == "completed":
+                    ext_ref = snippe_data.get(
+                        "external_reference", payout.transaction_id
+                    )
+                    payout.mark_completed(ext_ref)
+                elif snippe_status in ["failed", "reversed"]:
+                    failure_reason = snippe_data.get(
+                        "failure_reason", f"Snippe status: {snippe_status}"
+                    )
+                    payout.mark_failed(failure_reason)
+                elif snippe_status in ["processing", "pending"]:
+                    payout.status = "processing"
+                    payout.save()
 
-            logger.info(
-                f"Payout {payout.reference} status updated: {old_status} -> {payout.status}"
-            )
+                logger.info(
+                    f"Payout {payout.reference} status updated via Snippe: {old_status} -> {payout.status}"
+                )
 
-            return Response(
-                {
-                    "success": True,
-                    "message": "Payout status refreshed",
-                    "payout": {
-                        "id": payout.id,
-                        "reference": payout.reference,
-                        "status": payout.status,
-                        "old_status": old_status,
-                        "clickpesa_status": clickpesa_status,
+                return Response(
+                    {
+                        "success": True,
+                        "message": "Payout status refreshed",
+                        "gateway": "snippe",
+                        "payout": {
+                            "id": payout.id,
+                            "reference": payout.reference,
+                            "status": payout.status,
+                            "old_status": old_status,
+                            "provider_status": snippe_status,
+                        },
+                        "provider_data": snippe_data,
+                    }
+                )
+            else:
+                return Response(
+                    {
+                        "success": False,
+                        "message": result.get(
+                            "message", "Failed to query payout status from Snippe"
+                        ),
                     },
-                    "clickpesa_data": result.get("data"),
-                }
-            )
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         else:
-            return Response(
-                {
-                    "success": False,
-                    "message": result.get("message", "Failed to query payout status"),
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            # ---- ClickPesa payout status refresh ----
+            from .clickpesa import ClickPesaAPI
+
+            clickpesa = ClickPesaAPI()
+            result = clickpesa.query_payout_status(payout.reference)
+
+            if result.get("success"):
+                clickpesa_status = result.get("status", "").upper()
+                old_status = payout.status
+
+                # Map ClickPesa status to our status
+                if clickpesa_status == "SUCCESS":
+                    payout.mark_completed(result.get("payout_id"))
+                elif clickpesa_status in ["FAILED", "REVERSED", "REFUNDED"]:
+                    payout.mark_failed(f"ClickPesa status: {clickpesa_status}")
+                elif clickpesa_status in ["PROCESSING", "PENDING", "AUTHORIZED"]:
+                    payout.status = "processing"
+                    payout.save()
+
+                logger.info(
+                    f"Payout {payout.reference} status updated: {old_status} -> {payout.status}"
+                )
+
+                return Response(
+                    {
+                        "success": True,
+                        "message": "Payout status refreshed",
+                        "gateway": "clickpesa",
+                        "payout": {
+                            "id": payout.id,
+                            "reference": payout.reference,
+                            "status": payout.status,
+                            "old_status": old_status,
+                            "provider_status": clickpesa_status,
+                        },
+                        "provider_data": result.get("data"),
+                    }
+                )
+            else:
+                return Response(
+                    {
+                        "success": False,
+                        "message": result.get(
+                            "message", "Failed to query payout status"
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
     except Exception as e:
         logger.error(f"Error refreshing payout status: {e}")
@@ -4245,7 +4416,8 @@ def portal_payout_refresh_status(request, payout_id):
 @permission_classes([TenantOrAdminPermission])
 def portal_clickpesa_balance(request):
     """
-    Get ClickPesa account balance (platform balance for payouts)
+    Get payment gateway account balance (platform balance for payouts).
+    Automatically returns Snippe or ClickPesa balance based on tenant preference.
     Accessible by: Tenant (via API key) or Platform Admin
     """
     tenant = getattr(request, "tenant", None)
@@ -4263,33 +4435,72 @@ def portal_clickpesa_balance(request):
             status=status.HTTP_403_FORBIDDEN,
         )
 
+    # Determine preferred gateway
+    preferred_gateway = getattr(tenant, "preferred_payment_gateway", "clickpesa") if tenant else "clickpesa"
+
     try:
-        from .clickpesa import ClickPesaAPI
+        if preferred_gateway == "snippe":
+            from .snippe import SnippeAPI
 
-        clickpesa = ClickPesaAPI()
-        result = clickpesa.get_account_balance()
+            snippe = SnippeAPI()
+            result = snippe.get_account_balance()
 
-        if result.get("success"):
-            return Response(
-                {
-                    "success": True,
-                    "balances": result.get("balances", {}),
-                    "tzs_balance": result.get("balances", {}).get("TZS", 0),
-                }
-            )
+            if result.get("success"):
+                balance_data = result.get("data", {})
+                # Extract TZS balance — Snippe returns {available: {currency, value}, balance: {currency, value}}
+                available = balance_data.get("available", {})
+                if isinstance(available, dict) and "value" in available:
+                    tzs_balance = available.get("value", 0)
+                elif isinstance(available, dict) and "TZS" in available:
+                    tzs_balance = available.get("TZS", 0)
+                else:
+                    tzs_balance = balance_data.get("balance", {}).get("value", 0) if isinstance(balance_data.get("balance"), dict) else 0
+                return Response(
+                    {
+                        "success": True,
+                        "gateway": "snippe",
+                        "balances": balance_data,
+                        "tzs_balance": tzs_balance,
+                    }
+                )
+            else:
+                return Response(
+                    {
+                        "success": False,
+                        "gateway": "snippe",
+                        "message": result.get("message", "Failed to get Snippe balance"),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         else:
-            return Response(
-                {
-                    "success": False,
-                    "message": result.get("message", "Failed to get balance"),
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            from .clickpesa import ClickPesaAPI
+
+            clickpesa = ClickPesaAPI()
+            result = clickpesa.get_account_balance()
+
+            if result.get("success"):
+                return Response(
+                    {
+                        "success": True,
+                        "gateway": "clickpesa",
+                        "balances": result.get("balances", {}),
+                        "tzs_balance": result.get("balances", {}).get("TZS", 0),
+                    }
+                )
+            else:
+                return Response(
+                    {
+                        "success": False,
+                        "gateway": "clickpesa",
+                        "message": result.get("message", "Failed to get balance"),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
     except Exception as e:
-        logger.error(f"Error getting ClickPesa balance: {e}")
+        logger.error(f"Error getting {preferred_gateway} balance: {e}")
         return Response(
-            {"success": False, "message": f"Error: {str(e)}"},
+            {"success": False, "gateway": preferred_gateway, "message": f"Error: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 

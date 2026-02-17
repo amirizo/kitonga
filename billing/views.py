@@ -4244,7 +4244,10 @@ def verify_access(request):
 @permission_classes([AllowAny])
 def initiate_payment(request):
     """
-    Initiate ClickPesa USSD-PUSH payment (MULTI-TENANT AWARE)
+    Initiate USSD-PUSH payment via Snippe or ClickPesa (MULTI-TENANT AWARE)
+
+    The gateway is chosen based on the tenant's ``preferred_payment_gateway``
+    field (defaults to ClickPesa for backwards compatibility).
 
     The tenant is resolved from:
     1. X-API-Key header (for API integrations)
@@ -4454,40 +4457,97 @@ def initiate_payment(request):
     )
 
     # =========================================================================
-    # PLATFORM PAYMENT: All payments go through platform's ClickPesa account
-    # Tenants receive payouts from the platform based on their revenue share
+    # SMART GATEWAY ROUTING: Choose Snippe or ClickPesa based on tenant pref
     # =========================================================================
-    clickpesa = ClickPesaAPI()
-    if tenant:
-        logger.info(
-            f"Processing payment for tenant {tenant.slug} via platform ClickPesa account"
-        )
-    else:
-        logger.info("Processing payment via platform ClickPesa account")
-
-    result = clickpesa.initiate_payment(
-        phone_number=phone_number, amount=amount, order_reference=order_reference
+    preferred_gateway = (
+        getattr(tenant, "preferred_payment_gateway", "clickpesa")
+        if tenant
+        else "clickpesa"
     )
 
-    if result["success"]:
-        return Response(
-            {
-                "success": True,
-                "message": result["message"],
-                "transaction_id": payment.transaction_id,
+    if preferred_gateway == "snippe":
+        from .snippe import SnippeAPI
+
+        snippe = SnippeAPI()
+        logger.info(f"Processing payment for tenant {tenant.slug} via Snippe gateway")
+
+        snippe_result = snippe.create_mobile_payment(
+            phone_number=phone_number,
+            amount=int(amount),
+            metadata={
                 "order_reference": order_reference,
-                "amount": float(amount),
-                "bundle": BundleSerializer(bundle).data if bundle else None,
-                "channel": result.get("channel"),
+                "tenant": tenant.slug if tenant else "platform",
             },
-            status=status.HTTP_200_OK,
+            webhook_url=(
+                settings.SNIPPE_WEBHOOK_URL
+                if hasattr(settings, "SNIPPE_WEBHOOK_URL")
+                else ""
+            ),
         )
+
+        if snippe_result["success"]:
+            # Store Snippe reference for webhook resolution
+            payment.payment_reference = snippe_result.get("reference", "")
+            payment.save(update_fields=["payment_reference"])
+
+            return Response(
+                {
+                    "success": True,
+                    "message": snippe_result["message"],
+                    "transaction_id": payment.transaction_id,
+                    "order_reference": order_reference,
+                    "amount": float(amount),
+                    "bundle": BundleSerializer(bundle).data if bundle else None,
+                    "channel": snippe_result.get("channel", "snippe"),
+                    "gateway": "snippe",
+                    "snippe_reference": snippe_result.get("reference"),
+                },
+                status=status.HTTP_200_OK,
+            )
+        else:
+            payment.mark_failed()
+            return Response(
+                {
+                    "success": False,
+                    "error": snippe_result.get("message", "Payment initiation failed"),
+                    "gateway": "snippe",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
     else:
-        payment.mark_failed()
-        return Response(
-            {"success": False, "error": result["message"]},
-            status=status.HTTP_400_BAD_REQUEST,
+        # Default: ClickPesa gateway
+        clickpesa = ClickPesaAPI()
+        if tenant:
+            logger.info(
+                f"Processing payment for tenant {tenant.slug} via platform ClickPesa account"
+            )
+        else:
+            logger.info("Processing payment via platform ClickPesa account")
+
+        result = clickpesa.initiate_payment(
+            phone_number=phone_number, amount=amount, order_reference=order_reference
         )
+
+        if result["success"]:
+            return Response(
+                {
+                    "success": True,
+                    "message": result["message"],
+                    "transaction_id": payment.transaction_id,
+                    "order_reference": order_reference,
+                    "amount": float(amount),
+                    "bundle": BundleSerializer(bundle).data if bundle else None,
+                    "channel": result.get("channel"),
+                    "gateway": "clickpesa",
+                },
+                status=status.HTTP_200_OK,
+            )
+        else:
+            payment.mark_failed()
+            return Response(
+                {"success": False, "error": result["message"], "gateway": "clickpesa"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
 
 @csrf_exempt
@@ -5716,12 +5776,111 @@ def snippe_account_balance(request):
 @permission_classes([AllowAny])
 def query_payment_status(request, order_reference):
     """
-    Query payment status from ClickPesa
+    Query payment status from Snippe or ClickPesa based on tenant preference.
     """
     try:
         payment = Payment.objects.get(order_reference=order_reference)
 
-        # Query ClickPesa for latest status
+        # Determine gateway from tenant preference
+        tenant = payment.tenant
+        preferred_gateway = (
+            getattr(tenant, "preferred_payment_gateway", "clickpesa")
+            if tenant
+            else "clickpesa"
+        )
+
+        # Also detect if payment was made via Snippe (payment_reference from Snippe)
+        if payment.payment_reference and payment.payment_reference.startswith("pay_"):
+            preferred_gateway = "snippe"
+
+        if preferred_gateway == "snippe":
+            from .snippe import SnippeAPI
+
+            snippe = SnippeAPI()
+            # Try by Snippe reference first, fallback to order_reference in metadata
+            snippe_ref = payment.payment_reference or order_reference
+            result = snippe.get_payment_status(snippe_ref)
+
+            if result["success"]:
+                snippe_data = result.get("data", {})
+                snippe_status = snippe_data.get("status", "").lower()
+
+                mikrotik_auto_login = None
+
+                if snippe_status == "completed" and payment.status == "pending":
+                    payment.mark_completed(
+                        payment_reference=snippe_data.get("reference", snippe_ref),
+                        channel=f"snippe:{snippe_data.get('channel', {}).get('provider', 'mobile') if isinstance(snippe_data.get('channel'), dict) else 'snippe'}",
+                    )
+
+                    # Auto-connect logic (same as ClickPesa path)
+                    try:
+                        user = payment.user
+                        device = (
+                            user.devices.filter(is_active=True)
+                            .order_by("-last_seen")
+                            .first()
+                        )
+                        if device:
+                            if user.tenant:
+                                auto_access_result = (
+                                    force_immediate_internet_access_on_tenant_routers(
+                                        user=user,
+                                        mac_address=device.mac_address,
+                                        ip_address=device.ip_address or "0.0.0.0",
+                                        access_type="payment",
+                                    )
+                                )
+                            else:
+                                auto_access_result = force_immediate_internet_access(
+                                    username=user.phone_number,
+                                    mac_address=device.mac_address,
+                                    ip_address=device.ip_address or "0.0.0.0",
+                                    access_type="payment",
+                                )
+                            mikrotik_auto_login = {
+                                "success": auto_access_result.get("success", False),
+                                "message": auto_access_result.get("message", ""),
+                                "device_mac": device.mac_address,
+                                "device_ip": device.ip_address,
+                            }
+                    except Exception as e:
+                        logger.error(f"Auto-login after Snippe status query: {e}")
+
+                elif snippe_status == "failed" and payment.status == "pending":
+                    payment.mark_failed()
+
+                response_data = {
+                    "success": True,
+                    "order_reference": order_reference,
+                    "status": payment.status,
+                    "amount": float(payment.amount),
+                    "bundle": (
+                        BundleSerializer(payment.bundle).data
+                        if payment.bundle
+                        else None
+                    ),
+                    "gateway": "snippe",
+                    "snippe_reference": snippe_data.get("reference"),
+                    "snippe_status": snippe_status,
+                }
+                if mikrotik_auto_login:
+                    response_data["mikrotik_auto_login"] = mikrotik_auto_login
+                return Response(response_data)
+            else:
+                # Snippe query failed, return local status
+                return Response(
+                    {
+                        "success": True,
+                        "order_reference": order_reference,
+                        "status": payment.status,
+                        "amount": float(payment.amount),
+                        "gateway": "snippe",
+                        "message": "Could not query Snippe; returning local status",
+                    }
+                )
+
+        # ── ClickPesa path (default) ──
         clickpesa = ClickPesaAPI()
         result = clickpesa.query_payment_status(order_reference)
 
@@ -8839,8 +8998,8 @@ def tenant_usage(request):
 @permission_classes([TenantAPIKeyPermission])
 def create_subscription_payment(request):
     """
-    Create a subscription payment request for the tenant
-    Returns ClickPesa checkout URL for payment
+    Create a subscription payment request for the tenant.
+    Routes through Snippe or ClickPesa based on tenant preference.
     """
     tenant = getattr(request, "tenant", None)
     if not tenant:
@@ -8899,7 +9058,8 @@ def renew_subscription(request):
     Subscription renewal endpoint for tenants.
 
     GET  - Returns current subscription status and renewal info
-    POST - Initiates a renewal payment via ClickPesa USSD push
+    POST - Initiates a renewal payment via Snippe or ClickPesa USSD push
+           (gateway chosen based on tenant's preferred_payment_gateway)
 
     POST body (all optional):
         plan_id: int        - Plan to renew with (defaults to current plan)
@@ -9110,9 +9270,9 @@ def subscription_payment_status(request, transaction_id):
 @csrf_exempt
 def subscription_payment_webhook(request):
     """
-    Webhook for subscription payment callbacks from ClickPesa
-    Similar to WiFi payment webhook but for subscription payments
-    Creates PaymentWebhook log entries for audit trail
+    Webhook for subscription payment callbacks from ClickPesa or Snippe.
+    For Snippe, SUB-prefixed payments are routed here from snippe_webhook().
+    Creates PaymentWebhook log entries for audit trail.
     """
     webhook_log = None
 
