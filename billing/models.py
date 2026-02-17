@@ -2463,8 +2463,14 @@ class PPPProfile(models.Model):
     )
 
     # Profile identification
-    name = models.CharField(max_length=100, help_text="Profile name (e.g., 'basic-5m', 'premium-50m')")
-    display_name = models.CharField(max_length=200, blank=True, help_text="Human-friendly name (e.g., 'Basic 5Mbps')")
+    name = models.CharField(
+        max_length=100, help_text="Profile name (e.g., 'basic-5m', 'premium-50m')"
+    )
+    display_name = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Human-friendly name (e.g., 'Basic 5Mbps')",
+    )
     description = models.TextField(blank=True)
 
     # Speed settings (format: upload/download e.g., "5M/10M")
@@ -2490,7 +2496,8 @@ class PPPProfile(models.Model):
 
     # IP Pool
     local_address = models.GenericIPAddressField(
-        null=True, blank=True,
+        null=True,
+        blank=True,
         help_text="PPP local (gateway) address",
     )
     remote_address = models.CharField(
@@ -2506,29 +2513,36 @@ class PPPProfile(models.Model):
 
     # Pricing
     monthly_price = models.DecimalField(
-        max_digits=10, decimal_places=2, default=0,
+        max_digits=10,
+        decimal_places=2,
+        default=0,
         help_text="Monthly subscription price in TZS",
     )
     currency = models.CharField(max_length=3, default="TZS")
 
     # Session settings
     session_timeout = models.CharField(
-        max_length=20, blank=True,
+        max_length=20,
+        blank=True,
         help_text="Session timeout (e.g., '00:00:00' for unlimited)",
     )
     idle_timeout = models.CharField(
-        max_length=20, blank=True,
+        max_length=20,
+        blank=True,
         help_text="Idle timeout (e.g., '00:05:00' for 5 minutes)",
     )
     keepalive_timeout = models.CharField(
-        max_length=20, blank=True, default="10",
+        max_length=20,
+        blank=True,
+        default="10",
         help_text="Keepalive timeout in seconds",
     )
 
     # MikroTik sync status
     synced_to_router = models.BooleanField(default=False)
     mikrotik_id = models.CharField(
-        max_length=50, blank=True,
+        max_length=50,
+        blank=True,
         help_text="MikroTik internal ID (.id) for this profile",
     )
     last_synced_at = models.DateTimeField(null=True, blank=True)
@@ -2604,17 +2618,21 @@ class PPPCustomer(models.Model):
 
     # Network configuration
     remote_address = models.GenericIPAddressField(
-        null=True, blank=True,
+        null=True,
+        blank=True,
         help_text="Static IP assignment (leave blank for pool)",
     )
     mac_address = models.CharField(
-        max_length=17, blank=True,
+        max_length=17,
+        blank=True,
         help_text="Caller-ID / MAC binding (e.g., 'AA:BB:CC:DD:EE:FF')",
     )
 
     # Billing
     monthly_price = models.DecimalField(
-        max_digits=10, decimal_places=2, default=0,
+        max_digits=10,
+        decimal_places=2,
+        default=0,
         help_text="Monthly price (overrides profile price if set)",
     )
     currency = models.CharField(max_length=3, default="TZS")
@@ -2623,19 +2641,20 @@ class PPPCustomer(models.Model):
         help_text="Day of month for billing (1-28)",
     )
     paid_until = models.DateTimeField(
-        null=True, blank=True,
+        null=True,
+        blank=True,
         help_text="Service is active until this date",
     )
     last_payment_at = models.DateTimeField(null=True, blank=True)
     total_payments = models.IntegerField(default=0)
     total_amount_paid = models.DecimalField(
-        max_digits=12, decimal_places=2, default=0,
+        max_digits=12,
+        decimal_places=2,
+        default=0,
     )
 
     # Status
-    status = models.CharField(
-        max_length=20, choices=STATUS_CHOICES, default="active"
-    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     disabled = models.BooleanField(
         default=False,
         help_text="Whether the PPP secret is disabled on the router",
@@ -2646,16 +2665,20 @@ class PPPCustomer(models.Model):
     last_logged_in = models.DateTimeField(null=True, blank=True)
     last_logged_out = models.DateTimeField(null=True, blank=True)
     last_disconnect_reason = models.CharField(max_length=200, blank=True)
-    uptime = models.CharField(max_length=50, blank=True, help_text="Current session uptime")
+    uptime = models.CharField(
+        max_length=50, blank=True, help_text="Current session uptime"
+    )
     last_caller_id = models.CharField(
-        max_length=50, blank=True,
+        max_length=50,
+        blank=True,
         help_text="Last seen caller-ID / MAC from router",
     )
 
     # MikroTik sync
     synced_to_router = models.BooleanField(default=False)
     mikrotik_id = models.CharField(
-        max_length=50, blank=True,
+        max_length=50,
+        blank=True,
         help_text="MikroTik internal ID (.id) for this secret",
     )
     last_synced_at = models.DateTimeField(null=True, blank=True)

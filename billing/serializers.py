@@ -16,6 +16,8 @@ from .models import (
     TenantSubscriptionPayment,
     Router,
     Location,
+    PPPProfile,
+    PPPCustomer,
 )
 from .utils import normalize_phone_number, validate_tanzania_phone_number
 
@@ -1235,3 +1237,249 @@ class AnalyticsTrendSerializer(serializers.Serializer):
     user_growth_percent = serializers.DecimalField(
         max_digits=6, decimal_places=2, allow_null=True
     )
+
+
+# =============================================================================
+# PPP/PPPoE SERIALIZERS (Enterprise Plan Only)
+# =============================================================================
+
+
+class PPPProfileSerializer(serializers.ModelSerializer):
+    """Serializer for PPP speed profiles"""
+
+    customer_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PPPProfile
+        fields = [
+            "id",
+            "name",
+            "display_name",
+            "description",
+            "rate_limit",
+            "burst_limit",
+            "burst_threshold",
+            "burst_time",
+            "local_address",
+            "remote_address",
+            "dns_server",
+            "monthly_price",
+            "currency",
+            "session_timeout",
+            "idle_timeout",
+            "keepalive_timeout",
+            "synced_to_router",
+            "mikrotik_id",
+            "last_synced_at",
+            "is_active",
+            "router",
+            "customer_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "synced_to_router",
+            "mikrotik_id",
+            "last_synced_at",
+            "customer_count",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_customer_count(self, obj):
+        return obj.customers.count()
+
+
+class PPPProfileCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating/updating PPP profiles"""
+
+    class Meta:
+        model = PPPProfile
+        fields = [
+            "name",
+            "display_name",
+            "description",
+            "rate_limit",
+            "burst_limit",
+            "burst_threshold",
+            "burst_time",
+            "local_address",
+            "remote_address",
+            "dns_server",
+            "monthly_price",
+            "currency",
+            "session_timeout",
+            "idle_timeout",
+            "keepalive_timeout",
+            "is_active",
+            "router",
+        ]
+
+    def validate_name(self, value):
+        """Ensure profile name is unique per tenant"""
+        tenant = self.context.get("tenant")
+        qs = PPPProfile.objects.filter(tenant=tenant, name=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                f"A PPP profile named '{value}' already exists for this tenant."
+            )
+        return value
+
+    def validate_rate_limit(self, value):
+        """Validate MikroTik rate limit format (e.g. '5M/10M')"""
+        if "/" not in value:
+            raise serializers.ValidationError(
+                "Rate limit must be in format 'upload/download' (e.g., '5M/10M')."
+            )
+        return value
+
+    def validate_router(self, value):
+        """Ensure router belongs to tenant"""
+        tenant = self.context.get("tenant")
+        if value and value.tenant != tenant:
+            raise serializers.ValidationError("Router does not belong to your tenant.")
+        return value
+
+
+class PPPCustomerSerializer(serializers.ModelSerializer):
+    """Serializer for PPP customers (read)"""
+
+    profile_name = serializers.SerializerMethodField()
+    router_name = serializers.SerializerMethodField()
+    effective_price = serializers.SerializerMethodField()
+    is_service_active = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PPPCustomer
+        fields = [
+            "id",
+            "username",
+            "service",
+            "customer_name",
+            "phone_number",
+            "email",
+            "address",
+            "notes",
+            "profile",
+            "profile_name",
+            "router",
+            "router_name",
+            "remote_address",
+            "mac_address",
+            "monthly_price",
+            "currency",
+            "billing_day",
+            "paid_until",
+            "last_payment_at",
+            "total_payments",
+            "total_amount_paid",
+            "effective_price",
+            "is_service_active",
+            "status",
+            "disabled",
+            "expiry_notification_sent",
+            "last_logged_in",
+            "last_logged_out",
+            "last_disconnect_reason",
+            "uptime",
+            "last_caller_id",
+            "synced_to_router",
+            "mikrotik_id",
+            "last_synced_at",
+            "wifi_user",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "total_payments",
+            "total_amount_paid",
+            "last_logged_in",
+            "last_logged_out",
+            "last_disconnect_reason",
+            "uptime",
+            "last_caller_id",
+            "synced_to_router",
+            "mikrotik_id",
+            "last_synced_at",
+            "effective_price",
+            "is_service_active",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_profile_name(self, obj):
+        return obj.profile.display_name or obj.profile.name if obj.profile else None
+
+    def get_router_name(self, obj):
+        return obj.router.name if obj.router else None
+
+    def get_effective_price(self, obj):
+        return float(obj.get_effective_price())
+
+    def get_is_service_active(self, obj):
+        return obj.has_active_service()
+
+
+class PPPCustomerCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating/updating PPP customers"""
+
+    class Meta:
+        model = PPPCustomer
+        fields = [
+            "username",
+            "password",
+            "service",
+            "customer_name",
+            "phone_number",
+            "email",
+            "address",
+            "notes",
+            "profile",
+            "router",
+            "remote_address",
+            "mac_address",
+            "monthly_price",
+            "currency",
+            "billing_day",
+            "paid_until",
+            "status",
+            "disabled",
+            "wifi_user",
+        ]
+
+    def validate_username(self, value):
+        """Ensure username is unique per tenant"""
+        tenant = self.context.get("tenant")
+        qs = PPPCustomer.objects.filter(tenant=tenant, username=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                f"A PPP customer with username '{value}' already exists for this tenant."
+            )
+        return value
+
+    def validate_router(self, value):
+        """Ensure router belongs to tenant"""
+        tenant = self.context.get("tenant")
+        if value and value.tenant != tenant:
+            raise serializers.ValidationError("Router does not belong to your tenant.")
+        return value
+
+    def validate_profile(self, value):
+        """Ensure profile belongs to tenant"""
+        tenant = self.context.get("tenant")
+        if value and value.tenant != tenant:
+            raise serializers.ValidationError(
+                "PPP profile does not belong to your tenant."
+            )
+        return value
+
+    def validate_billing_day(self, value):
+        if value < 1 or value > 28:
+            raise serializers.ValidationError("Billing day must be between 1 and 28.")
+        return value

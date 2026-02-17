@@ -185,15 +185,11 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "username",
-                    models.CharField(
-                        help_text="PPP login username", max_length=100
-                    ),
+                    models.CharField(help_text="PPP login username", max_length=100),
                 ),
                 (
                     "password",
-                    models.CharField(
-                        help_text="PPP login password", max_length=255
-                    ),
+                    models.CharField(help_text="PPP login password", max_length=255),
                 ),
                 (
                     "service",
@@ -212,9 +208,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "customer_name",
-                    models.CharField(
-                        help_text="Customer full name", max_length=200
-                    ),
+                    models.CharField(help_text="Customer full name", max_length=200),
                 ),
                 (
                     "phone_number",
@@ -277,9 +271,7 @@ class Migration(migrations.Migration):
                 ("total_payments", models.IntegerField(default=0)),
                 (
                     "total_amount_paid",
-                    models.DecimalField(
-                        decimal_places=2, default=0, max_digits=12
-                    ),
+                    models.DecimalField(decimal_places=2, default=0, max_digits=12),
                 ),
                 (
                     "status",
