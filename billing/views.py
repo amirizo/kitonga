@@ -55,6 +55,7 @@ from .serializers import (
     RevenueReportSerializer,
 )
 from .clickpesa import ClickPesaAPI
+from .snippe import SnippeAPI
 from .utils import get_active_users_count, get_revenue_statistics
 from .permissions import (
     SimpleAdminTokenPermission,
@@ -5018,6 +5019,697 @@ def clickpesa_payout_webhook(request):
             {"success": False, "error": "Webhook processing failed"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+# =========================================================================
+# SNIPPE PAYMENT GATEWAY ENDPOINTS
+# =========================================================================
+
+
+@csrf_exempt
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def snippe_initiate_payment(request):
+    """
+    Initiate a payment via Snippe (mobile money USSD push).
+
+    Works exactly like the ClickPesa initiate_payment but routes through
+    the Snippe API instead. Tenant-aware: uses the tenant's preferred
+    gateway or explicit ``payment_gateway=snippe`` in the request body.
+    """
+    serializer = InitiatePaymentSerializer(data=request.data)
+    if not serializer.is_valid():
+        error_messages = []
+        for field, msgs in serializer.errors.items():
+            for msg in msgs if isinstance(msgs, list) else [msgs]:
+                error_messages.append(f"{field}: {msg}")
+        return Response(
+            {
+                "success": False,
+                "error": (
+                    "; ".join(error_messages) if error_messages else "Validation error"
+                ),
+                "errors": serializer.errors,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    phone_number = serializer.validated_data["phone_number"]
+    bundle_id = serializer.validated_data.get("bundle_id")
+    router_id = serializer.validated_data.get("router_id")
+    payment_type = request.data.get(
+        "payment_type", "mobile"
+    )  # mobile, card, dynamic-qr
+
+    # --- Resolve tenant (same logic as initiate_payment) ---
+    tenant = getattr(request, "tenant", None)
+
+    if router_id and not tenant:
+        try:
+            router = Router.objects.get(id=router_id, is_active=True)
+            tenant = router.tenant
+        except Router.DoesNotExist:
+            pass
+
+    if not tenant:
+        tenant_slug = request.data.get("tenant") or request.GET.get("tenant")
+        if tenant_slug:
+            try:
+                tenant = Tenant.objects.get(slug=tenant_slug, is_active=True)
+            except Tenant.DoesNotExist:
+                pass
+
+    # --- Resolve user ---
+    from .utils import get_or_create_user
+
+    try:
+        user, created = get_or_create_user(phone_number, tenant=tenant)
+    except ValueError as e:
+        return Response(
+            {"success": False, "error": f"Invalid phone number: {str(e)}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # --- Device tracking ---
+    request_info = get_request_info(request, serializer.validated_data)
+    ip_address = request_info["ip_address"]
+    mac_address = request_info["mac_address"]
+
+    if mac_address:
+        try:
+            enhance_device_tracking_for_payment(
+                payment_user=user, mac_address=mac_address, ip_address=ip_address
+            )
+        except Exception as e:
+            logger.error(f"Device tracking error during Snippe payment: {e}")
+
+    # --- Resolve bundle ---
+    if bundle_id:
+        try:
+            if tenant:
+                bundle = Bundle.objects.get(id=bundle_id, tenant=tenant, is_active=True)
+            else:
+                bundle = Bundle.objects.get(id=bundle_id, is_active=True)
+            amount = bundle.price
+        except Bundle.DoesNotExist:
+            return Response(
+                {"success": False, "error": "Invalid bundle selected for this network"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    else:
+        if tenant:
+            bundle = Bundle.objects.filter(
+                tenant=tenant, duration_hours=24, is_active=True
+            ).first()
+        else:
+            bundle = Bundle.objects.filter(duration_hours=24, is_active=True).first()
+        if not bundle:
+            return Response(
+                {"success": False, "error": "No daily bundle configured"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        amount = bundle.price
+
+    # --- Order reference & router ---
+    order_reference = f"SNP{user.id}{uuid.uuid4().hex[:8].upper()}"
+
+    router = None
+    if router_id:
+        try:
+            router = Router.objects.get(id=router_id, is_active=True)
+            if router.tenant and not user.tenant:
+                user.tenant = router.tenant
+                user.save(update_fields=["tenant"])
+        except Router.DoesNotExist:
+            pass
+
+    # --- Create payment record ---
+    payment = Payment.objects.create(
+        tenant=tenant,
+        router=router,
+        user=user,
+        bundle=bundle,
+        amount=amount,
+        phone_number=phone_number,
+        transaction_id=str(uuid.uuid4()),
+        order_reference=order_reference,
+        payment_channel="snippe",
+        status="pending",
+    )
+
+    logger.info(
+        "Snippe payment created: ref=%s user=%s tenant=%s amount=%s type=%s",
+        order_reference,
+        phone_number,
+        tenant.slug if tenant else "NONE",
+        amount,
+        payment_type,
+    )
+
+    # --- Build webhook URL ---
+    webhook_url = getattr(settings, "SNIPPE_WEBHOOK_URL", "") or ""
+
+    # --- Construct Snippe client ---
+    snippe = SnippeAPI()
+
+    metadata = {
+        "order_reference": order_reference,
+        "payment_id": str(payment.transaction_id),
+        "tenant": tenant.slug if tenant else "",
+    }
+
+    # --- Initiate payment based on type ---
+    if payment_type == "card":
+        redirect_url = request.data.get("redirect_url", "")
+        cancel_url = request.data.get("cancel_url", "")
+        if not redirect_url or not cancel_url:
+            payment.mark_failed()
+            return Response(
+                {
+                    "success": False,
+                    "error": "redirect_url and cancel_url are required for card payments",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        result = snippe.create_card_payment(
+            amount=int(amount),
+            redirect_url=redirect_url,
+            cancel_url=cancel_url,
+            phone_number=phone_number,
+            webhook_url=webhook_url,
+            metadata=metadata,
+            idempotency_key=order_reference,
+        )
+    elif payment_type == "dynamic-qr":
+        result = snippe.create_qr_payment(
+            amount=int(amount),
+            phone_number=phone_number,
+            webhook_url=webhook_url,
+            metadata=metadata,
+            idempotency_key=order_reference,
+        )
+    else:
+        # Default: mobile money USSD push
+        result = snippe.create_mobile_payment(
+            phone_number=phone_number,
+            amount=int(amount),
+            webhook_url=webhook_url,
+            metadata=metadata,
+            idempotency_key=order_reference,
+        )
+
+    if result["success"]:
+        response_data = {
+            "success": True,
+            "message": result.get("message", "Payment initiated"),
+            "transaction_id": payment.transaction_id,
+            "order_reference": order_reference,
+            "snippe_reference": result.get("reference"),
+            "amount": float(amount),
+            "payment_type": payment_type,
+            "status": result.get("status"),
+            "bundle": BundleSerializer(bundle).data if bundle else None,
+        }
+        # Include extra fields for card / QR payments
+        if result.get("payment_url"):
+            response_data["payment_url"] = result["payment_url"]
+        if result.get("payment_qr_code"):
+            response_data["payment_qr_code"] = result["payment_qr_code"]
+        if result.get("expires_at"):
+            response_data["expires_at"] = result["expires_at"]
+
+        # Store Snippe reference on payment for later querying
+        payment.payment_reference = result.get("reference", "")
+        payment.save(update_fields=["payment_reference"])
+
+        return Response(response_data, status=status.HTTP_200_OK)
+    else:
+        payment.mark_failed()
+        return Response(
+            {"success": False, "error": result.get("message", "Payment failed")},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+@csrf_exempt
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def snippe_webhook(request):
+    """
+    Snippe webhook endpoint.
+
+    Receives ``payment.completed``, ``payment.failed``,
+    ``payout.completed``, and ``payout.failed`` events.
+    """
+    webhook_log = None
+
+    try:
+        webhook_data = request.data
+        logger.info(f"Snippe webhook received: {json.dumps(webhook_data)}")
+
+        # --- Optional signature verification ---
+        signature = request.META.get("HTTP_X_WEBHOOK_SIGNATURE", "")
+        if signature:
+            raw_body = (
+                request.body.decode("utf-8")
+                if isinstance(request.body, bytes)
+                else str(request.body)
+            )
+            snippe = SnippeAPI()
+            if not snippe.verify_signature(raw_body, signature):
+                logger.warning("Snippe webhook signature verification failed")
+                return Response(
+                    {"success": False, "error": "Invalid signature"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        event_type = webhook_data.get("type", "")
+        event_data = webhook_data.get("data", {})
+
+        reference = event_data.get("reference", "")
+        external_reference = event_data.get("external_reference", "")
+        payment_status_val = event_data.get("status", "")
+        amount_obj = event_data.get("amount", {})
+        amount = amount_obj.get("value") if isinstance(amount_obj, dict) else amount_obj
+        channel_obj = event_data.get("channel", {})
+        channel = (
+            channel_obj.get("provider", "snippe")
+            if isinstance(channel_obj, dict)
+            else str(channel_obj)
+        )
+
+        # Metadata may contain our order_reference
+        metadata = event_data.get("metadata", {})
+        order_reference = metadata.get("order_reference", "")
+
+        # Log webhook
+        from .models import PaymentWebhook
+
+        mapped_event = "OTHER"
+        if "completed" in event_type:
+            mapped_event = "PAYMENT RECEIVED"
+        elif "failed" in event_type:
+            mapped_event = "PAYMENT FAILED"
+
+        webhook_log = PaymentWebhook.objects.create(
+            event_type=mapped_event,
+            order_reference=order_reference or reference,
+            transaction_id=external_reference or reference,
+            payment_status=payment_status_val,
+            channel=f"snippe:{channel}",
+            amount=amount,
+            raw_payload=webhook_data,
+            source_ip=get_client_ip(request),
+            user_agent=get_user_agent(request),
+        )
+
+        # ----- PAYOUT EVENTS -----
+        if event_type in ("payout.completed", "payout.failed"):
+            from .models import TenantPayout
+
+            try:
+                payout = TenantPayout.objects.get(
+                    reference=order_reference or reference
+                )
+                if event_type == "payout.completed":
+                    payout.mark_completed(external_reference or reference)
+                    logger.info(f"Snippe payout completed: {payout.reference}")
+                else:
+                    failure_reason = event_data.get("failure_reason", "Payout failed")
+                    payout.mark_failed(failure_reason)
+                    logger.warning(
+                        f"Snippe payout failed: {payout.reference} — {failure_reason}"
+                    )
+                webhook_log.mark_processed()
+            except TenantPayout.DoesNotExist:
+                webhook_log.mark_failed(
+                    f"Payout not found: {order_reference or reference}"
+                )
+            return Response({"success": True, "message": "Payout webhook processed"})
+
+        # ----- PAYMENT EVENTS -----
+        if not order_reference:
+            # Try to find payment by Snippe reference stored in payment_reference
+            try:
+                payment = Payment.objects.get(payment_reference=reference)
+                order_reference = payment.order_reference
+            except Payment.DoesNotExist:
+                error_msg = f"Cannot resolve payment for Snippe reference: {reference}"
+                logger.error(error_msg)
+                if webhook_log:
+                    webhook_log.mark_failed(error_msg)
+                return Response(
+                    {"success": False, "error": "Payment not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        # Duplicate check
+        if webhook_log.is_duplicate:
+            webhook_log.mark_ignored("Duplicate Snippe webhook")
+            return Response({"success": True, "message": "Duplicate ignored"})
+
+        # Subscription payment routing
+        if order_reference.startswith("SUB"):
+            webhook_log.mark_ignored("Routed to subscription handler")
+            return subscription_payment_webhook(request)
+
+        try:
+            payment = Payment.objects.get(order_reference=order_reference)
+
+            if event_type == "payment.completed":
+                payment.mark_completed(
+                    payment_reference=external_reference or reference,
+                    channel=f"snippe:{channel}",
+                )
+                logger.info(f"Snippe payment completed: {order_reference}")
+
+                # ======== AUTO-CONNECT (same logic as ClickPesa webhook) ========
+                try:
+                    user = payment.user
+                    phone_number = payment.phone_number
+                    devices = user.devices.filter(is_active=True)
+                    payment_router = payment.router
+
+                    if devices.exists():
+                        for device in devices:
+                            try:
+                                mac_address = device.mac_address
+                                ip_address = device.ip_address
+
+                                enhance_device_tracking_for_payment(
+                                    payment_user=user,
+                                    mac_address=mac_address,
+                                    ip_address=ip_address,
+                                )
+
+                                if payment_router:
+                                    auto_result = authorize_user_on_specific_router(
+                                        user=user,
+                                        router_id=payment_router.id,
+                                        mac_address=mac_address,
+                                        ip_address=ip_address,
+                                        access_type="payment",
+                                    )
+                                elif user.tenant:
+                                    auto_result = force_immediate_internet_access_on_tenant_routers(
+                                        user=user,
+                                        mac_address=mac_address,
+                                        ip_address=ip_address,
+                                        access_type="payment",
+                                    )
+                                else:
+                                    auto_result = force_immediate_internet_access(
+                                        username=phone_number,
+                                        mac_address=mac_address,
+                                        ip_address=ip_address,
+                                        access_type="payment",
+                                    )
+
+                                if auto_result.get("success"):
+                                    logger.info(
+                                        f"✓ Snippe auto-login OK for {phone_number} device {mac_address}"
+                                    )
+
+                                AccessLog.objects.create(
+                                    user=user,
+                                    device=device,
+                                    ip_address=ip_address or "127.0.0.1",
+                                    mac_address=mac_address,
+                                    access_granted=True,
+                                    denial_reason=(
+                                        f"Snippe payment completed: {order_reference} — "
+                                        f"Access granted for {payment.bundle.duration_hours if payment.bundle else 24}h"
+                                    ),
+                                )
+                            except Exception as dev_err:
+                                logger.error(
+                                    f"Snippe auto-login device error: {dev_err}"
+                                )
+                    else:
+                        # No devices yet — create hotspot user
+                        if payment_router:
+                            from .mikrotik import (
+                                get_tenant_mikrotik_api,
+                                create_hotspot_user_on_router,
+                                safe_close,
+                            )
+
+                            try:
+                                api = get_tenant_mikrotik_api(payment_router)
+                                if api:
+                                    try:
+                                        create_hotspot_user_on_router(
+                                            api, phone_number, phone_number
+                                        )
+                                    finally:
+                                        safe_close(api)
+                            except Exception as router_err:
+                                logger.error(
+                                    f"Snippe hotspot user creation error: {router_err}"
+                                )
+                        elif user.tenant:
+                            force_immediate_internet_access_on_tenant_routers(
+                                user=user,
+                                mac_address="",
+                                ip_address="127.0.0.1",
+                                access_type="payment",
+                            )
+                        else:
+                            create_hotspot_user_and_login(
+                                username=phone_number, password=phone_number
+                            )
+
+                        AccessLog.objects.create(
+                            user=user,
+                            device=None,
+                            router=payment_router,
+                            ip_address="127.0.0.1",
+                            mac_address="",
+                            access_granted=True,
+                            denial_reason=f"Snippe payment completed: {order_reference} (no device yet)",
+                        )
+
+                except Exception as e:
+                    logger.error(
+                        f"MikroTik auto-login after Snippe payment failed: {e}"
+                    )
+
+                # Send SMS confirmation
+                from .nextsms import NextSMSAPI
+                from .models import SMSLog
+
+                nextsms = NextSMSAPI()
+                duration_hours = payment.bundle.duration_hours if payment.bundle else 24
+                sms_result = nextsms.send_payment_confirmation_with_auth_success(
+                    payment.phone_number, payment.amount, duration_hours
+                )
+                SMSLog.objects.create(
+                    phone_number=payment.phone_number,
+                    message=f"Snippe payment confirmation: TSh {payment.amount}",
+                    sms_type="payment",
+                    success=sms_result["success"],
+                    response_data=sms_result.get("data"),
+                )
+
+            elif event_type == "payment.failed":
+                payment.mark_failed()
+                logger.warning(f"Snippe payment failed: {order_reference}")
+
+                failure_reason = event_data.get("failure_reason", "")
+
+                from .nextsms import NextSMSAPI
+                from .models import SMSLog
+
+                nextsms = NextSMSAPI()
+                sms_result = nextsms.send_payment_failed_notification(
+                    payment.phone_number, payment.amount
+                )
+                SMSLog.objects.create(
+                    phone_number=payment.phone_number,
+                    message=f"Snippe payment failed: TSh {payment.amount}",
+                    sms_type="payment",
+                    success=sms_result["success"],
+                    response_data=sms_result.get("data"),
+                )
+
+            webhook_log.mark_processed(payment)
+            return Response({"success": True, "message": "Webhook processed"})
+
+        except Payment.DoesNotExist:
+            # Try subscription fallback
+            try:
+                TenantSubscriptionPayment.objects.get(transaction_id=order_reference)
+                webhook_log.mark_ignored("Routed to subscription handler (fallback)")
+                return subscription_payment_webhook(request)
+            except TenantSubscriptionPayment.DoesNotExist:
+                pass
+
+            error_msg = f"Payment not found for Snippe order ref: {order_reference}"
+            logger.error(error_msg)
+            webhook_log.mark_failed(error_msg)
+            return Response(
+                {"success": False, "error": "Payment not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+    except Exception as e:
+        error_msg = f"Error processing Snippe webhook: {str(e)}"
+        logger.error(error_msg)
+        if webhook_log:
+            webhook_log.mark_failed(error_msg)
+        return Response(
+            {"success": False, "error": "Webhook processing failed"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def snippe_payment_status(request, reference):
+    """
+    Query payment status from Snippe by reference.
+    Checks both our local DB and the Snippe API.
+    """
+    try:
+        # Try to find by order_reference first, then by payment_reference (Snippe ref)
+        try:
+            payment = Payment.objects.get(order_reference=reference)
+        except Payment.DoesNotExist:
+            payment = Payment.objects.get(payment_reference=reference)
+
+        # Query Snippe for latest status
+        snippe_ref = payment.payment_reference or reference
+        snippe = SnippeAPI()
+        result = snippe.get_payment_status(snippe_ref)
+
+        if result["success"]:
+            snippe_data = result["data"]
+            snippe_status = snippe_data.get("status", "")
+
+            # Update local payment if status changed
+            if snippe_status == "completed" and payment.status == "pending":
+                payment.mark_completed(
+                    payment_reference=snippe_ref,
+                    channel=f"snippe",
+                )
+
+                # Auto-connect (simplified — the webhook will handle the full flow)
+                try:
+                    user = payment.user
+                    device = (
+                        user.devices.filter(is_active=True)
+                        .order_by("-last_seen")
+                        .first()
+                    )
+                    if device and user.tenant:
+                        force_immediate_internet_access_on_tenant_routers(
+                            user=user,
+                            mac_address=device.mac_address,
+                            ip_address=device.ip_address or "0.0.0.0",
+                            access_type="payment",
+                        )
+                    elif device:
+                        force_immediate_internet_access(
+                            username=user.phone_number,
+                            mac_address=device.mac_address,
+                            ip_address=device.ip_address or "0.0.0.0",
+                            access_type="payment",
+                        )
+                except Exception as e:
+                    logger.error(f"Auto-login after Snippe status query failed: {e}")
+
+            elif snippe_status == "failed" and payment.status == "pending":
+                payment.mark_failed()
+
+            return Response(
+                {
+                    "success": True,
+                    "status": payment.status,
+                    "snippe_status": snippe_status,
+                    "amount": float(payment.amount),
+                    "order_reference": payment.order_reference,
+                    "snippe_reference": snippe_ref,
+                    "completed_at": (
+                        payment.completed_at.isoformat()
+                        if payment.completed_at
+                        else None
+                    ),
+                    "bundle": (
+                        BundleSerializer(payment.bundle).data
+                        if payment.bundle
+                        else None
+                    ),
+                }
+            )
+
+        else:
+            # Snippe query failed — return local status
+            return Response(
+                {
+                    "success": True,
+                    "status": payment.status,
+                    "amount": float(payment.amount),
+                    "order_reference": payment.order_reference,
+                    "snippe_reference": payment.payment_reference,
+                    "snippe_error": result.get("message"),
+                }
+            )
+
+    except Payment.DoesNotExist:
+        return Response(
+            {"success": False, "error": "Payment not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def snippe_trigger_push(request, reference):
+    """
+    Trigger or retry a USSD push for a pending Snippe payment.
+    """
+    phone_number = request.data.get("phone_number", "")
+    snippe = SnippeAPI()
+
+    result = snippe.trigger_push(reference, phone_number=phone_number or None)
+
+    if result["success"]:
+        return Response(
+            {
+                "success": True,
+                "message": "USSD push sent successfully",
+                "data": result.get("data", {}),
+            }
+        )
+    return Response(
+        {"success": False, "error": result.get("message", "Push failed")},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def snippe_account_balance(request):
+    """
+    Get Snippe account balance.
+    Requires admin authentication.
+    """
+    snippe = SnippeAPI()
+    result = snippe.get_account_balance()
+
+    if result["success"]:
+        return Response(
+            {
+                "success": True,
+                "balance": result["balance"],
+                "available": result["available"],
+                "currency": result["currency"],
+            }
+        )
+    return Response(
+        {"success": False, "error": result.get("message", "Failed to get balance")},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
 
 
 @api_view(["GET", "POST"])

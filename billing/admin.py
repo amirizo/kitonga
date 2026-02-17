@@ -214,8 +214,11 @@ class TenantAdmin(admin.ModelAdmin):
             "Payment Gateway (Tenant's Own)",
             {
                 "fields": (
+                    "preferred_payment_gateway",
                     "clickpesa_client_id",
                     "clickpesa_api_key",
+                    "snippe_api_key",
+                    "snippe_webhook_secret",
                     "nextsms_username",
                     "nextsms_password",
                     "nextsms_sender_id",

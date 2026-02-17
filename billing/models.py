@@ -134,6 +134,18 @@ class Tenant(models.Model):
     # Payment Configuration (tenant's own payment gateway credentials)
     clickpesa_client_id = models.CharField(max_length=255, blank=True)
     clickpesa_api_key = models.CharField(max_length=255, blank=True)
+    snippe_api_key = models.CharField(
+        max_length=255, blank=True, help_text="Snippe API key (snp_...)"
+    )
+    snippe_webhook_secret = models.CharField(
+        max_length=255, blank=True, help_text="Snippe webhook signing secret"
+    )
+    preferred_payment_gateway = models.CharField(
+        max_length=20,
+        choices=[("clickpesa", "ClickPesa"), ("snippe", "Snippe")],
+        default="clickpesa",
+        help_text="Which payment gateway to use for collecting WiFi payments",
+    )
     nextsms_username = models.CharField(max_length=255, blank=True)
     nextsms_password = models.CharField(max_length=255, blank=True)
     nextsms_sender_id = models.CharField(max_length=20, blank=True)

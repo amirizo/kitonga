@@ -27,6 +27,32 @@ urlpatterns = [
         views.clickpesa_payout_webhook,
         name="clickpesa_payout_webhook",
     ),
+    # Snippe Payment Gateway endpoints
+    path(
+        "snippe/initiate-payment/",
+        views.snippe_initiate_payment,
+        name="snippe_initiate_payment",
+    ),
+    path(
+        "snippe-webhook",
+        views.snippe_webhook,
+        name="snippe_webhook",
+    ),
+    path(
+        "snippe/payment-status/<str:reference>/",
+        views.snippe_payment_status,
+        name="snippe_payment_status",
+    ),
+    path(
+        "snippe/trigger-push/<str:reference>/",
+        views.snippe_trigger_push,
+        name="snippe_trigger_push",
+    ),
+    path(
+        "snippe/balance/",
+        views.snippe_account_balance,
+        name="snippe_account_balance",
+    ),
     path(
         "payment-status/<str:order_reference>/",
         views.query_payment_status,

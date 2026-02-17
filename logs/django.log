@@ -2982,3 +2982,14 @@ ERROR 2026-01-27 23:15:02,482 tasks 30104 8489528384 Error in disconnect_expired
 ERROR 2026-01-27 23:20:02,007 tasks 30262 8489528384 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
 ERROR 2026-01-27 23:25:02,337 tasks 30488 8489528384 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
 ERROR 2026-01-27 23:30:02,270 tasks 30537 8489528384 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+INFO 2026-02-17 23:30:18,815 snippe 7000 8421157952 Snippe: Querying account balance
+INFO 2026-02-17 23:30:34,213 snippe 7000 8421157952 Snippe: Creating mobile payment phone=255772236727 amount=100 TZS
+ERROR 2026-02-17 23:30:36,225 snippe 7000 8421157952 Snippe API error POST /payments → 400 VAL_001: details.amount: amount 100 is below minimum of 500
+INFO 2026-02-17 23:31:15,176 snippe 7174 8421157952 Snippe: Querying account balance
+INFO 2026-02-17 23:31:24,669 snippe 7174 8421157952 Snippe: Creating mobile payment phone=255772236727 amount=500 TZS
+INFO 2026-02-17 23:31:58,661 snippe 7297 8421157952 Snippe: Querying account balance
+INFO 2026-02-17 23:32:12,343 snippe 7297 8421157952 Snippe: Creating mobile payment phone=255772236727 amount=500 TZS
+INFO 2026-02-17 23:32:53,075 snippe 7443 8421157952 Snippe: Querying account balance
+INFO 2026-02-17 23:33:01,884 snippe 7443 8421157952 Snippe: Creating mobile payment phone=255772236727 amount=1000 TZS
+INFO 2026-02-17 23:35:13,320 snippe 8443 8421157952 Snippe: Creating mobile payment phone=255772236727 amount=500 TZS
+INFO 2026-02-17 23:41:21,968 autoreload 9981 8421157952 Watching for file changes with StatReloader

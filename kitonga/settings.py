@@ -325,6 +325,12 @@ CLICKPESA_API_KEY = config("CLICKPESA_API_KEY", default="")
 CLICKPESA_BASE_URL = config("CLICKPESA_BASE_URL", default="https://api.clickpesa.com")
 CLICKPESA_WEBHOOK_URL = config("CLICKPESA_WEBHOOK_URL", default="")
 
+# Snippe Payment API Configuration (https://api.snippe.sh)
+SNIPPE_API_KEY = config("SNIPPE_API_KEY", default="")
+SNIPPE_WEBHOOK_SECRET = config("SNIPPE_WEBHOOK_SECRET", default="")
+SNIPPE_BASE_URL = config("SNIPPE_BASE_URL", default="https://api.snippe.sh/v1")
+SNIPPE_WEBHOOK_URL = config("SNIPPE_WEBHOOK_URL", default="")
+
 # NEXTSMS Configuration
 NEXTSMS_USERNAME = config("NEXTSMS_USERNAME", default="")
 NEXTSMS_PASSWORD = config("NEXTSMS_PASSWORD", default="")
