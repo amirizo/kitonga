@@ -39,10 +39,13 @@ class SubscriptionManager:
 
     def __init__(self, tenant: Tenant):
         self.tenant = tenant
-        self.preferred_gateway = getattr(tenant, "preferred_payment_gateway", "clickpesa") or "clickpesa"
+        self.preferred_gateway = (
+            getattr(tenant, "preferred_payment_gateway", "clickpesa") or "clickpesa"
+        )
         # Initialise the appropriate gateway client
         if self.preferred_gateway == "snippe":
             from .snippe import SnippeAPI
+
             self.gateway = SnippeAPI()
         else:
             self.gateway = ClickPesaAPI()
@@ -121,7 +124,9 @@ class SubscriptionManager:
                 # ── Snippe gateway ──
                 from .snippe import SnippeAPI
 
-                snippe = self.gateway if isinstance(self.gateway, SnippeAPI) else SnippeAPI()
+                snippe = (
+                    self.gateway if isinstance(self.gateway, SnippeAPI) else SnippeAPI()
+                )
                 response = snippe.create_mobile_payment(
                     phone_number=phone,
                     amount=int(amount),
@@ -262,7 +267,10 @@ class SubscriptionManager:
         if channel:
             payment.payment_method = channel
         else:
-            payment.payment_method = getattr(payment.tenant, "preferred_payment_gateway", "clickpesa") or "clickpesa"
+            payment.payment_method = (
+                getattr(payment.tenant, "preferred_payment_gateway", "clickpesa")
+                or "clickpesa"
+            )
         payment.save()
 
         # Update tenant subscription

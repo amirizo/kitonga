@@ -2435,3 +2435,285 @@ class TenantAnalyticsSnapshot(models.Model):
 
         snapshot.save()
         return snapshot
+
+
+# =============================================================================
+# PPP/PPPoE MODELS (Enterprise Plan Only)
+# =============================================================================
+
+
+class PPPProfile(models.Model):
+    """
+    PPP speed profile - defines bandwidth tiers for PPPoE customers.
+    Maps to /ppp/profile on MikroTik routers.
+    Enterprise plan feature only.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="ppp_profiles"
+    )
+    router = models.ForeignKey(
+        Router,
+        on_delete=models.CASCADE,
+        related_name="ppp_profiles",
+        null=True,
+        blank=True,
+        help_text="Specific router for this profile. Null = apply to all tenant routers.",
+    )
+
+    # Profile identification
+    name = models.CharField(max_length=100, help_text="Profile name (e.g., 'basic-5m', 'premium-50m')")
+    display_name = models.CharField(max_length=200, blank=True, help_text="Human-friendly name (e.g., 'Basic 5Mbps')")
+    description = models.TextField(blank=True)
+
+    # Speed settings (format: upload/download e.g., "5M/10M")
+    rate_limit = models.CharField(
+        max_length=50,
+        help_text="MikroTik rate limit format: upload/download (e.g., '5M/10M', '2M/5M')",
+    )
+    burst_limit = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Burst rate limit (e.g., '10M/20M')",
+    )
+    burst_threshold = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Burst threshold (e.g., '4M/8M')",
+    )
+    burst_time = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Burst time (e.g., '10/10')",
+    )
+
+    # IP Pool
+    local_address = models.GenericIPAddressField(
+        null=True, blank=True,
+        help_text="PPP local (gateway) address",
+    )
+    remote_address = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="IP pool name or IP range for PPP clients",
+    )
+    dns_server = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="DNS servers (comma-separated, e.g., '8.8.8.8,8.8.4.4')",
+    )
+
+    # Pricing
+    monthly_price = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text="Monthly subscription price in TZS",
+    )
+    currency = models.CharField(max_length=3, default="TZS")
+
+    # Session settings
+    session_timeout = models.CharField(
+        max_length=20, blank=True,
+        help_text="Session timeout (e.g., '00:00:00' for unlimited)",
+    )
+    idle_timeout = models.CharField(
+        max_length=20, blank=True,
+        help_text="Idle timeout (e.g., '00:05:00' for 5 minutes)",
+    )
+    keepalive_timeout = models.CharField(
+        max_length=20, blank=True, default="10",
+        help_text="Keepalive timeout in seconds",
+    )
+
+    # MikroTik sync status
+    synced_to_router = models.BooleanField(default=False)
+    mikrotik_id = models.CharField(
+        max_length=50, blank=True,
+        help_text="MikroTik internal ID (.id) for this profile",
+    )
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tenant", "name"]
+        unique_together = ["tenant", "name"]
+
+    def __str__(self):
+        return f"{self.tenant.slug} - {self.name} ({self.rate_limit}) - TZS {self.monthly_price}/mo"
+
+
+class PPPCustomer(models.Model):
+    """
+    PPPoE customer/secret - represents a single PPP connection account.
+    Maps to /ppp/secret on MikroTik routers.
+    Enterprise plan feature only.
+    """
+
+    STATUS_CHOICES = [
+        ("active", "Active"),
+        ("suspended", "Suspended"),
+        ("expired", "Expired"),
+        ("disabled", "Disabled"),
+    ]
+
+    SERVICE_CHOICES = [
+        ("pppoe", "PPPoE"),
+        ("pptp", "PPTP"),
+        ("l2tp", "L2TP"),
+        ("ovpn", "OpenVPN"),
+        ("sstp", "SSTP"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="ppp_customers"
+    )
+    profile = models.ForeignKey(
+        PPPProfile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="customers",
+    )
+    router = models.ForeignKey(
+        Router,
+        on_delete=models.CASCADE,
+        related_name="ppp_customers",
+        help_text="Router where this PPP secret is configured",
+    )
+
+    # PPP credentials
+    username = models.CharField(max_length=100, help_text="PPP login username")
+    password = models.CharField(max_length=255, help_text="PPP login password")
+    service = models.CharField(
+        max_length=10,
+        choices=SERVICE_CHOICES,
+        default="pppoe",
+        help_text="PPP service type",
+    )
+
+    # Customer info
+    customer_name = models.CharField(max_length=200, help_text="Customer full name")
+    phone_number = models.CharField(max_length=20, blank=True)
+    email = models.EmailField(blank=True)
+    address = models.TextField(blank=True, help_text="Physical installation address")
+    notes = models.TextField(blank=True)
+
+    # Network configuration
+    remote_address = models.GenericIPAddressField(
+        null=True, blank=True,
+        help_text="Static IP assignment (leave blank for pool)",
+    )
+    mac_address = models.CharField(
+        max_length=17, blank=True,
+        help_text="Caller-ID / MAC binding (e.g., 'AA:BB:CC:DD:EE:FF')",
+    )
+
+    # Billing
+    monthly_price = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text="Monthly price (overrides profile price if set)",
+    )
+    currency = models.CharField(max_length=3, default="TZS")
+    billing_day = models.IntegerField(
+        default=1,
+        help_text="Day of month for billing (1-28)",
+    )
+    paid_until = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Service is active until this date",
+    )
+    last_payment_at = models.DateTimeField(null=True, blank=True)
+    total_payments = models.IntegerField(default=0)
+    total_amount_paid = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+    )
+
+    # Status
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default="active"
+    )
+    disabled = models.BooleanField(
+        default=False,
+        help_text="Whether the PPP secret is disabled on the router",
+    )
+    expiry_notification_sent = models.BooleanField(default=False)
+
+    # Connection tracking
+    last_logged_in = models.DateTimeField(null=True, blank=True)
+    last_logged_out = models.DateTimeField(null=True, blank=True)
+    last_disconnect_reason = models.CharField(max_length=200, blank=True)
+    uptime = models.CharField(max_length=50, blank=True, help_text="Current session uptime")
+    last_caller_id = models.CharField(
+        max_length=50, blank=True,
+        help_text="Last seen caller-ID / MAC from router",
+    )
+
+    # MikroTik sync
+    synced_to_router = models.BooleanField(default=False)
+    mikrotik_id = models.CharField(
+        max_length=50, blank=True,
+        help_text="MikroTik internal ID (.id) for this secret",
+    )
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+
+    # Linked WiFi user (optional - for unified billing)
+    wifi_user = models.ForeignKey(
+        "User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ppp_accounts",
+        help_text="Link to a WiFi user for unified billing",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        unique_together = ["tenant", "username"]
+
+    def __str__(self):
+        return f"{self.tenant.slug} - {self.username} ({self.customer_name}) - {self.status}"
+
+    def get_effective_price(self):
+        """Get the effective monthly price (customer override or profile price)"""
+        if self.monthly_price > 0:
+            return self.monthly_price
+        if self.profile:
+            return self.profile.monthly_price
+        return 0
+
+    def has_active_service(self):
+        """Check if customer has active, paid-up service"""
+        if self.status != "active":
+            return False
+        if self.disabled:
+            return False
+        if self.paid_until and self.paid_until < timezone.now():
+            return False
+        return True
+
+    def extend_service(self, months=1):
+        """Extend service by N months"""
+        now = timezone.now()
+        if self.paid_until and self.paid_until > now:
+            self.paid_until = self.paid_until + timedelta(days=30 * months)
+        else:
+            self.paid_until = now + timedelta(days=30 * months)
+        self.status = "active"
+        self.disabled = False
+        self.expiry_notification_sent = False
+        self.total_payments += 1
+        self.last_payment_at = now
+        self.save()
+
+    def suspend_service(self):
+        """Suspend service (e.g., non-payment)"""
+        self.status = "suspended"
+        self.disabled = True
+        self.save()

@@ -4436,7 +4436,11 @@ def portal_clickpesa_balance(request):
         )
 
     # Determine preferred gateway
-    preferred_gateway = getattr(tenant, "preferred_payment_gateway", "clickpesa") if tenant else "clickpesa"
+    preferred_gateway = (
+        getattr(tenant, "preferred_payment_gateway", "clickpesa")
+        if tenant
+        else "clickpesa"
+    )
 
     try:
         if preferred_gateway == "snippe":
@@ -4454,7 +4458,11 @@ def portal_clickpesa_balance(request):
                 elif isinstance(available, dict) and "TZS" in available:
                     tzs_balance = available.get("TZS", 0)
                 else:
-                    tzs_balance = balance_data.get("balance", {}).get("value", 0) if isinstance(balance_data.get("balance"), dict) else 0
+                    tzs_balance = (
+                        balance_data.get("balance", {}).get("value", 0)
+                        if isinstance(balance_data.get("balance"), dict)
+                        else 0
+                    )
                 return Response(
                     {
                         "success": True,
@@ -4468,7 +4476,9 @@ def portal_clickpesa_balance(request):
                     {
                         "success": False,
                         "gateway": "snippe",
-                        "message": result.get("message", "Failed to get Snippe balance"),
+                        "message": result.get(
+                            "message", "Failed to get Snippe balance"
+                        ),
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
@@ -4500,7 +4510,11 @@ def portal_clickpesa_balance(request):
     except Exception as e:
         logger.error(f"Error getting {preferred_gateway} balance: {e}")
         return Response(
-            {"success": False, "gateway": preferred_gateway, "message": f"Error: {str(e)}"},
+            {
+                "success": False,
+                "gateway": preferred_gateway,
+                "message": f"Error: {str(e)}",
+            },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
