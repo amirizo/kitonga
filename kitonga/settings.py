@@ -606,6 +606,20 @@ CRONJOBS = [
         "billing.tasks.cleanup_inactive_devices",
         ">> /var/log/kitonga_cron.log 2>&1",
     ),
+    # PPP: Disconnect expired PPPoE customers every 5 minutes
+    # Disables secret on MikroTik, kicks active session, sets status to 'expired'
+    (
+        "*/5 * * * *",
+        "billing.tasks.disconnect_expired_ppp_customers",
+        ">> /var/log/kitonga_cron.log 2>&1",
+    ),
+    # PPP: Send expiry warning SMS every hour
+    # Warns PPP customers 24h and 3h before their subscription expires
+    (
+        "0 * * * *",
+        "billing.tasks.send_ppp_expiry_notifications",
+        ">> /var/log/kitonga_cron.log 2>&1",
+    ),
 ]
 
 # For development/testing, you can also manually run:

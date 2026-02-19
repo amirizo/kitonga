@@ -17,6 +17,7 @@ from .models import (
     Router,
     Location,
     PPPProfile,
+    PPPPlan,
     PPPCustomer,
 )
 from .utils import normalize_phone_number, validate_tanzania_phone_number
@@ -1306,6 +1307,101 @@ class PPPProfileCreateSerializer(serializers.Serializer):
     )
 
 
+# ---- PPP PLANS ----
+
+
+class PPPPlanSerializer(serializers.ModelSerializer):
+    """Serializer for PPP Plan (read)"""
+
+    profile_name = serializers.CharField(source="profile.name", read_only=True)
+    profile_rate_limit = serializers.CharField(
+        source="profile.rate_limit", read_only=True
+    )
+    router_name = serializers.CharField(source="profile.router.name", read_only=True)
+    effective_price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+    speed_display = serializers.CharField(read_only=True)
+    data_display = serializers.CharField(read_only=True)
+    customer_count = serializers.IntegerField(read_only=True)
+    price_per_day = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+
+    class Meta:
+        model = PPPPlan
+        fields = [
+            "id",
+            "profile",
+            "profile_name",
+            "profile_rate_limit",
+            "router_name",
+            "name",
+            "description",
+            "price",
+            "currency",
+            "billing_cycle",
+            "billing_days",
+            "data_limit_gb",
+            "download_speed",
+            "upload_speed",
+            "speed_display",
+            "data_display",
+            "features",
+            "display_order",
+            "is_popular",
+            "is_active",
+            "promo_price",
+            "promo_label",
+            "effective_price",
+            "price_per_day",
+            "customer_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class PPPPlanCreateSerializer(serializers.Serializer):
+    """Serializer for creating / updating a PPP Plan"""
+
+    profile_id = serializers.IntegerField(
+        help_text="ID of the PPPProfile (speed tier) this plan uses"
+    )
+    name = serializers.CharField(max_length=150)
+    description = serializers.CharField(required=False, default="")
+    price = serializers.DecimalField(max_digits=12, decimal_places=2)
+    currency = serializers.CharField(max_length=3, required=False, default="TZS")
+    billing_cycle = serializers.ChoiceField(
+        choices=[
+            "daily",
+            "weekly",
+            "monthly",
+            "quarterly",
+            "biannual",
+            "annual",
+            "custom",
+        ],
+        default="monthly",
+    )
+    billing_days = serializers.IntegerField(required=False, default=30)
+    data_limit_gb = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, allow_null=True
+    )
+    download_speed = serializers.CharField(max_length=20, required=False, default="")
+    upload_speed = serializers.CharField(max_length=20, required=False, default="")
+    features = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
+    display_order = serializers.IntegerField(required=False, default=0)
+    is_popular = serializers.BooleanField(required=False, default=False)
+    is_active = serializers.BooleanField(required=False, default=True)
+    promo_price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True
+    )
+    promo_label = serializers.CharField(max_length=50, required=False, default="")
+
+
 class PPPCustomerSerializer(serializers.ModelSerializer):
     """Serializer for PPP Customer (read)"""
 
@@ -1314,6 +1410,10 @@ class PPPCustomerSerializer(serializers.ModelSerializer):
         source="profile.rate_limit", read_only=True
     )
     router_name = serializers.CharField(source="router.name", read_only=True)
+    plan_name = serializers.CharField(source="plan.name", read_only=True, default=None)
+    plan_billing_cycle = serializers.CharField(
+        source="plan.billing_cycle", read_only=True, default=None
+    )
     effective_price = serializers.DecimalField(
         max_digits=12, decimal_places=2, read_only=True
     )
@@ -1328,6 +1428,9 @@ class PPPCustomerSerializer(serializers.ModelSerializer):
             "profile",
             "profile_name",
             "profile_rate_limit",
+            "plan",
+            "plan_name",
+            "plan_billing_cycle",
             "username",
             "service",
             "full_name",
@@ -1367,6 +1470,11 @@ class PPPCustomerCreateSerializer(serializers.Serializer):
 
     router_id = serializers.IntegerField()
     profile_id = serializers.IntegerField()
+    plan_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text="PPP Plan ID (optional). If set, billing_type and price are derived from the plan.",
+    )
     username = serializers.CharField(max_length=100)
     password = serializers.CharField(max_length=255)
     service = serializers.CharField(max_length=50, required=False, default="")

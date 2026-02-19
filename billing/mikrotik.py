@@ -108,7 +108,7 @@ def get_mikrotik_api(retries: int = 3, timeout: int = 10):
     raise last_error or Exception("Failed to connect to MikroTik router")
 
 
-def get_tenant_mikrotik_api(router, retries: int = 3, timeout: int = 10):
+def get_tenant_mikrotik_api(router, retries: int = 1, timeout: int = 3):
     """
     Return an authenticated RouterOS API connection for a specific tenant's router.
 
@@ -3194,7 +3194,9 @@ def sync_ppp_profile_to_router(profile) -> dict:
                 resource.set(id=mk_id, **params)
                 profile.mikrotik_id = mk_id
                 profile.synced_to_router = True
-                profile.save(update_fields=["mikrotik_id", "synced_to_router", "updated_at"])
+                profile.save(
+                    update_fields=["mikrotik_id", "synced_to_router", "updated_at"]
+                )
                 result["success"] = True
                 result["mikrotik_id"] = mk_id
                 result["message"] = f"PPP profile '{profile.name}' updated on router"
@@ -3209,7 +3211,9 @@ def sync_ppp_profile_to_router(profile) -> dict:
                 mk_id = created[0].get(".id") or created[0].get("id") or ""
             profile.mikrotik_id = mk_id
             profile.synced_to_router = True
-            profile.save(update_fields=["mikrotik_id", "synced_to_router", "updated_at"])
+            profile.save(
+                update_fields=["mikrotik_id", "synced_to_router", "updated_at"]
+            )
             result["success"] = True
             result["mikrotik_id"] = mk_id
             result["message"] = f"PPP profile '{profile.name}' created on router"
@@ -3341,10 +3345,14 @@ def sync_ppp_secret_to_router(customer) -> dict:
                 resource.set(id=mk_id, **params)
                 customer.mikrotik_id = mk_id
                 customer.synced_to_router = True
-                customer.save(update_fields=["mikrotik_id", "synced_to_router", "updated_at"])
+                customer.save(
+                    update_fields=["mikrotik_id", "synced_to_router", "updated_at"]
+                )
                 result["success"] = True
                 result["mikrotik_id"] = mk_id
-                result["message"] = f"PPP secret '{customer.username}' updated on router"
+                result["message"] = (
+                    f"PPP secret '{customer.username}' updated on router"
+                )
                 logger.info(f"Updated PPP secret {customer.username} on {router.name}")
         else:
             resource.add(**params)
@@ -3354,7 +3362,9 @@ def sync_ppp_secret_to_router(customer) -> dict:
                 mk_id = created[0].get(".id") or created[0].get("id") or ""
             customer.mikrotik_id = mk_id
             customer.synced_to_router = True
-            customer.save(update_fields=["mikrotik_id", "synced_to_router", "updated_at"])
+            customer.save(
+                update_fields=["mikrotik_id", "synced_to_router", "updated_at"]
+            )
             result["success"] = True
             result["mikrotik_id"] = mk_id
             result["message"] = f"PPP secret '{customer.username}' created on router"
@@ -3396,7 +3406,9 @@ def remove_ppp_secret_from_router(customer) -> dict:
             mk_id = existing[0].get(".id") or existing[0].get("id")
             if mk_id:
                 resource.remove(id=mk_id)
-                logger.info(f"Removed PPP secret {customer.username} from {router.name}")
+                logger.info(
+                    f"Removed PPP secret {customer.username} from {router.name}"
+                )
 
         customer.synced_to_router = False
         customer.mikrotik_id = ""
@@ -3405,7 +3417,9 @@ def remove_ppp_secret_from_router(customer) -> dict:
         result["message"] = f"PPP secret '{customer.username}' removed from router"
 
     except Exception as e:
-        logger.error(f"remove_ppp_secret_from_router failed for {customer.username}: {e}")
+        logger.error(
+            f"remove_ppp_secret_from_router failed for {customer.username}: {e}"
+        )
         result["errors"].append(str(e))
         result["message"] = f"Remove failed: {e}"
     finally:
@@ -3447,7 +3461,9 @@ def suspend_ppp_customer_on_router(customer) -> dict:
                 if mk_id:
                     secrets_res.set(id=mk_id, disabled="yes")
                     result["secret_disabled"] = True
-                    logger.info(f"Disabled PPP secret {customer.username} on {router.name}")
+                    logger.info(
+                        f"Disabled PPP secret {customer.username} on {router.name}"
+                    )
         except Exception as e:
             result["errors"].append(f"disable_secret: {e}")
             logger.error(f"Failed to disable PPP secret {customer.username}: {e}")
@@ -3461,7 +3477,9 @@ def suspend_ppp_customer_on_router(customer) -> dict:
                 if session_id:
                     active_res.remove(id=session_id)
                     result["session_kicked"] = True
-                    logger.info(f"Kicked PPP session for {customer.username} on {router.name}")
+                    logger.info(
+                        f"Kicked PPP session for {customer.username} on {router.name}"
+                    )
         except Exception as e:
             result["errors"].append(f"kick_session: {e}")
             logger.warning(f"Failed to kick PPP session for {customer.username}: {e}")
@@ -3470,7 +3488,9 @@ def suspend_ppp_customer_on_router(customer) -> dict:
 
     except Exception as e:
         result["errors"].append(str(e))
-        logger.error(f"suspend_ppp_customer_on_router failed for {customer.username}: {e}")
+        logger.error(
+            f"suspend_ppp_customer_on_router failed for {customer.username}: {e}"
+        )
     finally:
         safe_close(api)
 
@@ -3503,8 +3523,12 @@ def activate_ppp_customer_on_router(customer) -> dict:
             if mk_id:
                 secrets_res.set(id=mk_id, disabled="no")
                 result["success"] = True
-                result["message"] = f"PPP secret '{customer.username}' re-enabled on router"
-                logger.info(f"Re-enabled PPP secret {customer.username} on {router.name}")
+                result["message"] = (
+                    f"PPP secret '{customer.username}' re-enabled on router"
+                )
+                logger.info(
+                    f"Re-enabled PPP secret {customer.username} on {router.name}"
+                )
         else:
             # Secret doesn't exist on router, create it
             sync_result = sync_ppp_secret_to_router(customer)
@@ -3515,7 +3539,9 @@ def activate_ppp_customer_on_router(customer) -> dict:
     except Exception as e:
         result["errors"].append(str(e))
         result["message"] = f"Activate failed: {e}"
-        logger.error(f"activate_ppp_customer_on_router failed for {customer.username}: {e}")
+        logger.error(
+            f"activate_ppp_customer_on_router failed for {customer.username}: {e}"
+        )
     finally:
         safe_close(api)
 
@@ -3544,17 +3570,19 @@ def get_ppp_active_sessions(router) -> dict:
         sessions = active_res.get()
 
         for s in sessions:
-            result["sessions"].append({
-                "id": s.get(".id") or s.get("id"),
-                "name": s.get("name", ""),
-                "service": s.get("service", ""),
-                "caller_id": s.get("caller-id", ""),
-                "address": s.get("address", ""),
-                "uptime": s.get("uptime", ""),
-                "encoding": s.get("encoding", ""),
-                "session_id": s.get("session-id", ""),
-                "radius": s.get("radius", "false"),
-            })
+            result["sessions"].append(
+                {
+                    "id": s.get(".id") or s.get("id"),
+                    "name": s.get("name", ""),
+                    "service": s.get("service", ""),
+                    "caller_id": s.get("caller-id", ""),
+                    "address": s.get("address", ""),
+                    "uptime": s.get("uptime", ""),
+                    "encoding": s.get("encoding", ""),
+                    "session_id": s.get("session-id", ""),
+                    "radius": s.get("radius", "false"),
+                }
+            )
 
         result["success"] = True
 

@@ -5433,6 +5433,82 @@ def snippe_webhook(request):
             webhook_log.mark_ignored("Routed to subscription handler")
             return subscription_payment_webhook(request)
 
+        # PPP (PPPoE) payment routing
+        if order_reference.startswith("PPP"):
+            try:
+                from .models import PPPPayment
+
+                ppp_payment = PPPPayment.objects.get(
+                    order_reference=order_reference
+                )
+
+                if event_type == "payment.completed":
+                    ppp_payment.mark_completed(
+                        payment_reference=external_reference or reference,
+                        channel=f"snippe:{channel}",
+                    )
+                    logger.info(
+                        f"PPP payment completed: {order_reference} "
+                        f"customer={ppp_payment.customer.username}"
+                    )
+
+                    # Send payment confirmation + activation SMS
+                    try:
+                        from .portal_views import (
+                            _send_ppp_payment_confirmation_sms,
+                        )
+
+                        _send_ppp_payment_confirmation_sms(
+                            ppp_payment.customer, ppp_payment
+                        )
+                    except Exception as sms_err:
+                        logger.error(
+                            f"PPP payment confirmation SMS error: {sms_err}"
+                        )
+
+                elif event_type == "payment.failed":
+                    ppp_payment.mark_failed()
+                    logger.warning(
+                        f"PPP payment failed: {order_reference} "
+                        f"customer={ppp_payment.customer.username}"
+                    )
+
+                    # Notify customer of failed payment
+                    try:
+                        from .nextsms import TenantNextSMSAPI
+
+                        tenant = ppp_payment.tenant
+                        sms_api = TenantNextSMSAPI(tenant)
+                        if sms_api.is_configured():
+                            business = tenant.business_name or "WiFi"
+                            sms_api.send_sms(
+                                ppp_payment.phone_number,
+                                f"{business}: Payment of TSh {ppp_payment.amount:,.0f} "
+                                f"failed. Please try again. "
+                                f"Payment code: PPP-{ppp_payment.customer.id}",
+                                reference=f"PPP-FAIL-{ppp_payment.id}",
+                            )
+                    except Exception as sms_err:
+                        logger.error(
+                            f"PPP payment failed SMS error: {sms_err}"
+                        )
+
+                webhook_log.mark_processed()
+                return Response(
+                    {"success": True, "message": "PPP payment webhook processed"}
+                )
+
+            except PPPPayment.DoesNotExist:
+                error_msg = (
+                    f"PPPPayment not found for ref: {order_reference}"
+                )
+                logger.error(error_msg)
+                webhook_log.mark_failed(error_msg)
+                return Response(
+                    {"success": False, "error": "PPP Payment not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
         try:
             payment = Payment.objects.get(order_reference=order_reference)
 

@@ -42,7 +42,9 @@ from .models import (
     ContactSubmission,
     # PPP Models
     PPPProfile,
+    PPPPlan,
     PPPCustomer,
+    PPPPayment,
 )
 
 
@@ -1690,6 +1692,102 @@ class PPPProfileAdmin(admin.ModelAdmin):
     synced_badge.short_description = "Router Sync"
 
 
+@admin.register(PPPPlan)
+class PPPPlanAdmin(admin.ModelAdmin):
+    """Manage PPPoE billing plans"""
+
+    list_display = [
+        "name",
+        "tenant",
+        "profile_name",
+        "price_display",
+        "billing_cycle",
+        "billing_days",
+        "data_display",
+        "speed_display",
+        "customer_count_display",
+        "popular_badge",
+        "is_active",
+    ]
+    list_filter = ["tenant", "billing_cycle", "is_active", "is_popular"]
+    search_fields = ["name", "description", "tenant__business_name", "profile__name"]
+    readonly_fields = ["created_at", "updated_at"]
+    raw_id_fields = ["tenant", "profile"]
+
+    fieldsets = (
+        (None, {"fields": ("tenant", "profile", "name", "description", "is_active")}),
+        (
+            "Pricing",
+            {"fields": ("price", "currency", "promo_price", "promo_label")},
+        ),
+        (
+            "Billing Cycle",
+            {"fields": ("billing_cycle", "billing_days")},
+        ),
+        (
+            "Speed & Data",
+            {"fields": ("download_speed", "upload_speed", "data_limit_gb")},
+        ),
+        (
+            "Display",
+            {"fields": ("features", "display_order", "is_popular")},
+        ),
+        (
+            "Timestamps",
+            {
+                "classes": ("collapse",),
+                "fields": ("created_at", "updated_at"),
+            },
+        ),
+    )
+
+    def profile_name(self, obj):
+        return f"{obj.profile.name} ({obj.profile.rate_limit or 'unlimited'})"
+
+    profile_name.short_description = "Profile"
+
+    def price_display(self, obj):
+        if obj.promo_price is not None:
+            return format_html(
+                '<span style="text-decoration: line-through; color: #999;">TZS {}</span> '
+                '<span style="color: #10b981; font-weight: bold;">TZS {}</span>',
+                f"{obj.price:,.0f}",
+                f"{obj.promo_price:,.0f}",
+            )
+        return f"TZS {obj.price:,.0f}"
+
+    price_display.short_description = "Price"
+
+    def data_display(self, obj):
+        return obj.data_display
+
+    data_display.short_description = "Data"
+
+    def speed_display(self, obj):
+        return obj.speed_display
+
+    speed_display.short_description = "Speed"
+
+    def customer_count_display(self, obj):
+        count = obj.customer_count
+        if count > 0:
+            return format_html(
+                '<span style="font-weight: bold;">{}</span>', count
+            )
+        return "0"
+
+    customer_count_display.short_description = "Customers"
+
+    def popular_badge(self, obj):
+        if obj.is_popular:
+            return format_html(
+                '<span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px;">⭐ POPULAR</span>'
+            )
+        return "—"
+
+    popular_badge.short_description = "Popular"
+
+
 @admin.register(PPPCustomer)
 class PPPCustomerAdmin(admin.ModelAdmin):
     """Manage PPPoE customer accounts"""
@@ -1807,6 +1905,59 @@ class PPPCustomerAdmin(admin.ModelAdmin):
         )
 
     synced_badge.short_description = "Router Sync"
+
+
+@admin.register(PPPPayment)
+class PPPPaymentAdmin(admin.ModelAdmin):
+    """Manage PPPoE customer payments"""
+
+    list_display = [
+        "order_reference",
+        "customer",
+        "tenant",
+        "amount_display",
+        "billing_days",
+        "status_badge",
+        "payment_channel",
+        "created_at",
+        "completed_at",
+    ]
+    list_filter = ["status", "payment_channel", "tenant", "billing_days"]
+    search_fields = [
+        "order_reference",
+        "payment_reference",
+        "phone_number",
+        "customer__username",
+        "customer__full_name",
+    ]
+    readonly_fields = [
+        "order_reference",
+        "payment_reference",
+        "created_at",
+        "completed_at",
+    ]
+    raw_id_fields = ["customer", "tenant"]
+
+    def amount_display(self, obj):
+        return f"TZS {obj.amount:,.0f}"
+
+    amount_display.short_description = "Amount"
+
+    def status_badge(self, obj):
+        colors = {
+            "pending": "#f59e0b",
+            "completed": "#10b981",
+            "failed": "#ef4444",
+            "expired": "#6b7280",
+        }
+        color = colors.get(obj.status, "#6b7280")
+        return format_html(
+            '<span style="background: {}; color: white; padding: 2px 8px; border-radius: 4px;">{}</span>',
+            color,
+            obj.status.upper(),
+        )
+
+    status_badge.short_description = "Status"
 
 
 # Set admin site properties

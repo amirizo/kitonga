@@ -719,6 +719,17 @@ urlpatterns = [
         portal_views.portal_ppp_profile_sync,
         name="portal_ppp_profile_sync",
     ),
+    # PPP Plans
+    path(
+        "portal/ppp/plans/",
+        portal_views.portal_ppp_plans,
+        name="portal_ppp_plans",
+    ),
+    path(
+        "portal/ppp/plans/<int:plan_id>/",
+        portal_views.portal_ppp_plan_detail,
+        name="portal_ppp_plan_detail",
+    ),
     # PPP Customers
     path(
         "portal/ppp/customers/",
@@ -760,5 +771,16 @@ urlpatterns = [
         "portal/ppp/bulk-sync/",
         portal_views.portal_ppp_bulk_sync,
         name="portal_ppp_bulk_sync",
+    ),
+    # PPP Payment endpoints
+    path(
+        "portal/ppp/customers/<int:customer_id>/pay/",
+        portal_views.portal_ppp_initiate_payment,
+        name="portal_ppp_initiate_payment",
+    ),
+    path(
+        "portal/ppp/customers/<int:customer_id>/payments/",
+        portal_views.portal_ppp_payment_history,
+        name="portal_ppp_payment_history",
     ),
 ]

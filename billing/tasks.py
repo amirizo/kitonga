@@ -400,3 +400,214 @@ def send_expiry_notifications():
     except Exception as e:
         logger.error(f"Error in send_expiry_notifications task: {str(e)}")
         return {"success": False, "error": str(e)}
+
+
+# ==================== PPP (PPPoE) TASKS ====================
+
+
+def disconnect_expired_ppp_customers():
+    """
+    Disconnect PPPoE customers whose paid_until has passed.
+    Runs every 5 minutes via cron.
+
+    1. Find PPP customers whose status='active' and paid_until has passed
+    2. Suspend/disable them on MikroTik router (disable secret + kick active session)
+    3. Update status to 'expired' in database
+    4. Send SMS notification that their internet has been disabled
+    """
+    try:
+        from .models import PPPCustomer
+        from .mikrotik import suspend_ppp_customer_on_router, kick_ppp_session
+
+        now = timezone.now()
+
+        # Find active PPP customers whose subscription has expired
+        expired_customers = PPPCustomer.objects.filter(
+            status="active",
+            paid_until__lte=now,
+        ).exclude(billing_type="unlimited")
+
+        disconnected_count = 0
+        failed_count = 0
+        sms_sent = 0
+
+        logger.info(
+            f"🔍 PPP: Found {expired_customers.count()} expired PPP customers to disconnect"
+        )
+
+        for customer in expired_customers:
+            try:
+                time_expired = now - customer.paid_until if customer.paid_until else None
+                expired_hours = (
+                    int(time_expired.total_seconds() / 3600)
+                    if time_expired
+                    else 0
+                )
+
+                logger.info(
+                    f"⏰ PPP: Processing expired customer: {customer.username} "
+                    f"(tenant: {customer.tenant.slug}, "
+                    f"paid_until: {customer.paid_until}, expired {expired_hours}h ago)"
+                )
+
+                # 1) Suspend on MikroTik (disables the PPP secret)
+                suspend_result = suspend_ppp_customer_on_router(customer)
+                if suspend_result.get("success"):
+                    logger.info(
+                        f"  ✅ PPP secret disabled on router for {customer.username}"
+                    )
+                else:
+                    logger.warning(
+                        f"  ⚠️  Router suspend failed for {customer.username}: "
+                        f"{suspend_result.get('message')}"
+                    )
+
+                # 2) Kick active PPP session (force disconnect immediately)
+                try:
+                    kick_result = kick_ppp_session(customer.router, customer.username)
+                    if kick_result.get("success"):
+                        logger.info(
+                            f"  ✅ PPP session kicked for {customer.username}"
+                        )
+                    else:
+                        logger.info(
+                            f"  ℹ️  No active PPP session to kick for {customer.username}"
+                        )
+                except Exception as kick_err:
+                    logger.warning(
+                        f"  ⚠️  Error kicking PPP session for {customer.username}: {kick_err}"
+                    )
+
+                # 3) Update database status to expired
+                customer.status = "expired"
+                customer.save(update_fields=["status", "updated_at"])
+                disconnected_count += 1
+
+                # 4) Send SMS notification
+                try:
+                    from .portal_views import _send_ppp_disabled_sms
+
+                    result = _send_ppp_disabled_sms(customer)
+                    if result.get("success"):
+                        sms_sent += 1
+                except Exception as sms_err:
+                    logger.error(
+                        f"  ❌ Failed to send PPP disabled SMS to {customer.phone_number}: {sms_err}"
+                    )
+
+                logger.info(
+                    f"✅ PPP customer {customer.username} disabled after expiry"
+                )
+
+            except Exception as cust_error:
+                logger.error(
+                    f"❌ Error processing expired PPP customer {customer.username}: {cust_error}"
+                )
+                failed_count += 1
+
+        logger.info(
+            f"🎯 PPP expired customer cleanup: {disconnected_count} disconnected, "
+            f"{sms_sent} SMS sent, {failed_count} failures"
+        )
+
+        return {
+            "success": True,
+            "disconnected": disconnected_count,
+            "sms_sent": sms_sent,
+            "failed": failed_count,
+            "total_checked": expired_customers.count(),
+        }
+
+    except Exception as e:
+        logger.error(f"Error in disconnect_expired_ppp_customers task: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def send_ppp_expiry_notifications():
+    """
+    Send SMS warnings to PPP customers whose subscription is about to expire.
+    Runs hourly via cron.
+
+    Sends notifications at:
+    - 24 hours before expiry
+    - 3 hours before expiry
+    """
+    try:
+        from datetime import timedelta
+        from .models import PPPCustomer
+
+        now = timezone.now()
+        notified_count = 0
+        failed_count = 0
+
+        # Notify customers expiring in 24 hours (±30 min window to avoid duplicates)
+        expiry_24h_start = now + timedelta(hours=23, minutes=30)
+        expiry_24h_end = now + timedelta(hours=24, minutes=30)
+
+        customers_24h = PPPCustomer.objects.filter(
+            status="active",
+            paid_until__gte=expiry_24h_start,
+            paid_until__lte=expiry_24h_end,
+        ).exclude(billing_type="unlimited")
+
+        logger.info(
+            f"📢 PPP: Found {customers_24h.count()} customers expiring in ~24h"
+        )
+
+        for customer in customers_24h:
+            try:
+                from .portal_views import _send_ppp_expiry_warning_sms
+
+                result = _send_ppp_expiry_warning_sms(customer, hours_remaining=24)
+                if result.get("success"):
+                    notified_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                failed_count += 1
+                logger.error(
+                    f"Error sending 24h PPP expiry notification to {customer.username}: {e}"
+                )
+
+        # Notify customers expiring in 3 hours (±30 min window)
+        expiry_3h_start = now + timedelta(hours=2, minutes=30)
+        expiry_3h_end = now + timedelta(hours=3, minutes=30)
+
+        customers_3h = PPPCustomer.objects.filter(
+            status="active",
+            paid_until__gte=expiry_3h_start,
+            paid_until__lte=expiry_3h_end,
+        ).exclude(billing_type="unlimited")
+
+        logger.info(
+            f"📢 PPP: Found {customers_3h.count()} customers expiring in ~3h"
+        )
+
+        for customer in customers_3h:
+            try:
+                from .portal_views import _send_ppp_expiry_warning_sms
+
+                result = _send_ppp_expiry_warning_sms(customer, hours_remaining=3)
+                if result.get("success"):
+                    notified_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                failed_count += 1
+                logger.error(
+                    f"Error sending 3h PPP expiry notification to {customer.username}: {e}"
+                )
+
+        logger.info(
+            f"📢 PPP expiry notifications: {notified_count} sent, {failed_count} failed"
+        )
+
+        return {
+            "success": True,
+            "notified": notified_count,
+            "failed": failed_count,
+        }
+
+    except Exception as e:
+        logger.error(f"Error in send_ppp_expiry_notifications task: {e}")
+        return {"success": False, "error": str(e)}

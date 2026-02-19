@@ -3,6 +3,7 @@ Tenant Portal Views for Kitonga Wi-Fi Billing System
 Phase 3: Self-service dashboard, router wizard, analytics, and white-label customization
 """
 
+import uuid
 from datetime import timedelta
 from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
@@ -6688,6 +6689,163 @@ def check_ppp_permission(tenant):
     return False, "PPP management requires Enterprise plan"
 
 
+def _send_ppp_welcome_sms(customer):
+    """
+    Send welcome SMS to a new PPP customer with their credentials
+    and payment instructions.
+    """
+    try:
+        from .nextsms import TenantNextSMSAPI
+
+        tenant = customer.tenant
+        sms_api = TenantNextSMSAPI(tenant)
+
+        if not sms_api.is_configured():
+            logger.warning(
+                f"Tenant {tenant.slug} has no SMS credentials, skipping PPP welcome SMS"
+            )
+            return {"success": False, "message": "SMS not configured for tenant"}
+
+        price = customer.effective_price
+        business_name = tenant.business_name or "WiFi"
+
+        message = (
+            f"{business_name} PPPoE Account Created!\n"
+            f"Username: {customer.username}\n"
+            f"Password: {customer.password}\n"
+            f"Plan: {customer.profile.name} ({customer.profile.rate_limit})\n"
+            f"Monthly: TSh {price:,.0f}\n"
+            f"Pay via M-Pesa/Airtel to activate your internet.\n"
+            f"Payment code: PPP-{customer.id}"
+        )
+
+        result = sms_api.send_sms(
+            customer.phone_number,
+            message,
+            reference=f"PPP-WELCOME-{customer.id}",
+        )
+
+        if result.get("success"):
+            logger.info(
+                f"PPP welcome SMS sent to {customer.phone_number} for {customer.username}"
+            )
+        else:
+            logger.warning(
+                f"Failed to send PPP welcome SMS to {customer.phone_number}: {result}"
+            )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error sending PPP welcome SMS: {e}")
+        return {"success": False, "message": str(e)}
+
+
+def _send_ppp_payment_confirmation_sms(customer, payment):
+    """Send payment confirmation + activation SMS to PPP customer."""
+    try:
+        from .nextsms import TenantNextSMSAPI
+
+        tenant = customer.tenant
+        sms_api = TenantNextSMSAPI(tenant)
+
+        if not sms_api.is_configured():
+            return {"success": False, "message": "SMS not configured"}
+
+        business_name = tenant.business_name or "WiFi"
+        paid_until_str = (
+            customer.paid_until.strftime("%d %b %Y %H:%M")
+            if customer.paid_until
+            else "N/A"
+        )
+
+        message = (
+            f"{business_name}: Payment of TSh {payment.amount:,.0f} received!\n"
+            f"Your PPPoE internet is now ACTIVE.\n"
+            f"Username: {customer.username}\n"
+            f"Valid until: {paid_until_str}\n"
+            f"Thank you!"
+        )
+
+        return sms_api.send_sms(
+            customer.phone_number,
+            message,
+            reference=f"PPP-PAID-{payment.id}",
+        )
+
+    except Exception as e:
+        logger.error(f"Error sending PPP payment confirmation SMS: {e}")
+        return {"success": False, "message": str(e)}
+
+
+def _send_ppp_expiry_warning_sms(customer, hours_remaining):
+    """Send expiry warning SMS to PPP customer."""
+    try:
+        from .nextsms import TenantNextSMSAPI
+
+        tenant = customer.tenant
+        sms_api = TenantNextSMSAPI(tenant)
+
+        if not sms_api.is_configured():
+            return {"success": False, "message": "SMS not configured"}
+
+        business_name = tenant.business_name or "WiFi"
+        price = customer.effective_price
+
+        if hours_remaining > 24:
+            time_str = f"{hours_remaining // 24} day(s)"
+        else:
+            time_str = f"{hours_remaining} hour(s)"
+
+        message = (
+            f"{business_name}: Your PPPoE internet expires in {time_str}.\n"
+            f"Pay TSh {price:,.0f} to continue.\n"
+            f"Payment code: PPP-{customer.id}\n"
+            f"Username: {customer.username}"
+        )
+
+        return sms_api.send_sms(
+            customer.phone_number,
+            message,
+            reference=f"PPP-EXPIRY-{customer.id}",
+        )
+
+    except Exception as e:
+        logger.error(f"Error sending PPP expiry warning SMS: {e}")
+        return {"success": False, "message": str(e)}
+
+
+def _send_ppp_disabled_sms(customer):
+    """Send SMS notifying customer their internet has been disabled."""
+    try:
+        from .nextsms import TenantNextSMSAPI
+
+        tenant = customer.tenant
+        sms_api = TenantNextSMSAPI(tenant)
+
+        if not sms_api.is_configured():
+            return {"success": False, "message": "SMS not configured"}
+
+        business_name = tenant.business_name or "WiFi"
+        price = customer.effective_price
+
+        message = (
+            f"{business_name}: Your PPPoE internet has expired and been disconnected.\n"
+            f"Pay TSh {price:,.0f} to reconnect.\n"
+            f"Payment code: PPP-{customer.id}"
+        )
+
+        return sms_api.send_sms(
+            customer.phone_number,
+            message,
+            reference=f"PPP-DISABLED-{customer.id}",
+        )
+
+    except Exception as e:
+        logger.error(f"Error sending PPP disabled SMS: {e}")
+        return {"success": False, "message": str(e)}
+
+
 @api_view(["GET", "POST"])
 @permission_classes([TenantAPIKeyPermission])
 def portal_ppp_profiles(request):
@@ -6743,14 +6901,22 @@ def portal_ppp_profiles(request):
             router = Router.objects.get(id=data["router_id"], tenant=tenant)
         except Router.DoesNotExist:
             return Response(
-                {"success": False, "error": "Router not found or does not belong to your tenant"},
+                {
+                    "success": False,
+                    "error": "Router not found or does not belong to your tenant",
+                },
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         # Check uniqueness
-        if PPPProfile.objects.filter(tenant=tenant, router=router, name=data["name"]).exists():
+        if PPPProfile.objects.filter(
+            tenant=tenant, router=router, name=data["name"]
+        ).exists():
             return Response(
-                {"success": False, "error": f"Profile '{data['name']}' already exists on this router"},
+                {
+                    "success": False,
+                    "error": f"Profile '{data['name']}' already exists on this router",
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -6889,7 +7055,9 @@ def portal_ppp_profile_detail(request, profile_id):
 
         profile.delete()
         logger.info(f"Tenant {tenant.slug} deleted PPP profile: {profile_name}")
-        return Response({"success": True, "message": f"PPP profile '{profile_name}' deleted"})
+        return Response(
+            {"success": True, "message": f"PPP profile '{profile_name}' deleted"}
+        )
 
 
 @api_view(["POST"])
@@ -6925,7 +7093,199 @@ def portal_ppp_profile_sync(request, profile_id):
             "mikrotik_id": sync_result.get("mikrotik_id", ""),
             "errors": sync_result.get("errors", []),
         },
-        status=status.HTTP_200_OK if sync_result["success"] else status.HTTP_502_BAD_GATEWAY,
+        status=(
+            status.HTTP_200_OK
+            if sync_result["success"]
+            else status.HTTP_502_BAD_GATEWAY
+        ),
+    )
+
+
+# ----- PPP Plans -----
+
+
+@api_view(["GET", "POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_plans(request):
+    """
+    GET: List PPP plans for tenant (optionally filter by profile_id, is_active)
+    POST: Create a new PPP plan
+    """
+    from .models import PPPPlan, PPPProfile
+    from .serializers import PPPPlanSerializer, PPPPlanCreateSerializer
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if request.method == "GET":
+        plans = PPPPlan.objects.filter(tenant=tenant).select_related(
+            "profile", "profile__router"
+        )
+
+        # Filters
+        profile_id = request.GET.get("profile_id")
+        if profile_id:
+            plans = plans.filter(profile_id=profile_id)
+
+        is_active = request.GET.get("is_active")
+        if is_active is not None:
+            plans = plans.filter(is_active=is_active.lower() in ("true", "1"))
+
+        billing_cycle = request.GET.get("billing_cycle")
+        if billing_cycle:
+            plans = plans.filter(billing_cycle=billing_cycle)
+
+        serializer = PPPPlanSerializer(plans, many=True)
+        return Response({"success": True, "plans": serializer.data})
+
+    # POST — Create
+    serializer = PPPPlanCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    data = serializer.validated_data
+
+    # Validate profile belongs to tenant
+    try:
+        profile = PPPProfile.objects.get(
+            id=data["profile_id"], tenant=tenant, is_active=True
+        )
+    except PPPProfile.DoesNotExist:
+        return Response(
+            {"success": False, "error": "PPP Profile not found or inactive"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    plan = PPPPlan.objects.create(
+        tenant=tenant,
+        profile=profile,
+        name=data["name"],
+        description=data.get("description", ""),
+        price=data["price"],
+        currency=data.get("currency", "TZS"),
+        billing_cycle=data.get("billing_cycle", "monthly"),
+        billing_days=data.get("billing_days", 30),
+        data_limit_gb=data.get("data_limit_gb"),
+        download_speed=data.get("download_speed", ""),
+        upload_speed=data.get("upload_speed", ""),
+        features=data.get("features", []),
+        display_order=data.get("display_order", 0),
+        is_popular=data.get("is_popular", False),
+        is_active=data.get("is_active", True),
+        promo_price=data.get("promo_price"),
+        promo_label=data.get("promo_label", ""),
+    )
+
+    return Response(
+        {
+            "success": True,
+            "message": f"PPP Plan '{plan.name}' created",
+            "plan": PPPPlanSerializer(plan).data,
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["GET", "PUT", "DELETE"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_plan_detail(request, plan_id):
+    """
+    GET: Retrieve single PPP plan
+    PUT: Update PPP plan
+    DELETE: Soft-delete (deactivate) PPP plan
+    """
+    from .models import PPPPlan, PPPProfile
+    from .serializers import PPPPlanSerializer, PPPPlanCreateSerializer
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        plan = PPPPlan.objects.select_related("profile", "profile__router").get(
+            id=plan_id, tenant=tenant
+        )
+    except PPPPlan.DoesNotExist:
+        return Response(
+            {"success": False, "error": "PPP Plan not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if request.method == "GET":
+        serializer = PPPPlanSerializer(plan)
+        return Response({"success": True, "plan": serializer.data})
+
+    if request.method == "DELETE":
+        if plan.customers.exists():
+            # Don't hard-delete — deactivate
+            plan.is_active = False
+            plan.save(update_fields=["is_active", "updated_at"])
+            return Response(
+                {
+                    "success": True,
+                    "message": f"Plan '{plan.name}' deactivated (has {plan.customer_count} customers)",
+                }
+            )
+        plan.delete()
+        return Response(
+            {"success": True, "message": f"Plan '{plan.name}' deleted"}
+        )
+
+    # PUT — Update
+    serializer = PPPPlanCreateSerializer(data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    data = serializer.validated_data
+
+    if "profile_id" in data:
+        try:
+            profile = PPPProfile.objects.get(
+                id=data["profile_id"], tenant=tenant, is_active=True
+            )
+            plan.profile = profile
+        except PPPProfile.DoesNotExist:
+            return Response(
+                {"success": False, "error": "PPP Profile not found or inactive"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+    # Update fields
+    updatable = [
+        "name", "description", "price", "currency", "billing_cycle",
+        "billing_days", "data_limit_gb", "download_speed", "upload_speed",
+        "features", "display_order", "is_popular", "is_active",
+        "promo_price", "promo_label",
+    ]
+    for field in updatable:
+        if field in data:
+            setattr(plan, field, data[field])
+
+    plan.save()
+
+    return Response(
+        {
+            "success": True,
+            "message": f"Plan '{plan.name}' updated",
+            "plan": PPPPlanSerializer(plan).data,
+        }
     )
 
 
@@ -6995,9 +7355,15 @@ def portal_ppp_customers(request):
                 },
                 "summary": {
                     "total": total_count,
-                    "active": PPPCustomer.objects.filter(tenant=tenant, status="active").count(),
-                    "suspended": PPPCustomer.objects.filter(tenant=tenant, status="suspended").count(),
-                    "expired": PPPCustomer.objects.filter(tenant=tenant, status="expired").count(),
+                    "active": PPPCustomer.objects.filter(
+                        tenant=tenant, status="active"
+                    ).count(),
+                    "suspended": PPPCustomer.objects.filter(
+                        tenant=tenant, status="suspended"
+                    ).count(),
+                    "expired": PPPCustomer.objects.filter(
+                        tenant=tenant, status="expired"
+                    ).count(),
                 },
             }
         )
@@ -7017,7 +7383,10 @@ def portal_ppp_customers(request):
             router = Router.objects.get(id=data["router_id"], tenant=tenant)
         except Router.DoesNotExist:
             return Response(
-                {"success": False, "error": "Router not found or does not belong to your tenant"},
+                {
+                    "success": False,
+                    "error": "Router not found or does not belong to your tenant",
+                },
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -7037,14 +7406,42 @@ def portal_ppp_customers(request):
             tenant=tenant, router=router, username=data["username"]
         ).exists():
             return Response(
-                {"success": False, "error": f"Username '{data['username']}' already exists on this router"},
+                {
+                    "success": False,
+                    "error": f"Username '{data['username']}' already exists on this router",
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # Validate plan if provided
+        plan = None
+        if data.get("plan_id"):
+            from .models import PPPPlan
+
+            try:
+                plan = PPPPlan.objects.get(
+                    id=data["plan_id"], tenant=tenant, is_active=True
+                )
+                # Ensure plan's profile matches the selected profile
+                if plan.profile_id != profile.id:
+                    return Response(
+                        {
+                            "success": False,
+                            "error": "Plan's profile does not match the selected profile",
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            except PPPPlan.DoesNotExist:
+                return Response(
+                    {"success": False, "error": "PPP Plan not found or inactive"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
 
         customer = PPPCustomer.objects.create(
             tenant=tenant,
             router=router,
             profile=profile,
+            plan=plan,
             username=data["username"],
             password=data["password"],
             service=data.get("service", ""),
@@ -7068,6 +7465,11 @@ def portal_ppp_customers(request):
 
             sync_result = sync_ppp_secret_to_router(customer)
 
+        # --- Send SMS with credentials & payment info ---
+        sms_result = None
+        if customer.phone_number:
+            sms_result = _send_ppp_welcome_sms(customer)
+
         logger.info(f"Tenant {tenant.slug} created PPP customer: {customer.username}")
 
         return Response(
@@ -7076,6 +7478,7 @@ def portal_ppp_customers(request):
                 "message": "PPP customer created",
                 "customer": PPPCustomerSerializer(customer).data,
                 "sync_result": sync_result,
+                "sms_result": sms_result,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -7129,6 +7532,23 @@ def portal_ppp_customer_detail(request, customer_id):
                     {"success": False, "error": "PPP profile not found on this router"},
                     status=status.HTTP_404_NOT_FOUND,
                 )
+
+        if "plan_id" in data:
+            if data["plan_id"] is None:
+                customer.plan = None
+            else:
+                from .models import PPPPlan
+
+                try:
+                    plan = PPPPlan.objects.get(
+                        id=data["plan_id"], tenant=tenant, is_active=True
+                    )
+                    customer.plan = plan
+                except PPPPlan.DoesNotExist:
+                    return Response(
+                        {"success": False, "error": "PPP Plan not found or inactive"},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
 
         if "password" in data:
             customer.password = data["password"]
@@ -7188,7 +7608,9 @@ def portal_ppp_customer_detail(request, customer_id):
 
         customer.delete()
         logger.info(f"Tenant {tenant.slug} deleted PPP customer: {username}")
-        return Response({"success": True, "message": f"PPP customer '{username}' deleted"})
+        return Response(
+            {"success": True, "message": f"PPP customer '{username}' deleted"}
+        )
 
 
 @api_view(["POST"])
@@ -7224,7 +7646,11 @@ def portal_ppp_customer_sync(request, customer_id):
             "mikrotik_id": sync_result.get("mikrotik_id", ""),
             "errors": sync_result.get("errors", []),
         },
-        status=status.HTTP_200_OK if sync_result["success"] else status.HTTP_502_BAD_GATEWAY,
+        status=(
+            status.HTTP_200_OK
+            if sync_result["success"]
+            else status.HTTP_502_BAD_GATEWAY
+        ),
     )
 
 
@@ -7433,7 +7859,9 @@ def portal_ppp_bulk_sync(request):
                     results["profiles_synced"] += 1
                 else:
                     results["profiles_failed"] += 1
-                    results["errors"].append(f"Profile '{profile.name}': {r['message']}")
+                    results["errors"].append(
+                        f"Profile '{profile.name}': {r['message']}"
+                    )
             except Exception as e:
                 results["profiles_failed"] += 1
                 results["errors"].append(f"Profile '{profile.name}': {e}")
@@ -7447,7 +7875,9 @@ def portal_ppp_bulk_sync(request):
                     results["customers_synced"] += 1
                 else:
                     results["customers_failed"] += 1
-                    results["errors"].append(f"Customer '{customer.username}': {r['message']}")
+                    results["errors"].append(
+                        f"Customer '{customer.username}': {r['message']}"
+                    )
             except Exception as e:
                 results["customers_failed"] += 1
                 results["errors"].append(f"Customer '{customer.username}': {e}")
@@ -7466,5 +7896,216 @@ def portal_ppp_bulk_sync(request):
                 f"Synced {results['profiles_synced']} profiles and {results['customers_synced']} customers"
             ),
             "results": results,
+        }
+    )
+
+
+# ==================== PPP PAYMENT ENDPOINTS ====================
+
+
+@api_view(["POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_initiate_payment(request, customer_id):
+    """
+    Initiate a payment for a PPPoE customer via Snippe mobile money USSD push.
+    This creates a PPPPayment record and triggers USSD on the customer's phone.
+
+    POST /api/portal/ppp/customers/<id>/pay/
+    Body: { "billing_days": 30 }  (optional, defaults to 30)
+    """
+    from .models import PPPCustomer, PPPPayment
+    from .snippe import SnippeAPI
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        customer = PPPCustomer.objects.get(id=customer_id, tenant=tenant)
+    except PPPCustomer.DoesNotExist:
+        return Response(
+            {"success": False, "error": "PPP customer not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    billing_days = int(request.data.get("billing_days", 0))
+
+    # If customer has a plan, use plan's billing cycle and price by default
+    if customer.plan and billing_days == 0:
+        billing_days = customer.plan.billing_days
+    elif billing_days == 0:
+        billing_days = 30  # Default fallback
+
+    if billing_days < 1 or billing_days > 365:
+        return Response(
+            {"success": False, "error": "billing_days must be between 1 and 365"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Calculate amount: plan price > customer override > profile default
+    import math
+
+    if customer.plan and billing_days == customer.plan.billing_days:
+        # Exact plan cycle — use plan's effective (promo) price
+        amount = int(customer.plan.effective_price)
+    else:
+        # Pro-rate from the effective monthly/cycle price
+        base_price = customer.effective_price
+        daily_rate = base_price / 30
+        amount = math.ceil(daily_rate * billing_days)
+        if billing_days == 30:
+            amount = int(base_price)
+
+    # Check for existing pending payment for this customer
+    pending = PPPPayment.objects.filter(
+        customer=customer, status="pending"
+    ).first()
+    if pending:
+        # Expire old pending payment to avoid duplicates
+        pending.status = "expired"
+        pending.save(update_fields=["status"])
+
+    # Create order reference with PPP prefix
+    order_reference = f"PPP{customer.id}{uuid.uuid4().hex[:8].upper()}"
+
+    # Create PPP payment record
+    ppp_payment = PPPPayment.objects.create(
+        tenant=tenant,
+        customer=customer,
+        amount=amount,
+        phone_number=customer.phone_number,
+        order_reference=order_reference,
+        payment_channel="snippe",
+        status="pending",
+        billing_days=billing_days,
+    )
+
+    logger.info(
+        f"PPP payment initiated: ref={order_reference} customer={customer.username} "
+        f"amount={amount} days={billing_days} tenant={tenant.slug}"
+    )
+
+    # Build webhook URL
+    from django.conf import settings as django_settings
+
+    webhook_url = getattr(django_settings, "SNIPPE_WEBHOOK_URL", "") or ""
+
+    # Initiate Snippe mobile money payment
+    snippe = SnippeAPI()
+    metadata = {
+        "order_reference": order_reference,
+        "payment_type": "ppp",
+        "customer_id": str(customer.id),
+        "tenant": tenant.slug,
+    }
+
+    name_parts = (customer.full_name or customer.username).split(" ", 1)
+    firstname = name_parts[0]
+    lastname = name_parts[1] if len(name_parts) > 1 else ""
+
+    result = snippe.create_mobile_payment(
+        phone_number=customer.phone_number,
+        amount=int(amount),
+        firstname=firstname,
+        lastname=lastname,
+        webhook_url=webhook_url,
+        metadata=metadata,
+        idempotency_key=order_reference,
+    )
+
+    if result.get("success"):
+        # Store Snippe reference
+        snippe_reference = result.get("reference", "")
+        if snippe_reference:
+            ppp_payment.payment_reference = snippe_reference
+            ppp_payment.save(update_fields=["payment_reference"])
+
+        return Response(
+            {
+                "success": True,
+                "message": f"Payment request of TSh {amount:,} sent to {customer.phone_number}",
+                "payment": {
+                    "id": ppp_payment.id,
+                    "order_reference": order_reference,
+                    "snippe_reference": snippe_reference,
+                    "amount": str(amount),
+                    "billing_days": billing_days,
+                    "status": "pending",
+                    "customer": customer.username,
+                    "phone_number": customer.phone_number,
+                },
+            },
+            status=status.HTTP_201_CREATED,
+        )
+    else:
+        ppp_payment.mark_failed()
+        error_msg = result.get("message", result.get("error", "Snippe payment failed"))
+        logger.error(f"PPP Snippe payment failed: {error_msg}")
+
+        return Response(
+            {
+                "success": False,
+                "error": f"Payment initiation failed: {error_msg}",
+                "order_reference": order_reference,
+            },
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+
+@api_view(["GET"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_payment_history(request, customer_id):
+    """
+    Get payment history for a PPPoE customer.
+    GET /api/portal/ppp/customers/<id>/payments/
+    """
+    from .models import PPPCustomer, PPPPayment
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        customer = PPPCustomer.objects.get(id=customer_id, tenant=tenant)
+    except PPPCustomer.DoesNotExist:
+        return Response(
+            {"success": False, "error": "PPP customer not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    payments = PPPPayment.objects.filter(customer=customer).order_by("-created_at")
+
+    payment_data = [
+        {
+            "id": p.id,
+            "amount": str(p.amount),
+            "billing_days": p.billing_days,
+            "order_reference": p.order_reference,
+            "payment_reference": p.payment_reference,
+            "payment_channel": p.payment_channel,
+            "status": p.status,
+            "phone_number": p.phone_number,
+            "created_at": p.created_at.isoformat(),
+            "completed_at": p.completed_at.isoformat() if p.completed_at else None,
+        }
+        for p in payments
+    ]
+
+    return Response(
+        {
+            "success": True,
+            "customer": customer.username,
+            "total_payments": len(payment_data),
+            "payments": payment_data,
         }
     )

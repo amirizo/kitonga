@@ -2549,6 +2549,180 @@ class PPPProfile(models.Model):
         return f"{self.tenant.business_name} — {self.name} ({self.rate_limit or 'unlimited'})"
 
 
+class PPPPlan(models.Model):
+    """
+    Commercial PPPoE billing plan (the package customers buy).
+    Links a PPPProfile (MikroTik speed tier) to pricing, duration, and data caps.
+    This is analogous to Bundle for hotspot, but designed for PPPoE subscribers.
+    """
+
+    BILLING_CYCLE_CHOICES = [
+        ("daily", "Daily"),
+        ("weekly", "Weekly"),
+        ("monthly", "Monthly"),
+        ("quarterly", "Quarterly (3 months)"),
+        ("biannual", "Bi-Annual (6 months)"),
+        ("annual", "Annual (12 months)"),
+        ("custom", "Custom Days"),
+    ]
+
+    # Map cycle to days for auto-calculation
+    CYCLE_DAYS_MAP = {
+        "daily": 1,
+        "weekly": 7,
+        "monthly": 30,
+        "quarterly": 90,
+        "biannual": 180,
+        "annual": 365,
+    }
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="ppp_plans"
+    )
+    profile = models.ForeignKey(
+        PPPProfile,
+        on_delete=models.CASCADE,
+        related_name="plans",
+        help_text="The MikroTik PPP profile (speed tier) this plan uses",
+    )
+
+    # Plan identification
+    name = models.CharField(
+        max_length=150,
+        help_text="Customer-facing plan name, e.g. 'Home 10Mbps Monthly'",
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="Customer-facing description of the plan",
+    )
+
+    # Pricing
+    price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        help_text="Price (TSh) per billing cycle",
+    )
+    currency = models.CharField(max_length=3, default="TZS")
+
+    # Billing cycle
+    billing_cycle = models.CharField(
+        max_length=20,
+        choices=BILLING_CYCLE_CHOICES,
+        default="monthly",
+    )
+    billing_days = models.IntegerField(
+        default=30,
+        help_text="Duration in days this plan grants. Auto-set from billing_cycle unless custom.",
+    )
+
+    # Data caps (optional)
+    data_limit_gb = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Data cap in GB per cycle. Null = unlimited.",
+    )
+
+    # Speed display (human-readable, for invoices/SMS)
+    download_speed = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Human-readable download speed e.g. '10 Mbps'",
+    )
+    upload_speed = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Human-readable upload speed e.g. '5 Mbps'",
+    )
+
+    # Plan features / selling points (JSON list)
+    features = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='List of feature strings, e.g. ["Unlimited data", "Static IP", "24/7 support"]',
+    )
+
+    # Popularity / display
+    display_order = models.IntegerField(
+        default=0,
+        help_text="Lower number = shown first",
+    )
+    is_popular = models.BooleanField(
+        default=False,
+        help_text="Mark as popular/recommended to highlight in customer portal",
+    )
+    is_active = models.BooleanField(default=True)
+
+    # Promotional pricing
+    promo_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Promotional/discounted price (TSh). Null = no promo.",
+    )
+    promo_label = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Promo badge text, e.g. 'Save 20%' or 'New Customer Offer'",
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tenant", "display_order", "price"]
+        verbose_name = "PPP Plan"
+        verbose_name_plural = "PPP Plans"
+
+    def __str__(self):
+        return f"{self.tenant.business_name} — {self.name} (TSh {self.price:,.0f}/{self.billing_cycle})"
+
+    def save(self, *args, **kwargs):
+        # Auto-set billing_days from cycle if not custom
+        if self.billing_cycle != "custom" and self.billing_cycle in self.CYCLE_DAYS_MAP:
+            self.billing_days = self.CYCLE_DAYS_MAP[self.billing_cycle]
+        super().save(*args, **kwargs)
+
+    @property
+    def effective_price(self):
+        """Return promo price if set, otherwise regular price."""
+        if self.promo_price is not None:
+            return self.promo_price
+        return self.price
+
+    @property
+    def price_per_day(self):
+        """Calculate the per-day cost for comparison."""
+        if self.billing_days and self.billing_days > 0:
+            return self.effective_price / self.billing_days
+        return self.effective_price
+
+    @property
+    def customer_count(self):
+        """Number of customers currently on this plan."""
+        return self.customers.count()
+
+    @property
+    def speed_display(self):
+        """Human-readable speed string."""
+        if self.download_speed and self.upload_speed:
+            return f"↓{self.download_speed} / ↑{self.upload_speed}"
+        if self.download_speed:
+            return f"↓{self.download_speed}"
+        # Fall back to profile rate_limit
+        return self.profile.rate_limit or "Unlimited"
+
+    @property
+    def data_display(self):
+        """Human-readable data limit string."""
+        if self.data_limit_gb is not None:
+            return f"{self.data_limit_gb} GB"
+        return "Unlimited"
+
+
 class PPPCustomer(models.Model):
     """
     PPPoE customer account synced to MikroTik /ppp/secret.
@@ -2582,6 +2756,14 @@ class PPPCustomer(models.Model):
         on_delete=models.PROTECT,
         related_name="customers",
         help_text="PPP profile (speed tier) for this customer",
+    )
+    plan = models.ForeignKey(
+        PPPPlan,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="customers",
+        help_text="Billing plan this customer is subscribed to",
     )
 
     # PPP credentials (synced to /ppp/secret)
@@ -2672,9 +2854,11 @@ class PPPCustomer(models.Model):
 
     @property
     def effective_price(self):
-        """Return customer-level override or fall back to profile default."""
+        """Return customer-level override, plan price, or profile default."""
         if self.monthly_price is not None:
             return self.monthly_price
+        if self.plan_id:
+            return self.plan.effective_price
         return self.profile.monthly_price
 
     @property
@@ -2695,3 +2879,109 @@ class PPPCustomer(models.Model):
         """Re-activate a suspended customer."""
         self.status = "active"
         self.save(update_fields=["status", "updated_at"])
+
+
+class PPPPayment(models.Model):
+    """
+    Payment record for PPPoE customer subscriptions.
+    Tracks monthly/prepaid payments and triggers auto-enable on MikroTik.
+    """
+
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+        ("expired", "Expired"),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="ppp_payments"
+    )
+    customer = models.ForeignKey(
+        PPPCustomer, on_delete=models.CASCADE, related_name="payments"
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    phone_number = models.CharField(
+        max_length=20, help_text="Phone used for payment"
+    )
+    order_reference = models.CharField(max_length=100, unique=True)
+    payment_reference = models.CharField(
+        max_length=100, blank=True, help_text="External reference from Snippe"
+    )
+    payment_channel = models.CharField(max_length=50, default="snippe")
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default="pending"
+    )
+    billing_days = models.IntegerField(
+        default=30, help_text="Number of days this payment covers"
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "PPP Payment"
+        verbose_name_plural = "PPP Payments"
+
+    def __str__(self):
+        return f"{self.customer.username} — TSh {self.amount} — {self.status}"
+
+    def mark_completed(self, payment_reference="", channel=""):
+        """
+        Mark payment as completed.
+        Extends the customer's paid_until and activates on router.
+        """
+        from datetime import timedelta
+        from .mikrotik import activate_ppp_customer_on_router
+
+        if self.status == "completed" and self.completed_at:
+            return  # Idempotent
+
+        self.status = "completed"
+        self.payment_reference = payment_reference or self.payment_reference
+        if channel:
+            self.payment_channel = channel
+        self.completed_at = timezone.now()
+        self.save()
+
+        # Extend paid_until
+        customer = self.customer
+        now = timezone.now()
+        if customer.paid_until and customer.paid_until > now:
+            # Still has time — extend from current expiry
+            customer.paid_until = customer.paid_until + timedelta(
+                days=self.billing_days
+            )
+        else:
+            # Expired or new — start from now
+            customer.paid_until = now + timedelta(days=self.billing_days)
+
+        customer.last_payment_date = now
+        customer.last_payment_amount = self.amount
+        customer.status = "active"
+        customer.save(
+            update_fields=[
+                "paid_until",
+                "last_payment_date",
+                "last_payment_amount",
+                "status",
+                "updated_at",
+            ]
+        )
+
+        # Enable on MikroTik router
+        try:
+            activate_ppp_customer_on_router(customer)
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).error(
+                f"Failed to activate PPP customer {customer.username} on router: {e}"
+            )
+
+    def mark_failed(self):
+        self.status = "failed"
+        self.save(update_fields=["status", "updated_at"])
+
