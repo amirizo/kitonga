@@ -700,4 +700,65 @@ urlpatterns = [
         portal_views.portal_analytics_router_performance,
         name="portal_analytics_router_performance",
     ),
+    # =========================================================================
+    # PPP MANAGEMENT (Enterprise)
+    # =========================================================================
+    # PPP Profiles
+    path(
+        "portal/ppp/profiles/",
+        portal_views.portal_ppp_profiles,
+        name="portal_ppp_profiles",
+    ),
+    path(
+        "portal/ppp/profiles/<int:profile_id>/",
+        portal_views.portal_ppp_profile_detail,
+        name="portal_ppp_profile_detail",
+    ),
+    path(
+        "portal/ppp/profiles/<int:profile_id>/sync/",
+        portal_views.portal_ppp_profile_sync,
+        name="portal_ppp_profile_sync",
+    ),
+    # PPP Customers
+    path(
+        "portal/ppp/customers/",
+        portal_views.portal_ppp_customers,
+        name="portal_ppp_customers",
+    ),
+    path(
+        "portal/ppp/customers/<int:customer_id>/",
+        portal_views.portal_ppp_customer_detail,
+        name="portal_ppp_customer_detail",
+    ),
+    path(
+        "portal/ppp/customers/<int:customer_id>/sync/",
+        portal_views.portal_ppp_customer_sync,
+        name="portal_ppp_customer_sync",
+    ),
+    path(
+        "portal/ppp/customers/<int:customer_id>/suspend/",
+        portal_views.portal_ppp_customer_suspend,
+        name="portal_ppp_customer_suspend",
+    ),
+    path(
+        "portal/ppp/customers/<int:customer_id>/activate/",
+        portal_views.portal_ppp_customer_activate,
+        name="portal_ppp_customer_activate",
+    ),
+    # PPP Sessions & Bulk Operations
+    path(
+        "portal/ppp/routers/<int:router_id>/sessions/",
+        portal_views.portal_ppp_active_sessions,
+        name="portal_ppp_active_sessions",
+    ),
+    path(
+        "portal/ppp/routers/<int:router_id>/kick/",
+        portal_views.portal_ppp_kick_session,
+        name="portal_ppp_kick_session",
+    ),
+    path(
+        "portal/ppp/bulk-sync/",
+        portal_views.portal_ppp_bulk_sync,
+        name="portal_ppp_bulk_sync",
+    ),
 ]

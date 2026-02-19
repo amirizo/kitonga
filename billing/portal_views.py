@@ -6671,3 +6671,800 @@ def portal_analytics_router_performance(request):
             },
         }
     )
+
+
+# =============================================================================
+# PPP (Point-to-Point Protocol) MANAGEMENT — Enterprise Plan
+# =============================================================================
+
+
+def check_ppp_permission(tenant):
+    """Check if tenant has access to PPP management features (Enterprise only)"""
+    if not tenant.subscription_plan:
+        return False, "No subscription plan"
+    plan_name = tenant.subscription_plan.name.lower()
+    if "enterprise" in plan_name:
+        return True, None
+    return False, "PPP management requires Enterprise plan"
+
+
+@api_view(["GET", "POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_profiles(request):
+    """
+    GET: List PPP profiles for tenant
+    POST: Create a new PPP profile
+    """
+    from .models import PPPProfile, Router
+    from .serializers import PPPProfileSerializer, PPPProfileCreateSerializer
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if request.method == "GET":
+        profiles = PPPProfile.objects.filter(tenant=tenant).select_related("router")
+
+        # Optional filters
+        router_id = request.query_params.get("router_id")
+        if router_id:
+            profiles = profiles.filter(router_id=router_id)
+        active_only = request.query_params.get("active")
+        if active_only and active_only.lower() == "true":
+            profiles = profiles.filter(is_active=True)
+
+        serializer = PPPProfileSerializer(profiles, many=True)
+
+        return Response(
+            {
+                "success": True,
+                "profiles": serializer.data,
+                "total_count": profiles.count(),
+            }
+        )
+
+    elif request.method == "POST":
+        serializer = PPPProfileCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = serializer.validated_data
+
+        # Validate router belongs to tenant
+        try:
+            router = Router.objects.get(id=data["router_id"], tenant=tenant)
+        except Router.DoesNotExist:
+            return Response(
+                {"success": False, "error": "Router not found or does not belong to your tenant"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Check uniqueness
+        if PPPProfile.objects.filter(tenant=tenant, router=router, name=data["name"]).exists():
+            return Response(
+                {"success": False, "error": f"Profile '{data['name']}' already exists on this router"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        profile = PPPProfile.objects.create(
+            tenant=tenant,
+            router=router,
+            name=data["name"],
+            rate_limit=data.get("rate_limit", ""),
+            local_address=data.get("local_address"),
+            remote_address=data.get("remote_address", ""),
+            dns_server=data.get("dns_server", ""),
+            service_type=data.get("service_type", "pppoe"),
+            session_timeout=data.get("session_timeout", ""),
+            idle_timeout=data.get("idle_timeout", ""),
+            address_pool=data.get("address_pool", ""),
+            monthly_price=data.get("monthly_price", 0),
+            is_active=data.get("is_active", True),
+        )
+
+        # Optionally sync to router
+        sync_result = None
+        if data.get("sync_to_router"):
+            from .mikrotik import sync_ppp_profile_to_router
+
+            sync_result = sync_ppp_profile_to_router(profile)
+
+        logger.info(f"Tenant {tenant.slug} created PPP profile: {profile.name}")
+
+        return Response(
+            {
+                "success": True,
+                "message": "PPP profile created",
+                "profile": PPPProfileSerializer(profile).data,
+                "sync_result": sync_result,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+@api_view(["GET", "PUT", "DELETE"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_profile_detail(request, profile_id):
+    """
+    GET: Get PPP profile details
+    PUT: Update PPP profile
+    DELETE: Delete PPP profile
+    """
+    from .models import PPPProfile
+    from .serializers import PPPProfileSerializer
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        profile = PPPProfile.objects.get(id=profile_id, tenant=tenant)
+    except PPPProfile.DoesNotExist:
+        return Response(
+            {"success": False, "error": "PPP profile not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if request.method == "GET":
+        serializer = PPPProfileSerializer(profile)
+        return Response({"success": True, "profile": serializer.data})
+
+    elif request.method == "PUT":
+        data = request.data
+
+        if "name" in data:
+            profile.name = data["name"]
+        if "rate_limit" in data:
+            profile.rate_limit = data["rate_limit"]
+        if "local_address" in data:
+            profile.local_address = data["local_address"] or None
+        if "remote_address" in data:
+            profile.remote_address = data["remote_address"]
+        if "dns_server" in data:
+            profile.dns_server = data["dns_server"]
+        if "service_type" in data:
+            profile.service_type = data["service_type"]
+        if "session_timeout" in data:
+            profile.session_timeout = data["session_timeout"]
+        if "idle_timeout" in data:
+            profile.idle_timeout = data["idle_timeout"]
+        if "address_pool" in data:
+            profile.address_pool = data["address_pool"]
+        if "monthly_price" in data:
+            profile.monthly_price = data["monthly_price"]
+        if "is_active" in data:
+            profile.is_active = data["is_active"]
+
+        profile.save()
+
+        # Optionally re-sync to router
+        sync_result = None
+        if data.get("sync_to_router"):
+            from .mikrotik import sync_ppp_profile_to_router
+
+            sync_result = sync_ppp_profile_to_router(profile)
+
+        logger.info(f"Tenant {tenant.slug} updated PPP profile: {profile.name}")
+
+        return Response(
+            {
+                "success": True,
+                "message": "PPP profile updated",
+                "profile": PPPProfileSerializer(profile).data,
+                "sync_result": sync_result,
+            }
+        )
+
+    elif request.method == "DELETE":
+        # Check for dependent customers
+        if profile.customers.exists():
+            return Response(
+                {
+                    "success": False,
+                    "error": f"Cannot delete profile '{profile.name}': {profile.customers.count()} customer(s) are using it. Reassign or remove them first.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        profile_name = profile.name
+
+        # Remove from router if synced
+        if profile.synced_to_router:
+            from .mikrotik import remove_ppp_profile_from_router
+
+            remove_ppp_profile_from_router(profile)
+
+        profile.delete()
+        logger.info(f"Tenant {tenant.slug} deleted PPP profile: {profile_name}")
+        return Response({"success": True, "message": f"PPP profile '{profile_name}' deleted"})
+
+
+@api_view(["POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_profile_sync(request, profile_id):
+    """Sync a PPP profile to the MikroTik router"""
+    from .models import PPPProfile
+    from .mikrotik import sync_ppp_profile_to_router
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        profile = PPPProfile.objects.get(id=profile_id, tenant=tenant)
+    except PPPProfile.DoesNotExist:
+        return Response(
+            {"success": False, "error": "PPP profile not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    sync_result = sync_ppp_profile_to_router(profile)
+
+    return Response(
+        {
+            "success": sync_result["success"],
+            "message": sync_result["message"],
+            "mikrotik_id": sync_result.get("mikrotik_id", ""),
+            "errors": sync_result.get("errors", []),
+        },
+        status=status.HTTP_200_OK if sync_result["success"] else status.HTTP_502_BAD_GATEWAY,
+    )
+
+
+# ----- PPP Customers -----
+
+
+@api_view(["GET", "POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_customers(request):
+    """
+    GET: List PPP customers for tenant
+    POST: Create a new PPP customer
+    """
+    from .models import PPPCustomer, PPPProfile, Router
+    from .serializers import PPPCustomerSerializer, PPPCustomerCreateSerializer
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if request.method == "GET":
+        customers = PPPCustomer.objects.filter(tenant=tenant).select_related(
+            "router", "profile"
+        )
+
+        # Optional filters
+        router_id = request.query_params.get("router_id")
+        if router_id:
+            customers = customers.filter(router_id=router_id)
+        profile_id = request.query_params.get("profile_id")
+        if profile_id:
+            customers = customers.filter(profile_id=profile_id)
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            customers = customers.filter(status=status_filter)
+        search = request.query_params.get("search")
+        if search:
+            customers = customers.filter(
+                Q(username__icontains=search)
+                | Q(full_name__icontains=search)
+                | Q(phone_number__icontains=search)
+            )
+
+        # Pagination
+        page = int(request.query_params.get("page", 1))
+        page_size = int(request.query_params.get("page_size", 50))
+        total_count = customers.count()
+        start = (page - 1) * page_size
+        customers_page = customers[start : start + page_size]
+
+        serializer = PPPCustomerSerializer(customers_page, many=True)
+
+        return Response(
+            {
+                "success": True,
+                "customers": serializer.data,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_count": total_count,
+                    "total_pages": (total_count + page_size - 1) // page_size,
+                },
+                "summary": {
+                    "total": total_count,
+                    "active": PPPCustomer.objects.filter(tenant=tenant, status="active").count(),
+                    "suspended": PPPCustomer.objects.filter(tenant=tenant, status="suspended").count(),
+                    "expired": PPPCustomer.objects.filter(tenant=tenant, status="expired").count(),
+                },
+            }
+        )
+
+    elif request.method == "POST":
+        serializer = PPPCustomerCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = serializer.validated_data
+
+        # Validate router belongs to tenant
+        try:
+            router = Router.objects.get(id=data["router_id"], tenant=tenant)
+        except Router.DoesNotExist:
+            return Response(
+                {"success": False, "error": "Router not found or does not belong to your tenant"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Validate profile belongs to tenant and same router
+        try:
+            profile = PPPProfile.objects.get(
+                id=data["profile_id"], tenant=tenant, router=router
+            )
+        except PPPProfile.DoesNotExist:
+            return Response(
+                {"success": False, "error": "PPP profile not found on this router"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Check username uniqueness on router
+        if PPPCustomer.objects.filter(
+            tenant=tenant, router=router, username=data["username"]
+        ).exists():
+            return Response(
+                {"success": False, "error": f"Username '{data['username']}' already exists on this router"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        customer = PPPCustomer.objects.create(
+            tenant=tenant,
+            router=router,
+            profile=profile,
+            username=data["username"],
+            password=data["password"],
+            service=data.get("service", ""),
+            full_name=data.get("full_name", ""),
+            phone_number=data.get("phone_number", ""),
+            email=data.get("email", ""),
+            address=data.get("address", ""),
+            static_ip=data.get("static_ip"),
+            mac_address=data.get("mac_address", ""),
+            caller_id=data.get("caller_id", ""),
+            billing_type=data.get("billing_type", "monthly"),
+            monthly_price=data.get("monthly_price"),
+            paid_until=data.get("paid_until"),
+            comment=data.get("comment", ""),
+        )
+
+        # Optionally sync to router
+        sync_result = None
+        if data.get("sync_to_router"):
+            from .mikrotik import sync_ppp_secret_to_router
+
+            sync_result = sync_ppp_secret_to_router(customer)
+
+        logger.info(f"Tenant {tenant.slug} created PPP customer: {customer.username}")
+
+        return Response(
+            {
+                "success": True,
+                "message": "PPP customer created",
+                "customer": PPPCustomerSerializer(customer).data,
+                "sync_result": sync_result,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+@api_view(["GET", "PUT", "DELETE"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_customer_detail(request, customer_id):
+    """
+    GET: Get PPP customer details
+    PUT: Update PPP customer
+    DELETE: Delete PPP customer
+    """
+    from .models import PPPCustomer, PPPProfile
+    from .serializers import PPPCustomerSerializer
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        customer = PPPCustomer.objects.select_related("router", "profile").get(
+            id=customer_id, tenant=tenant
+        )
+    except PPPCustomer.DoesNotExist:
+        return Response(
+            {"success": False, "error": "PPP customer not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if request.method == "GET":
+        serializer = PPPCustomerSerializer(customer)
+        return Response({"success": True, "customer": serializer.data})
+
+    elif request.method == "PUT":
+        data = request.data
+
+        if "profile_id" in data:
+            try:
+                profile = PPPProfile.objects.get(
+                    id=data["profile_id"], tenant=tenant, router=customer.router
+                )
+                customer.profile = profile
+            except PPPProfile.DoesNotExist:
+                return Response(
+                    {"success": False, "error": "PPP profile not found on this router"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        if "password" in data:
+            customer.password = data["password"]
+        if "service" in data:
+            customer.service = data["service"]
+        if "full_name" in data:
+            customer.full_name = data["full_name"]
+        if "phone_number" in data:
+            customer.phone_number = data["phone_number"]
+        if "email" in data:
+            customer.email = data["email"]
+        if "address" in data:
+            customer.address = data["address"]
+        if "static_ip" in data:
+            customer.static_ip = data["static_ip"] or None
+        if "mac_address" in data:
+            customer.mac_address = data["mac_address"]
+        if "caller_id" in data:
+            customer.caller_id = data["caller_id"]
+        if "billing_type" in data:
+            customer.billing_type = data["billing_type"]
+        if "monthly_price" in data:
+            customer.monthly_price = data["monthly_price"]
+        if "paid_until" in data:
+            customer.paid_until = data["paid_until"]
+        if "comment" in data:
+            customer.comment = data["comment"]
+
+        customer.save()
+
+        # Optionally re-sync to router
+        sync_result = None
+        if data.get("sync_to_router"):
+            from .mikrotik import sync_ppp_secret_to_router
+
+            sync_result = sync_ppp_secret_to_router(customer)
+
+        logger.info(f"Tenant {tenant.slug} updated PPP customer: {customer.username}")
+
+        return Response(
+            {
+                "success": True,
+                "message": "PPP customer updated",
+                "customer": PPPCustomerSerializer(customer).data,
+                "sync_result": sync_result,
+            }
+        )
+
+    elif request.method == "DELETE":
+        username = customer.username
+
+        # Remove from router if synced
+        if customer.synced_to_router:
+            from .mikrotik import remove_ppp_secret_from_router
+
+            remove_ppp_secret_from_router(customer)
+
+        customer.delete()
+        logger.info(f"Tenant {tenant.slug} deleted PPP customer: {username}")
+        return Response({"success": True, "message": f"PPP customer '{username}' deleted"})
+
+
+@api_view(["POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_customer_sync(request, customer_id):
+    """Sync a PPP customer to the MikroTik router"""
+    from .models import PPPCustomer
+    from .mikrotik import sync_ppp_secret_to_router
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        customer = PPPCustomer.objects.get(id=customer_id, tenant=tenant)
+    except PPPCustomer.DoesNotExist:
+        return Response(
+            {"success": False, "error": "PPP customer not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    sync_result = sync_ppp_secret_to_router(customer)
+
+    return Response(
+        {
+            "success": sync_result["success"],
+            "message": sync_result["message"],
+            "mikrotik_id": sync_result.get("mikrotik_id", ""),
+            "errors": sync_result.get("errors", []),
+        },
+        status=status.HTTP_200_OK if sync_result["success"] else status.HTTP_502_BAD_GATEWAY,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_customer_suspend(request, customer_id):
+    """Suspend a PPP customer (disable on router + kick session)"""
+    from .models import PPPCustomer
+    from .mikrotik import suspend_ppp_customer_on_router
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        customer = PPPCustomer.objects.get(id=customer_id, tenant=tenant)
+    except PPPCustomer.DoesNotExist:
+        return Response(
+            {"success": False, "error": "PPP customer not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    reason = request.data.get("reason", "")
+    customer.suspend(reason=reason)
+
+    # Sync suspension to router
+    router_result = suspend_ppp_customer_on_router(customer)
+
+    logger.info(f"Tenant {tenant.slug} suspended PPP customer: {customer.username}")
+
+    return Response(
+        {
+            "success": True,
+            "message": f"PPP customer '{customer.username}' suspended",
+            "router_sync": router_result,
+        }
+    )
+
+
+@api_view(["POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_customer_activate(request, customer_id):
+    """Re-activate a suspended PPP customer"""
+    from .models import PPPCustomer
+    from .mikrotik import activate_ppp_customer_on_router
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        customer = PPPCustomer.objects.get(id=customer_id, tenant=tenant)
+    except PPPCustomer.DoesNotExist:
+        return Response(
+            {"success": False, "error": "PPP customer not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    customer.activate()
+
+    # Re-enable on router
+    router_result = activate_ppp_customer_on_router(customer)
+
+    logger.info(f"Tenant {tenant.slug} activated PPP customer: {customer.username}")
+
+    return Response(
+        {
+            "success": True,
+            "message": f"PPP customer '{customer.username}' activated",
+            "router_sync": router_result,
+        }
+    )
+
+
+@api_view(["GET"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_active_sessions(request, router_id):
+    """Get active PPP sessions on a specific router"""
+    from .models import Router
+    from .mikrotik import get_ppp_active_sessions
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        router = Router.objects.get(id=router_id, tenant=tenant)
+    except Router.DoesNotExist:
+        return Response(
+            {"success": False, "error": "Router not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    sessions_result = get_ppp_active_sessions(router)
+
+    return Response(
+        {
+            "success": sessions_result["success"],
+            "router": {"id": router.id, "name": router.name},
+            "sessions": sessions_result.get("sessions", []),
+            "total_sessions": len(sessions_result.get("sessions", [])),
+            "errors": sessions_result.get("errors", []),
+        }
+    )
+
+
+@api_view(["POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_kick_session(request, router_id):
+    """Kick a specific PPP active session"""
+    from .models import Router
+    from .mikrotik import kick_ppp_session
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        router = Router.objects.get(id=router_id, tenant=tenant)
+    except Router.DoesNotExist:
+        return Response(
+            {"success": False, "error": "Router not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    username = request.data.get("username")
+    if not username:
+        return Response(
+            {"success": False, "error": "Username is required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    kick_result = kick_ppp_session(router, username)
+
+    return Response(
+        {
+            "success": kick_result["success"],
+            "message": kick_result.get("message", ""),
+            "errors": kick_result.get("errors", []),
+        }
+    )
+
+
+@api_view(["POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_bulk_sync(request):
+    """Bulk sync all PPP profiles and customers to router(s)"""
+    from .models import PPPProfile, PPPCustomer
+    from .mikrotik import sync_ppp_profile_to_router, sync_ppp_secret_to_router
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    router_id = request.data.get("router_id")
+    sync_profiles = request.data.get("sync_profiles", True)
+    sync_customers = request.data.get("sync_customers", True)
+
+    results = {
+        "profiles_synced": 0,
+        "profiles_failed": 0,
+        "customers_synced": 0,
+        "customers_failed": 0,
+        "errors": [],
+    }
+
+    # Build querysets
+    profiles_qs = PPPProfile.objects.filter(tenant=tenant, is_active=True)
+    customers_qs = PPPCustomer.objects.filter(tenant=tenant)
+
+    if router_id:
+        profiles_qs = profiles_qs.filter(router_id=router_id)
+        customers_qs = customers_qs.filter(router_id=router_id)
+
+    # Sync profiles first (customers depend on profiles existing on the router)
+    if sync_profiles:
+        for profile in profiles_qs:
+            try:
+                r = sync_ppp_profile_to_router(profile)
+                if r["success"]:
+                    results["profiles_synced"] += 1
+                else:
+                    results["profiles_failed"] += 1
+                    results["errors"].append(f"Profile '{profile.name}': {r['message']}")
+            except Exception as e:
+                results["profiles_failed"] += 1
+                results["errors"].append(f"Profile '{profile.name}': {e}")
+
+    # Then sync customers
+    if sync_customers:
+        for customer in customers_qs:
+            try:
+                r = sync_ppp_secret_to_router(customer)
+                if r["success"]:
+                    results["customers_synced"] += 1
+                else:
+                    results["customers_failed"] += 1
+                    results["errors"].append(f"Customer '{customer.username}': {r['message']}")
+            except Exception as e:
+                results["customers_failed"] += 1
+                results["errors"].append(f"Customer '{customer.username}': {e}")
+
+    overall_success = (results["profiles_failed"] + results["customers_failed"]) == 0
+
+    logger.info(
+        f"Tenant {tenant.slug} bulk PPP sync: "
+        f"{results['profiles_synced']} profiles, {results['customers_synced']} customers synced"
+    )
+
+    return Response(
+        {
+            "success": overall_success,
+            "message": (
+                f"Synced {results['profiles_synced']} profiles and {results['customers_synced']} customers"
+            ),
+            "results": results,
+        }
+    )

@@ -40,6 +40,9 @@ from .models import (
     AutoSMSLog,
     # Contact & Support
     ContactSubmission,
+    # PPP Models
+    PPPProfile,
+    PPPCustomer,
 )
 
 
@@ -1604,6 +1607,206 @@ class TenantAnalyticsSnapshotAdmin(admin.ModelAdmin):
         return f"TZS {obj.total_revenue:,.0f}"
 
     total_revenue_display.short_description = "Revenue"
+
+
+# =============================================================================
+# PPP (Point-to-Point Protocol) ADMIN — Enterprise Plan
+# =============================================================================
+
+
+@admin.register(PPPProfile)
+class PPPProfileAdmin(admin.ModelAdmin):
+    """Manage PPP speed/service profiles"""
+
+    list_display = [
+        "name",
+        "tenant",
+        "router",
+        "rate_limit",
+        "service_type",
+        "monthly_price_display",
+        "synced_badge",
+        "is_active",
+    ]
+    list_filter = ["tenant", "router", "service_type", "is_active", "synced_to_router"]
+    search_fields = ["name", "tenant__business_name", "router__name"]
+    readonly_fields = ["mikrotik_id", "synced_to_router", "created_at", "updated_at"]
+
+    fieldsets = (
+        (None, {"fields": ("tenant", "router", "name", "is_active")}),
+        (
+            "Bandwidth",
+            {"fields": ("rate_limit",)},
+        ),
+        (
+            "IP & Addressing",
+            {
+                "fields": (
+                    "local_address",
+                    "remote_address",
+                    "address_pool",
+                    "dns_server",
+                )
+            },
+        ),
+        (
+            "Connection",
+            {"fields": ("service_type", "session_timeout", "idle_timeout")},
+        ),
+        (
+            "Billing",
+            {"fields": ("monthly_price",)},
+        ),
+        (
+            "MikroTik Sync",
+            {
+                "classes": ("collapse",),
+                "fields": ("synced_to_router", "mikrotik_id"),
+            },
+        ),
+        (
+            "Timestamps",
+            {
+                "classes": ("collapse",),
+                "fields": ("created_at", "updated_at"),
+            },
+        ),
+    )
+
+    def monthly_price_display(self, obj):
+        return f"TZS {obj.monthly_price:,.0f}"
+
+    monthly_price_display.short_description = "Price"
+
+    def synced_badge(self, obj):
+        if obj.synced_to_router:
+            return format_html(
+                '<span style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px;">SYNCED</span>'
+            )
+        return format_html(
+            '<span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px;">PENDING</span>'
+        )
+
+    synced_badge.short_description = "Router Sync"
+
+
+@admin.register(PPPCustomer)
+class PPPCustomerAdmin(admin.ModelAdmin):
+    """Manage PPPoE customer accounts"""
+
+    list_display = [
+        "username",
+        "full_name",
+        "tenant",
+        "router",
+        "profile",
+        "status_badge",
+        "billing_type",
+        "effective_price_display",
+        "paid_until",
+        "synced_badge",
+    ]
+    list_filter = [
+        "tenant",
+        "router",
+        "profile",
+        "status",
+        "billing_type",
+        "synced_to_router",
+    ]
+    search_fields = [
+        "username",
+        "full_name",
+        "phone_number",
+        "email",
+        "tenant__business_name",
+    ]
+    readonly_fields = [
+        "mikrotik_id",
+        "synced_to_router",
+        "last_payment_date",
+        "last_payment_amount",
+        "created_at",
+        "updated_at",
+    ]
+
+    fieldsets = (
+        (None, {"fields": ("tenant", "router", "profile", "status")}),
+        (
+            "PPP Credentials",
+            {"fields": ("username", "password", "service")},
+        ),
+        (
+            "Customer Info",
+            {"fields": ("full_name", "phone_number", "email", "address")},
+        ),
+        (
+            "IP & Access Control",
+            {"fields": ("static_ip", "mac_address", "caller_id")},
+        ),
+        (
+            "Billing",
+            {
+                "fields": (
+                    "billing_type",
+                    "monthly_price",
+                    "paid_until",
+                    "last_payment_date",
+                    "last_payment_amount",
+                ),
+            },
+        ),
+        (
+            "Notes",
+            {"fields": ("comment",)},
+        ),
+        (
+            "MikroTik Sync",
+            {
+                "classes": ("collapse",),
+                "fields": ("synced_to_router", "mikrotik_id"),
+            },
+        ),
+        (
+            "Timestamps",
+            {
+                "classes": ("collapse",),
+                "fields": ("created_at", "updated_at"),
+            },
+        ),
+    )
+
+    def status_badge(self, obj):
+        colors = {
+            "active": "#10b981",
+            "suspended": "#f59e0b",
+            "disabled": "#6b7280",
+            "expired": "#ef4444",
+        }
+        color = colors.get(obj.status, "#6b7280")
+        return format_html(
+            '<span style="background: {}; color: white; padding: 2px 8px; border-radius: 4px;">{}</span>',
+            color,
+            obj.status.upper(),
+        )
+
+    status_badge.short_description = "Status"
+
+    def effective_price_display(self, obj):
+        return f"TZS {obj.effective_price:,.0f}"
+
+    effective_price_display.short_description = "Price"
+
+    def synced_badge(self, obj):
+        if obj.synced_to_router:
+            return format_html(
+                '<span style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px;">SYNCED</span>'
+            )
+        return format_html(
+            '<span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px;">PENDING</span>'
+        )
+
+    synced_badge.short_description = "Router Sync"
 
 
 # Set admin site properties

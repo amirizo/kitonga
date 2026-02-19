@@ -1240,12 +1240,12 @@ class AnalyticsTrendSerializer(serializers.Serializer):
 
 
 # =============================================================================
-# PPP/PPPoE SERIALIZERS (Enterprise Plan Only)
+# PPP (Point-to-Point Protocol) SERIALIZERS — Enterprise Plan
 # =============================================================================
 
 
 class PPPProfileSerializer(serializers.ModelSerializer):
-    """Serializer for PPP speed profiles"""
+    """Serializer for PPP Profile (read)"""
 
     customer_count = serializers.SerializerMethodField()
 
@@ -1253,26 +1253,20 @@ class PPPProfileSerializer(serializers.ModelSerializer):
         model = PPPProfile
         fields = [
             "id",
+            "router",
             "name",
-            "display_name",
-            "description",
             "rate_limit",
-            "burst_limit",
-            "burst_threshold",
-            "burst_time",
             "local_address",
             "remote_address",
             "dns_server",
-            "monthly_price",
-            "currency",
+            "service_type",
             "session_timeout",
             "idle_timeout",
-            "keepalive_timeout",
+            "address_pool",
+            "monthly_price",
+            "is_active",
             "synced_to_router",
             "mikrotik_id",
-            "last_synced_at",
-            "is_active",
-            "router",
             "customer_count",
             "created_at",
             "updated_at",
@@ -1281,8 +1275,6 @@ class PPPProfileSerializer(serializers.ModelSerializer):
             "id",
             "synced_to_router",
             "mikrotik_id",
-            "last_synced_at",
-            "customer_count",
             "created_at",
             "updated_at",
         ]
@@ -1291,195 +1283,119 @@ class PPPProfileSerializer(serializers.ModelSerializer):
         return obj.customers.count()
 
 
-class PPPProfileCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating/updating PPP profiles"""
+class PPPProfileCreateSerializer(serializers.Serializer):
+    """Serializer for creating / updating a PPP Profile"""
 
-    class Meta:
-        model = PPPProfile
-        fields = [
-            "name",
-            "display_name",
-            "description",
-            "rate_limit",
-            "burst_limit",
-            "burst_threshold",
-            "burst_time",
-            "local_address",
-            "remote_address",
-            "dns_server",
-            "monthly_price",
-            "currency",
-            "session_timeout",
-            "idle_timeout",
-            "keepalive_timeout",
-            "is_active",
-            "router",
-        ]
-
-    def validate_name(self, value):
-        """Ensure profile name is unique per tenant"""
-        tenant = self.context.get("tenant")
-        qs = PPPProfile.objects.filter(tenant=tenant, name=value)
-        if self.instance:
-            qs = qs.exclude(pk=self.instance.pk)
-        if qs.exists():
-            raise serializers.ValidationError(
-                f"A PPP profile named '{value}' already exists for this tenant."
-            )
-        return value
-
-    def validate_rate_limit(self, value):
-        """Validate MikroTik rate limit format (e.g. '5M/10M')"""
-        if "/" not in value:
-            raise serializers.ValidationError(
-                "Rate limit must be in format 'upload/download' (e.g., '5M/10M')."
-            )
-        return value
-
-    def validate_router(self, value):
-        """Ensure router belongs to tenant"""
-        tenant = self.context.get("tenant")
-        if value and value.tenant != tenant:
-            raise serializers.ValidationError("Router does not belong to your tenant.")
-        return value
+    router_id = serializers.IntegerField()
+    name = serializers.CharField(max_length=100)
+    rate_limit = serializers.CharField(max_length=100, required=False, default="")
+    local_address = serializers.IPAddressField(required=False, allow_null=True)
+    remote_address = serializers.CharField(max_length=100, required=False, default="")
+    dns_server = serializers.CharField(max_length=255, required=False, default="")
+    service_type = serializers.ChoiceField(
+        choices=["pppoe", "l2tp", "pptp", "any"], default="pppoe"
+    )
+    session_timeout = serializers.CharField(max_length=20, required=False, default="")
+    idle_timeout = serializers.CharField(max_length=20, required=False, default="")
+    address_pool = serializers.CharField(max_length=100, required=False, default="")
+    monthly_price = serializers.DecimalField(max_digits=12, decimal_places=2, default=0)
+    is_active = serializers.BooleanField(default=True)
+    sync_to_router = serializers.BooleanField(
+        default=False,
+        help_text="If true, immediately push profile to MikroTik router",
+    )
 
 
 class PPPCustomerSerializer(serializers.ModelSerializer):
-    """Serializer for PPP customers (read)"""
+    """Serializer for PPP Customer (read)"""
 
-    profile_name = serializers.SerializerMethodField()
-    router_name = serializers.SerializerMethodField()
-    effective_price = serializers.SerializerMethodField()
-    is_service_active = serializers.SerializerMethodField()
+    profile_name = serializers.CharField(source="profile.name", read_only=True)
+    profile_rate_limit = serializers.CharField(
+        source="profile.rate_limit", read_only=True
+    )
+    router_name = serializers.CharField(source="router.name", read_only=True)
+    effective_price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+    is_expired = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = PPPCustomer
         fields = [
             "id",
+            "router",
+            "router_name",
+            "profile",
+            "profile_name",
+            "profile_rate_limit",
             "username",
             "service",
-            "customer_name",
+            "full_name",
             "phone_number",
             "email",
             "address",
-            "notes",
-            "profile",
-            "profile_name",
-            "router",
-            "router_name",
-            "remote_address",
+            "static_ip",
             "mac_address",
+            "caller_id",
+            "billing_type",
             "monthly_price",
-            "currency",
-            "billing_day",
-            "paid_until",
-            "last_payment_at",
-            "total_payments",
-            "total_amount_paid",
             "effective_price",
-            "is_service_active",
+            "paid_until",
+            "last_payment_date",
+            "last_payment_amount",
             "status",
-            "disabled",
-            "expiry_notification_sent",
-            "last_logged_in",
-            "last_logged_out",
-            "last_disconnect_reason",
-            "uptime",
-            "last_caller_id",
+            "comment",
             "synced_to_router",
             "mikrotik_id",
-            "last_synced_at",
-            "wifi_user",
+            "is_expired",
             "created_at",
             "updated_at",
         ]
         read_only_fields = [
             "id",
-            "total_payments",
-            "total_amount_paid",
-            "last_logged_in",
-            "last_logged_out",
-            "last_disconnect_reason",
-            "uptime",
-            "last_caller_id",
             "synced_to_router",
             "mikrotik_id",
-            "last_synced_at",
-            "effective_price",
-            "is_service_active",
+            "last_payment_date",
+            "last_payment_amount",
             "created_at",
             "updated_at",
         ]
 
-    def get_profile_name(self, obj):
-        return obj.profile.display_name or obj.profile.name if obj.profile else None
 
-    def get_router_name(self, obj):
-        return obj.router.name if obj.router else None
+class PPPCustomerCreateSerializer(serializers.Serializer):
+    """Serializer for creating / updating a PPP Customer"""
 
-    def get_effective_price(self, obj):
-        return float(obj.get_effective_price())
+    router_id = serializers.IntegerField()
+    profile_id = serializers.IntegerField()
+    username = serializers.CharField(max_length=100)
+    password = serializers.CharField(max_length=255)
+    service = serializers.CharField(max_length=50, required=False, default="")
 
-    def get_is_service_active(self, obj):
-        return obj.has_active_service()
+    # Customer info
+    full_name = serializers.CharField(max_length=200, required=False, default="")
+    phone_number = serializers.CharField(max_length=20, required=False, default="")
+    email = serializers.EmailField(required=False, default="")
+    address = serializers.CharField(required=False, default="")
 
+    # IP & access control
+    static_ip = serializers.IPAddressField(required=False, allow_null=True)
+    mac_address = serializers.CharField(max_length=17, required=False, default="")
+    caller_id = serializers.CharField(max_length=100, required=False, default="")
 
-class PPPCustomerCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating/updating PPP customers"""
+    # Billing
+    billing_type = serializers.ChoiceField(
+        choices=["monthly", "prepaid", "unlimited"], default="monthly"
+    )
+    monthly_price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True
+    )
+    paid_until = serializers.DateTimeField(required=False, allow_null=True)
 
-    class Meta:
-        model = PPPCustomer
-        fields = [
-            "username",
-            "password",
-            "service",
-            "customer_name",
-            "phone_number",
-            "email",
-            "address",
-            "notes",
-            "profile",
-            "router",
-            "remote_address",
-            "mac_address",
-            "monthly_price",
-            "currency",
-            "billing_day",
-            "paid_until",
-            "status",
-            "disabled",
-            "wifi_user",
-        ]
+    # Notes
+    comment = serializers.CharField(required=False, default="")
 
-    def validate_username(self, value):
-        """Ensure username is unique per tenant"""
-        tenant = self.context.get("tenant")
-        qs = PPPCustomer.objects.filter(tenant=tenant, username=value)
-        if self.instance:
-            qs = qs.exclude(pk=self.instance.pk)
-        if qs.exists():
-            raise serializers.ValidationError(
-                f"A PPP customer with username '{value}' already exists for this tenant."
-            )
-        return value
-
-    def validate_router(self, value):
-        """Ensure router belongs to tenant"""
-        tenant = self.context.get("tenant")
-        if value and value.tenant != tenant:
-            raise serializers.ValidationError("Router does not belong to your tenant.")
-        return value
-
-    def validate_profile(self, value):
-        """Ensure profile belongs to tenant"""
-        tenant = self.context.get("tenant")
-        if value and value.tenant != tenant:
-            raise serializers.ValidationError(
-                "PPP profile does not belong to your tenant."
-            )
-        return value
-
-    def validate_billing_day(self, value):
-        if value < 1 or value > 28:
-            raise serializers.ValidationError("Billing day must be between 1 and 28.")
-        return value
+    # Sync option
+    sync_to_router = serializers.BooleanField(
+        default=False,
+        help_text="If true, immediately push secret to MikroTik router",
+    )

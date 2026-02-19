@@ -3131,3 +3131,483 @@ def force_immediate_internet_access(
                 "Enter your phone number as username and password",
             ],
         }
+
+
+# =============================================================================
+# PPP (Point-to-Point Protocol) SYNC FUNCTIONS — Enterprise Plan
+# =============================================================================
+
+
+def sync_ppp_profile_to_router(profile) -> dict:
+    """
+    Push a PPPProfile to MikroTik /ppp/profile.
+    Creates or updates the profile on the router.
+
+    Args:
+        profile: PPPProfile model instance
+
+    Returns:
+        dict with success, mikrotik_id, message, errors
+    """
+    result = {
+        "success": False,
+        "mikrotik_id": "",
+        "message": "",
+        "errors": [],
+    }
+
+    router = profile.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        result["message"] = "Router connection failed"
+        return result
+
+    try:
+        resource = api.get_resource("/ppp/profile")
+
+        # Build the parameter dict for MikroTik
+        params = {"name": profile.name}
+        if profile.rate_limit:
+            params["rate-limit"] = profile.rate_limit
+        if profile.local_address:
+            params["local-address"] = str(profile.local_address)
+        if profile.remote_address:
+            params["remote-address"] = profile.remote_address
+        if profile.dns_server:
+            params["dns-server"] = profile.dns_server
+        if profile.session_timeout:
+            params["session-timeout"] = profile.session_timeout
+        if profile.idle_timeout:
+            params["idle-timeout"] = profile.idle_timeout
+        if profile.address_pool:
+            params["address-pool"] = profile.address_pool
+
+        # Check if profile already exists on router
+        existing = resource.get(name=profile.name)
+
+        if existing:
+            # Update existing profile
+            item = existing[0]
+            mk_id = item.get(".id") or item.get("id")
+            if mk_id:
+                resource.set(id=mk_id, **params)
+                profile.mikrotik_id = mk_id
+                profile.synced_to_router = True
+                profile.save(update_fields=["mikrotik_id", "synced_to_router", "updated_at"])
+                result["success"] = True
+                result["mikrotik_id"] = mk_id
+                result["message"] = f"PPP profile '{profile.name}' updated on router"
+                logger.info(f"Updated PPP profile {profile.name} on {router.name}")
+        else:
+            # Create new profile
+            resource.add(**params)
+            # Fetch back to get the .id
+            created = resource.get(name=profile.name)
+            mk_id = ""
+            if created:
+                mk_id = created[0].get(".id") or created[0].get("id") or ""
+            profile.mikrotik_id = mk_id
+            profile.synced_to_router = True
+            profile.save(update_fields=["mikrotik_id", "synced_to_router", "updated_at"])
+            result["success"] = True
+            result["mikrotik_id"] = mk_id
+            result["message"] = f"PPP profile '{profile.name}' created on router"
+            logger.info(f"Created PPP profile {profile.name} on {router.name}")
+
+    except Exception as e:
+        logger.error(f"sync_ppp_profile_to_router failed for {profile.name}: {e}")
+        result["errors"].append(str(e))
+        result["message"] = f"Sync failed: {e}"
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def remove_ppp_profile_from_router(profile) -> dict:
+    """
+    Remove a PPP profile from MikroTik /ppp/profile.
+
+    Args:
+        profile: PPPProfile model instance
+
+    Returns:
+        dict with success, message, errors
+    """
+    result = {"success": False, "message": "", "errors": []}
+
+    router = profile.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    try:
+        resource = api.get_resource("/ppp/profile")
+        existing = resource.get(name=profile.name)
+
+        if existing:
+            mk_id = existing[0].get(".id") or existing[0].get("id")
+            if mk_id:
+                resource.remove(id=mk_id)
+                logger.info(f"Removed PPP profile {profile.name} from {router.name}")
+
+        profile.synced_to_router = False
+        profile.mikrotik_id = ""
+        profile.save(update_fields=["synced_to_router", "mikrotik_id", "updated_at"])
+        result["success"] = True
+        result["message"] = f"PPP profile '{profile.name}' removed from router"
+
+    except Exception as e:
+        logger.error(f"remove_ppp_profile_from_router failed for {profile.name}: {e}")
+        result["errors"].append(str(e))
+        result["message"] = f"Remove failed: {e}"
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def sync_ppp_secret_to_router(customer) -> dict:
+    """
+    Push a PPPCustomer to MikroTik /ppp/secret.
+    Creates or updates the secret on the router.
+
+    Args:
+        customer: PPPCustomer model instance
+
+    Returns:
+        dict with success, mikrotik_id, message, errors
+    """
+    result = {
+        "success": False,
+        "mikrotik_id": "",
+        "message": "",
+        "errors": [],
+    }
+
+    router = customer.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        result["message"] = "Router connection failed"
+        return result
+
+    try:
+        resource = api.get_resource("/ppp/secret")
+
+        # Build the parameter dict for MikroTik
+        params = {
+            "name": customer.username,
+            "password": customer.password,
+            "profile": customer.profile.name,
+        }
+        if customer.service:
+            params["service"] = customer.service
+        else:
+            params["service"] = "pppoe"
+        if customer.static_ip:
+            params["remote-address"] = str(customer.static_ip)
+        if customer.caller_id:
+            params["caller-id"] = customer.caller_id
+        elif customer.mac_address:
+            params["caller-id"] = customer.mac_address
+
+        # Build comment from customer info
+        comment_parts = []
+        if customer.full_name:
+            comment_parts.append(customer.full_name)
+        if customer.phone_number:
+            comment_parts.append(customer.phone_number)
+        if customer.comment:
+            comment_parts.append(customer.comment)
+        if comment_parts:
+            params["comment"] = " | ".join(comment_parts)
+
+        # Disabled state maps to MikroTik disabled flag
+        if customer.status in ("suspended", "disabled", "expired"):
+            params["disabled"] = "yes"
+        else:
+            params["disabled"] = "no"
+
+        # Check if secret already exists on router
+        existing = resource.get(name=customer.username)
+
+        if existing:
+            item = existing[0]
+            mk_id = item.get(".id") or item.get("id")
+            if mk_id:
+                resource.set(id=mk_id, **params)
+                customer.mikrotik_id = mk_id
+                customer.synced_to_router = True
+                customer.save(update_fields=["mikrotik_id", "synced_to_router", "updated_at"])
+                result["success"] = True
+                result["mikrotik_id"] = mk_id
+                result["message"] = f"PPP secret '{customer.username}' updated on router"
+                logger.info(f"Updated PPP secret {customer.username} on {router.name}")
+        else:
+            resource.add(**params)
+            created = resource.get(name=customer.username)
+            mk_id = ""
+            if created:
+                mk_id = created[0].get(".id") or created[0].get("id") or ""
+            customer.mikrotik_id = mk_id
+            customer.synced_to_router = True
+            customer.save(update_fields=["mikrotik_id", "synced_to_router", "updated_at"])
+            result["success"] = True
+            result["mikrotik_id"] = mk_id
+            result["message"] = f"PPP secret '{customer.username}' created on router"
+            logger.info(f"Created PPP secret {customer.username} on {router.name}")
+
+    except Exception as e:
+        logger.error(f"sync_ppp_secret_to_router failed for {customer.username}: {e}")
+        result["errors"].append(str(e))
+        result["message"] = f"Sync failed: {e}"
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def remove_ppp_secret_from_router(customer) -> dict:
+    """
+    Remove a PPP secret from MikroTik /ppp/secret.
+
+    Args:
+        customer: PPPCustomer model instance
+
+    Returns:
+        dict with success, message, errors
+    """
+    result = {"success": False, "message": "", "errors": []}
+
+    router = customer.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    try:
+        resource = api.get_resource("/ppp/secret")
+        existing = resource.get(name=customer.username)
+
+        if existing:
+            mk_id = existing[0].get(".id") or existing[0].get("id")
+            if mk_id:
+                resource.remove(id=mk_id)
+                logger.info(f"Removed PPP secret {customer.username} from {router.name}")
+
+        customer.synced_to_router = False
+        customer.mikrotik_id = ""
+        customer.save(update_fields=["synced_to_router", "mikrotik_id", "updated_at"])
+        result["success"] = True
+        result["message"] = f"PPP secret '{customer.username}' removed from router"
+
+    except Exception as e:
+        logger.error(f"remove_ppp_secret_from_router failed for {customer.username}: {e}")
+        result["errors"].append(str(e))
+        result["message"] = f"Remove failed: {e}"
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def suspend_ppp_customer_on_router(customer) -> dict:
+    """
+    Disable a PPP secret on MikroTik (set disabled=yes) and kick active session.
+
+    Args:
+        customer: PPPCustomer model instance
+
+    Returns:
+        dict with success, secret_disabled, session_kicked, errors
+    """
+    result = {
+        "success": False,
+        "secret_disabled": False,
+        "session_kicked": False,
+        "errors": [],
+    }
+
+    router = customer.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    try:
+        # Step 1: Disable the PPP secret
+        try:
+            secrets_res = api.get_resource("/ppp/secret")
+            existing = secrets_res.get(name=customer.username)
+            if existing:
+                mk_id = existing[0].get(".id") or existing[0].get("id")
+                if mk_id:
+                    secrets_res.set(id=mk_id, disabled="yes")
+                    result["secret_disabled"] = True
+                    logger.info(f"Disabled PPP secret {customer.username} on {router.name}")
+        except Exception as e:
+            result["errors"].append(f"disable_secret: {e}")
+            logger.error(f"Failed to disable PPP secret {customer.username}: {e}")
+
+        # Step 2: Kick active PPP session
+        try:
+            active_res = api.get_resource("/ppp/active")
+            sessions = active_res.get(name=customer.username)
+            for session in sessions:
+                session_id = session.get(".id") or session.get("id")
+                if session_id:
+                    active_res.remove(id=session_id)
+                    result["session_kicked"] = True
+                    logger.info(f"Kicked PPP session for {customer.username} on {router.name}")
+        except Exception as e:
+            result["errors"].append(f"kick_session: {e}")
+            logger.warning(f"Failed to kick PPP session for {customer.username}: {e}")
+
+        result["success"] = result["secret_disabled"] or result["session_kicked"]
+
+    except Exception as e:
+        result["errors"].append(str(e))
+        logger.error(f"suspend_ppp_customer_on_router failed for {customer.username}: {e}")
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def activate_ppp_customer_on_router(customer) -> dict:
+    """
+    Re-enable a PPP secret on MikroTik (set disabled=no).
+
+    Args:
+        customer: PPPCustomer model instance
+
+    Returns:
+        dict with success, message, errors
+    """
+    result = {"success": False, "message": "", "errors": []}
+
+    router = customer.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    try:
+        secrets_res = api.get_resource("/ppp/secret")
+        existing = secrets_res.get(name=customer.username)
+        if existing:
+            mk_id = existing[0].get(".id") or existing[0].get("id")
+            if mk_id:
+                secrets_res.set(id=mk_id, disabled="no")
+                result["success"] = True
+                result["message"] = f"PPP secret '{customer.username}' re-enabled on router"
+                logger.info(f"Re-enabled PPP secret {customer.username} on {router.name}")
+        else:
+            # Secret doesn't exist on router, create it
+            sync_result = sync_ppp_secret_to_router(customer)
+            result["success"] = sync_result["success"]
+            result["message"] = sync_result["message"]
+            result["errors"] = sync_result["errors"]
+
+    except Exception as e:
+        result["errors"].append(str(e))
+        result["message"] = f"Activate failed: {e}"
+        logger.error(f"activate_ppp_customer_on_router failed for {customer.username}: {e}")
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def get_ppp_active_sessions(router) -> dict:
+    """
+    Get all active PPP sessions from a router.
+
+    Args:
+        router: Router model instance
+
+    Returns:
+        dict with success, sessions list, errors
+    """
+    result = {"success": False, "sessions": [], "errors": []}
+
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    try:
+        active_res = api.get_resource("/ppp/active")
+        sessions = active_res.get()
+
+        for s in sessions:
+            result["sessions"].append({
+                "id": s.get(".id") or s.get("id"),
+                "name": s.get("name", ""),
+                "service": s.get("service", ""),
+                "caller_id": s.get("caller-id", ""),
+                "address": s.get("address", ""),
+                "uptime": s.get("uptime", ""),
+                "encoding": s.get("encoding", ""),
+                "session_id": s.get("session-id", ""),
+                "radius": s.get("radius", "false"),
+            })
+
+        result["success"] = True
+
+    except Exception as e:
+        result["errors"].append(str(e))
+        logger.error(f"get_ppp_active_sessions failed on {router.name}: {e}")
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def kick_ppp_session(router, username: str) -> dict:
+    """
+    Kick a specific PPP active session by username.
+
+    Args:
+        router: Router model instance
+        username: PPP username to disconnect
+
+    Returns:
+        dict with success, message, errors
+    """
+    result = {"success": False, "message": "", "errors": []}
+
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    try:
+        active_res = api.get_resource("/ppp/active")
+        sessions = active_res.get(name=username)
+
+        if not sessions:
+            result["message"] = f"No active PPP session found for '{username}'"
+            result["success"] = True  # Not an error — user just isn't connected
+            return result
+
+        for session in sessions:
+            session_id = session.get(".id") or session.get("id")
+            if session_id:
+                active_res.remove(id=session_id)
+                logger.info(f"Kicked PPP session for {username} on {router.name}")
+
+        result["success"] = True
+        result["message"] = f"PPP session for '{username}' terminated"
+
+    except Exception as e:
+        result["errors"].append(str(e))
+        result["message"] = f"Kick failed: {e}"
+        logger.error(f"kick_ppp_session failed for {username} on {router.name}: {e}")
+    finally:
+        safe_close(api)
+
+    return result
