@@ -28,3 +28,15 @@ next-env.d.tsdb.sqlite3
 
 db.sqlite3
 .history/
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs
+logs/
+*.log
+
+# Environment
+.env
+venv/

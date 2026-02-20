@@ -3167,12 +3167,17 @@ def sync_ppp_profile_to_router(profile) -> dict:
         resource = api.get_resource("/ppp/profile")
 
         # Build the parameter dict for MikroTik
+        # Note: RouterOS v7 does not have 'address-pool' param on /ppp/profile.
+        # Pool names are assigned via 'remote-address' instead.
         params = {"name": profile.name}
         if profile.rate_limit:
             params["rate-limit"] = profile.rate_limit
         if profile.local_address:
             params["local-address"] = str(profile.local_address)
-        if profile.remote_address:
+        if profile.address_pool:
+            # In RouterOS v7, pool name goes into remote-address
+            params["remote-address"] = profile.address_pool
+        elif profile.remote_address:
             params["remote-address"] = profile.remote_address
         if profile.dns_server:
             params["dns-server"] = profile.dns_server
@@ -3180,8 +3185,6 @@ def sync_ppp_profile_to_router(profile) -> dict:
             params["session-timeout"] = profile.session_timeout
         if profile.idle_timeout:
             params["idle-timeout"] = profile.idle_timeout
-        if profile.address_pool:
-            params["address-pool"] = profile.address_pool
 
         # Check if profile already exists on router
         existing = resource.get(name=profile.name)
