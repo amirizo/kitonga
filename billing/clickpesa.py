@@ -1,6 +1,6 @@
 """
 ClickPesa API Integration
-Handles Mobile Money USSD-PUSH payments for Tanzania
+Handles Mobile Money USSD-PUSH payments and BillPay for Tanzania
 """
 
 import requests
@@ -688,4 +688,408 @@ class ClickPesaAPI:
                     error_message = error_data.get("message", error_message)
                 except:
                     pass
+            return {"success": False, "message": error_message}
+
+    # =========================================================================
+    # BILLPAY API METHODS — Control Number / Bill Payment
+    # =========================================================================
+
+    def _format_phone(self, phone_number):
+        """Normalize phone number to 255XXXXXXXXX format."""
+        phone_number = str(phone_number).strip().lstrip("+")
+        if phone_number.startswith("0"):
+            phone_number = "255" + phone_number[1:]
+        elif not phone_number.startswith("255"):
+            phone_number = "255" + phone_number
+        return phone_number
+
+    def create_order_control_number(
+        self,
+        amount,
+        bill_reference,
+        description="",
+        payment_mode="EXACT",
+    ):
+        """
+        Create a BillPay Order Control Number (no customer info attached).
+
+        Args:
+            amount: Bill amount in TZS
+            bill_reference: Unique reference for this bill
+            description: Bill description
+            payment_mode: EXACT | ALLOW_PARTIAL_AND_OVER_PAYMENT
+
+        Returns:
+            dict with success, bill_pay_number, data
+        """
+        token = self.get_access_token()
+        if not token:
+            return {
+                "success": False,
+                "message": "Failed to authenticate with ClickPesa",
+            }
+
+        url = f"{self.base_url}/third-parties/billpay/create-order-control-number"
+
+        headers = {"Authorization": token, "Content-Type": "application/json"}
+
+        payload = {
+            "billAmount": int(amount),
+            "billReference": bill_reference,
+            "billDescription": description or f"Payment for {bill_reference}",
+            "billPaymentMode": payment_mode,
+        }
+
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(
+                f"ClickPesa BillPay order control number created: {result}"
+            )
+
+            return {
+                "success": True,
+                "bill_pay_number": result.get("billPayNumber", ""),
+                "bill_description": result.get("billDescription", ""),
+                "bill_customer_name": result.get("billCustomerName", ""),
+                "bill_amount": result.get("billAmount"),
+                "bill_payment_mode": result.get("billPaymentMode"),
+                "data": result,
+            }
+
+        except requests.exceptions.RequestException as e:
+            error_message = "Failed to create order control number"
+            if hasattr(e, "response") and e.response is not None:
+                logger.error(f"Response text: {e.response.text}")
+                try:
+                    error_data = e.response.json()
+                    error_message = error_data.get("message", error_message)
+                except Exception:
+                    pass
+            logger.error(f"ClickPesa BillPay create order failed: {e}")
+            return {"success": False, "message": error_message}
+
+    def create_customer_control_number(
+        self,
+        amount,
+        bill_reference,
+        customer_name,
+        customer_phone="",
+        customer_email="",
+        description="",
+        payment_mode="EXACT",
+    ):
+        """
+        Create a BillPay Customer Control Number (with customer info).
+
+        This is the preferred method for PPPoE customers — attaches
+        customer name, phone, and email to the control number.
+
+        Args:
+            amount: Bill amount in TZS
+            bill_reference: Unique reference for this bill
+            customer_name: Customer full name
+            customer_phone: Customer phone (format: 255XXXXXXXXX)
+            customer_email: Customer email
+            description: Bill description
+            payment_mode: EXACT | ALLOW_PARTIAL_AND_OVER_PAYMENT
+
+        Returns:
+            dict with success, bill_pay_number, data
+        """
+        token = self.get_access_token()
+        if not token:
+            return {
+                "success": False,
+                "message": "Failed to authenticate with ClickPesa",
+            }
+
+        url = f"{self.base_url}/third-parties/billpay/create-customer-control-number"
+
+        headers = {"Authorization": token, "Content-Type": "application/json"}
+
+        payload = {
+            "billAmount": int(amount),
+            "billReference": bill_reference,
+            "billDescription": description or f"Payment for {bill_reference}",
+            "billPaymentMode": payment_mode,
+            "customerName": customer_name,
+        }
+
+        if customer_phone:
+            payload["customerPhone"] = self._format_phone(customer_phone)
+        if customer_email:
+            payload["customerEmail"] = customer_email
+
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(
+                f"ClickPesa BillPay customer control number created: "
+                f"ref={bill_reference} number={result.get('billPayNumber')}"
+            )
+
+            return {
+                "success": True,
+                "bill_pay_number": result.get("billPayNumber", ""),
+                "bill_description": result.get("billDescription", ""),
+                "bill_customer_name": result.get("billCustomerName", ""),
+                "bill_amount": result.get("billAmount"),
+                "bill_payment_mode": result.get("billPaymentMode"),
+                "data": result,
+            }
+
+        except requests.exceptions.RequestException as e:
+            error_message = "Failed to create customer control number"
+            if hasattr(e, "response") and e.response is not None:
+                logger.error(f"Response text: {e.response.text}")
+                try:
+                    error_data = e.response.json()
+                    error_message = error_data.get("message", error_message)
+                except Exception:
+                    pass
+            logger.error(f"ClickPesa BillPay create customer failed: {e}")
+            return {"success": False, "message": error_message}
+
+    def bulk_create_customer_control_numbers(self, items):
+        """
+        Bulk create BillPay Customer Control Numbers (max 50 per request).
+
+        Args:
+            items: list of dicts, each with:
+                - customerName (required)
+                - billAmount (optional)
+                - customerEmail (optional)
+                - customerPhone (optional)
+                - billReference (optional)
+                - billDescription (optional)
+                - billPaymentMode (optional)
+
+        Returns:
+            dict with success, bill_pay_numbers, created, failed, errors
+        """
+        token = self.get_access_token()
+        if not token:
+            return {
+                "success": False,
+                "message": "Failed to authenticate with ClickPesa",
+            }
+
+        url = (
+            f"{self.base_url}/third-parties/billpay/"
+            f"bulk-create-customer-control-numbers"
+        )
+
+        headers = {"Authorization": token, "Content-Type": "application/json"}
+
+        # Format phone numbers in items
+        formatted_items = []
+        for item in items[:50]:
+            entry = dict(item)
+            if entry.get("customerPhone"):
+                entry["customerPhone"] = self._format_phone(entry["customerPhone"])
+            formatted_items.append(entry)
+
+        payload = {"controlNumbers": formatted_items}
+
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=60)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(
+                f"ClickPesa BillPay bulk create: "
+                f"created={result.get('created')}, failed={result.get('failed')}"
+            )
+
+            return {
+                "success": True,
+                "bill_pay_numbers": result.get("billPayNumbers", []),
+                "created": result.get("created", 0),
+                "failed": result.get("failed", 0),
+                "errors": result.get("errors", []),
+                "data": result,
+            }
+
+        except requests.exceptions.RequestException as e:
+            error_message = "Failed to bulk create control numbers"
+            if hasattr(e, "response") and e.response is not None:
+                logger.error(f"Response text: {e.response.text}")
+                try:
+                    error_data = e.response.json()
+                    error_message = error_data.get("message", error_message)
+                except Exception:
+                    pass
+            logger.error(f"ClickPesa BillPay bulk create failed: {e}")
+            return {"success": False, "message": error_message}
+
+    def query_bill_status(self, bill_pay_number):
+        """
+        Query a BillPay control number status.
+
+        Args:
+            bill_pay_number: The control number (billPayNumber)
+
+        Returns:
+            dict with success, bill details
+        """
+        token = self.get_access_token()
+        if not token:
+            return {
+                "success": False,
+                "message": "Failed to authenticate with ClickPesa",
+            }
+
+        url = f"{self.base_url}/third-parties/billpay/{bill_pay_number}"
+
+        headers = {"Authorization": token}
+
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(f"ClickPesa BillPay query for {bill_pay_number}: {result}")
+
+            return {
+                "success": True,
+                "bill_pay_number": result.get("billPayNumber", ""),
+                "bill_description": result.get("billDescription", ""),
+                "bill_customer_name": result.get("billCustomerName", ""),
+                "bill_amount": result.get("billAmount"),
+                "bill_payment_mode": result.get("billPaymentMode"),
+                "bill_status": result.get("billStatus", ""),
+                "data": result,
+            }
+
+        except requests.exceptions.RequestException as e:
+            error_message = "Failed to query bill status"
+            if hasattr(e, "response") and e.response is not None:
+                logger.error(f"Response text: {e.response.text}")
+                try:
+                    error_data = e.response.json()
+                    error_message = error_data.get("message", error_message)
+                except Exception:
+                    pass
+            logger.error(f"ClickPesa BillPay query failed: {e}")
+            return {"success": False, "message": error_message}
+
+    def update_bill(self, bill_pay_number, amount=None, description=None):
+        """
+        Update a BillPay control number (amount and/or description).
+
+        Args:
+            bill_pay_number: The control number
+            amount: New bill amount (optional)
+            description: New description (optional)
+
+        Returns:
+            dict with success, updated bill details
+        """
+        token = self.get_access_token()
+        if not token:
+            return {
+                "success": False,
+                "message": "Failed to authenticate with ClickPesa",
+            }
+
+        url = f"{self.base_url}/third-parties/billpay/{bill_pay_number}"
+
+        headers = {"Authorization": token, "Content-Type": "application/json"}
+
+        payload = {}
+        if amount is not None:
+            payload["billAmount"] = int(amount)
+        if description is not None:
+            payload["billDescription"] = description
+
+        if not payload:
+            return {"success": False, "message": "Nothing to update"}
+
+        try:
+            response = requests.patch(url, json=payload, headers=headers, timeout=15)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(f"ClickPesa BillPay updated {bill_pay_number}: {result}")
+
+            return {
+                "success": True,
+                "bill_pay_number": result.get("billPayNumber", ""),
+                "bill_status": result.get("billStatus", ""),
+                "bill_amount": result.get("billAmount"),
+                "bill_description": result.get("billDescription", ""),
+                "bill_payment_mode": result.get("billPaymentMode", ""),
+                "data": result,
+            }
+
+        except requests.exceptions.RequestException as e:
+            error_message = "Failed to update bill"
+            if hasattr(e, "response") and e.response is not None:
+                logger.error(f"Response text: {e.response.text}")
+                try:
+                    error_data = e.response.json()
+                    error_message = error_data.get("message", error_message)
+                except Exception:
+                    pass
+            logger.error(f"ClickPesa BillPay update failed: {e}")
+            return {"success": False, "message": error_message}
+
+    def update_bill_status(self, bill_pay_number, bill_status="INACTIVE"):
+        """
+        Activate or deactivate a BillPay control number.
+
+        Args:
+            bill_pay_number: The control number
+            bill_status: "ACTIVE" or "INACTIVE"
+
+        Returns:
+            dict with success, updated status
+        """
+        token = self.get_access_token()
+        if not token:
+            return {
+                "success": False,
+                "message": "Failed to authenticate with ClickPesa",
+            }
+
+        url = f"{self.base_url}/third-parties/billpay/update-status"
+
+        headers = {"Authorization": token, "Content-Type": "application/json"}
+
+        payload = {
+            "billPayNumber": bill_pay_number,
+            "status": bill_status,
+        }
+
+        try:
+            response = requests.put(url, json=payload, headers=headers, timeout=15)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(
+                f"ClickPesa BillPay status updated {bill_pay_number} -> {bill_status}"
+            )
+
+            return {
+                "success": True,
+                "bill_pay_number": result.get("billPayNumber", ""),
+                "status": result.get("status", ""),
+                "data": result,
+            }
+
+        except requests.exceptions.RequestException as e:
+            error_message = "Failed to update bill status"
+            if hasattr(e, "response") and e.response is not None:
+                logger.error(f"Response text: {e.response.text}")
+                try:
+                    error_data = e.response.json()
+                    error_message = error_data.get("message", error_message)
+                except Exception:
+                    pass
+            logger.error(f"ClickPesa BillPay status update failed: {e}")
             return {"success": False, "message": error_message}

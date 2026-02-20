@@ -1824,6 +1824,7 @@ class PPPCustomerAdmin(admin.ModelAdmin):
         "synced_to_router",
         "last_payment_date",
         "last_payment_amount",
+        "control_number",
         "created_at",
         "updated_at",
     ]
@@ -1851,6 +1852,7 @@ class PPPCustomerAdmin(admin.ModelAdmin):
                     "paid_until",
                     "last_payment_date",
                     "last_payment_amount",
+                    "control_number",
                 ),
             },
         ),
@@ -1919,6 +1921,7 @@ class PPPPaymentAdmin(admin.ModelAdmin):
         "billing_days",
         "status_badge",
         "payment_channel",
+        "control_number",
         "created_at",
         "completed_at",
     ]
@@ -1926,6 +1929,7 @@ class PPPPaymentAdmin(admin.ModelAdmin):
     search_fields = [
         "order_reference",
         "payment_reference",
+        "control_number",
         "phone_number",
         "customer__username",
         "customer__full_name",
@@ -1933,6 +1937,7 @@ class PPPPaymentAdmin(admin.ModelAdmin):
     readonly_fields = [
         "order_reference",
         "payment_reference",
+        "control_number",
         "created_at",
         "completed_at",
     ]

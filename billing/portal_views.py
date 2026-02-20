@@ -6689,10 +6689,69 @@ def check_ppp_permission(tenant):
     return False, "PPP management requires Enterprise plan"
 
 
+def _create_ppp_customer_bill(customer):
+    """
+    Create a ClickPesa BillPay control number for a PPP customer.
+    This gives them a permanent control number they can use to pay
+    via M-Pesa, bank, USSD, etc.
+
+    Returns:
+        dict with success, control_number, data
+    """
+    try:
+        from .clickpesa import ClickPesaAPI
+
+        clickpesa = ClickPesaAPI()
+
+        price = int(customer.effective_price)
+        business_name = customer.tenant.business_name or "Kitonga WiFi"
+        plan_name = customer.plan.name if customer.plan else customer.profile.name
+
+        description = (
+            f"{business_name} - {plan_name} - {customer.full_name or customer.username}"
+        )
+        bill_reference = f"PPP-{customer.tenant.slug}-{customer.id}"
+
+        result = clickpesa.create_customer_control_number(
+            amount=price,
+            bill_reference=bill_reference,
+            customer_name=customer.full_name or customer.username,
+            customer_phone=customer.phone_number,
+            customer_email=customer.email,
+            description=description,
+            payment_mode="EXACT",
+        )
+
+        if result.get("success"):
+            control_number = result.get("bill_pay_number", "")
+            if control_number:
+                customer.control_number = control_number
+                customer.save(update_fields=["control_number", "updated_at"])
+                logger.info(
+                    f"ClickPesa control number {control_number} created for "
+                    f"PPP customer {customer.username}"
+                )
+            return {
+                "success": True,
+                "control_number": control_number,
+                "data": result,
+            }
+        else:
+            logger.error(
+                f"Failed to create ClickPesa control number for {customer.username}: "
+                f"{result.get('message')}"
+            )
+            return result
+
+    except Exception as e:
+        logger.error(f"Error creating PPP bill for {customer.username}: {e}")
+        return {"success": False, "message": str(e)}
+
+
 def _send_ppp_welcome_sms(customer):
     """
     Send welcome SMS to a new PPP customer with their credentials
-    and payment instructions.
+    and control number for payment.
     """
     try:
         from .nextsms import TenantNextSMSAPI
@@ -6709,14 +6768,24 @@ def _send_ppp_welcome_sms(customer):
         price = customer.effective_price
         business_name = tenant.business_name or "WiFi"
 
+        # Build payment instruction based on whether control number exists
+        if customer.control_number:
+            pay_line = (
+                f"Control No: {customer.control_number}\n"
+                f"Pay TSh {price:,.0f} via M-Pesa/Bank using this control number."
+            )
+        else:
+            pay_line = (
+                f"Pay TSh {price:,.0f} via M-Pesa/Airtel to activate.\n"
+                f"Payment code: PPP-{customer.id}"
+            )
+
         message = (
             f"{business_name} PPPoE Account Created!\n"
             f"Username: {customer.username}\n"
             f"Password: {customer.password}\n"
             f"Plan: {customer.profile.name} ({customer.profile.rate_limit})\n"
-            f"Monthly: TSh {price:,.0f}\n"
-            f"Pay via M-Pesa/Airtel to activate your internet.\n"
-            f"Payment code: PPP-{customer.id}"
+            f"{pay_line}"
         )
 
         result = sms_api.send_sms(
@@ -7474,7 +7543,12 @@ def portal_ppp_customers(request):
 
             sync_result = sync_ppp_secret_to_router(customer)
 
-        # --- Send SMS with credentials & payment info ---
+        # --- Create ClickPesa BillPay control number ---
+        bill_result = None
+        if customer.phone_number:
+            bill_result = _create_ppp_customer_bill(customer)
+
+        # --- Send SMS with credentials & control number ---
         sms_result = None
         if customer.phone_number:
             sms_result = _send_ppp_welcome_sms(customer)
@@ -7487,6 +7561,7 @@ def portal_ppp_customers(request):
                 "message": "PPP customer created",
                 "customer": PPPCustomerSerializer(customer).data,
                 "sync_result": sync_result,
+                "bill_result": bill_result,
                 "sms_result": sms_result,
             },
             status=status.HTTP_201_CREATED,
@@ -7909,6 +7984,191 @@ def portal_ppp_bulk_sync(request):
     )
 
 
+# ==================== PPP BILLPAY (ClickPesa) ENDPOINTS ====================
+
+
+@api_view(["POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_create_bill(request, customer_id):
+    """
+    Create or refresh a ClickPesa BillPay control number for a PPP customer.
+    If the customer already has one, updates the amount; otherwise creates new.
+
+    POST /api/portal/ppp/customers/<id>/create-bill/
+    Body: { "amount": 30000 }  (optional — defaults to effective_price)
+    """
+    from .models import PPPCustomer
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        customer = PPPCustomer.objects.get(id=customer_id, tenant=tenant)
+    except PPPCustomer.DoesNotExist:
+        return Response(
+            {"success": False, "error": "PPP customer not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    custom_amount = request.data.get("amount")
+
+    if customer.control_number and not custom_amount:
+        # Already has a control number and no amount change — update amount
+        from .clickpesa import ClickPesaAPI
+
+        clickpesa = ClickPesaAPI()
+        update_result = clickpesa.update_bill(
+            customer.control_number,
+            amount=int(customer.effective_price),
+        )
+        if update_result.get("success"):
+            return Response(
+                {
+                    "success": True,
+                    "message": "Control number amount updated",
+                    "control_number": customer.control_number,
+                    "amount": int(customer.effective_price),
+                    "data": update_result,
+                }
+            )
+        else:
+            # Update failed — create a new one
+            logger.warning(
+                f"Failed to update bill {customer.control_number}, creating new one"
+            )
+
+    # Create new control number (or custom amount bill)
+    if custom_amount:
+        # One-time bill with custom amount
+        from .clickpesa import ClickPesaAPI
+
+        clickpesa = ClickPesaAPI()
+        business_name = tenant.business_name or "Kitonga WiFi"
+        plan_name = customer.plan.name if customer.plan else customer.profile.name
+
+        bill_reference = f"PPP-{tenant.slug}-{customer.id}-{uuid.uuid4().hex[:6].upper()}"
+        description = (
+            f"{business_name} - {plan_name} - {customer.full_name or customer.username}"
+        )
+
+        result = clickpesa.create_customer_control_number(
+            amount=int(custom_amount),
+            bill_reference=bill_reference,
+            customer_name=customer.full_name or customer.username,
+            customer_phone=customer.phone_number,
+            customer_email=customer.email,
+            description=description,
+            payment_mode="EXACT",
+        )
+
+        if result.get("success"):
+            control_number = result.get("bill_pay_number", "")
+            customer.control_number = control_number
+            customer.save(update_fields=["control_number", "updated_at"])
+
+            return Response(
+                {
+                    "success": True,
+                    "message": f"Control number created: {control_number}",
+                    "control_number": control_number,
+                    "amount": int(custom_amount),
+                    "data": result,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+        else:
+            return Response(
+                {
+                    "success": False,
+                    "error": result.get("message", "Failed to create control number"),
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+    else:
+        result = _create_ppp_customer_bill(customer)
+        if result.get("success"):
+            return Response(
+                {
+                    "success": True,
+                    "message": f"Control number created: {result.get('control_number')}",
+                    "control_number": result.get("control_number"),
+                    "amount": int(customer.effective_price),
+                    "data": result,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+        else:
+            return Response(
+                {
+                    "success": False,
+                    "error": result.get("message", "Failed to create control number"),
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+
+@api_view(["GET"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_ppp_query_bill(request, customer_id):
+    """
+    Query the ClickPesa BillPay status for a PPP customer.
+
+    GET /api/portal/ppp/customers/<id>/bill-status/
+    """
+    from .models import PPPCustomer
+    from .clickpesa import ClickPesaAPI
+
+    tenant = request.tenant
+
+    allowed, error = check_ppp_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        customer = PPPCustomer.objects.get(id=customer_id, tenant=tenant)
+    except PPPCustomer.DoesNotExist:
+        return Response(
+            {"success": False, "error": "PPP customer not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if not customer.control_number:
+        return Response(
+            {
+                "success": False,
+                "error": "No control number for this customer. Use create-bill first.",
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    clickpesa = ClickPesaAPI()
+    result = clickpesa.query_bill_status(customer.control_number)
+
+    if result.get("success"):
+        return Response(
+            {
+                "success": True,
+                "customer": customer.username,
+                "control_number": customer.control_number,
+                "bill": result,
+            }
+        )
+    else:
+        return Response(
+            {"success": False, "error": result.get("message", "Query failed")},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+
 # ==================== PPP PAYMENT ENDPOINTS ====================
 
 
@@ -8102,6 +8362,7 @@ def portal_ppp_payment_history(request, customer_id):
             "order_reference": p.order_reference,
             "payment_reference": p.payment_reference,
             "payment_channel": p.payment_channel,
+            "control_number": p.control_number,
             "status": p.status,
             "phone_number": p.phone_number,
             "created_at": p.created_at.isoformat(),

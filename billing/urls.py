@@ -783,4 +783,15 @@ urlpatterns = [
         portal_views.portal_ppp_payment_history,
         name="portal_ppp_payment_history",
     ),
+    # PPP BillPay (ClickPesa) endpoints
+    path(
+        "portal/ppp/customers/<int:customer_id>/create-bill/",
+        portal_views.portal_ppp_create_bill,
+        name="portal_ppp_create_bill",
+    ),
+    path(
+        "portal/ppp/customers/<int:customer_id>/bill-status/",
+        portal_views.portal_ppp_query_bill,
+        name="portal_ppp_query_bill",
+    ),
 ]

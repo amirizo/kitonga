@@ -2838,6 +2838,13 @@ class PPPCustomer(models.Model):
         help_text="MikroTik internal ID (.id) of this secret on the router",
     )
 
+    # ClickPesa BillPay
+    control_number = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="ClickPesa BillPay control number for recurring payments",
+    )
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -2907,6 +2914,11 @@ class PPPPayment(models.Model):
         max_length=100, blank=True, help_text="External reference from Snippe"
     )
     payment_channel = models.CharField(max_length=50, default="snippe")
+    control_number = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="ClickPesa BillPay control number for this payment",
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     billing_days = models.IntegerField(
         default=30, help_text="Number of days this payment covers"
