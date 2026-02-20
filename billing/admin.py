@@ -1796,6 +1796,7 @@ class PPPCustomerAdmin(admin.ModelAdmin):
         "tenant",
         "router",
         "profile",
+        "plan",
         "status_badge",
         "billing_type",
         "effective_price_display",
@@ -1806,6 +1807,7 @@ class PPPCustomerAdmin(admin.ModelAdmin):
         "tenant",
         "router",
         "profile",
+        "plan",
         "status",
         "billing_type",
         "synced_to_router",
@@ -1827,7 +1829,7 @@ class PPPCustomerAdmin(admin.ModelAdmin):
     ]
 
     fieldsets = (
-        (None, {"fields": ("tenant", "router", "profile", "status")}),
+        (None, {"fields": ("tenant", "router", "profile", "plan", "status")}),
         (
             "PPP Credentials",
             {"fields": ("username", "password", "service")},
