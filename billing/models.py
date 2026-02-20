@@ -2901,17 +2901,13 @@ class PPPPayment(models.Model):
         PPPCustomer, on_delete=models.CASCADE, related_name="payments"
     )
     amount = models.DecimalField(max_digits=12, decimal_places=2)
-    phone_number = models.CharField(
-        max_length=20, help_text="Phone used for payment"
-    )
+    phone_number = models.CharField(max_length=20, help_text="Phone used for payment")
     order_reference = models.CharField(max_length=100, unique=True)
     payment_reference = models.CharField(
         max_length=100, blank=True, help_text="External reference from Snippe"
     )
     payment_channel = models.CharField(max_length=50, default="snippe")
-    status = models.CharField(
-        max_length=20, choices=STATUS_CHOICES, default="pending"
-    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     billing_days = models.IntegerField(
         default=30, help_text="Number of days this payment covers"
     )
@@ -2984,4 +2980,3 @@ class PPPPayment(models.Model):
     def mark_failed(self):
         self.status = "failed"
         self.save(update_fields=["status", "updated_at"])
-

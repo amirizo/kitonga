@@ -7241,9 +7241,7 @@ def portal_ppp_plan_detail(request, plan_id):
                 }
             )
         plan.delete()
-        return Response(
-            {"success": True, "message": f"Plan '{plan.name}' deleted"}
-        )
+        return Response({"success": True, "message": f"Plan '{plan.name}' deleted"})
 
     # PUT — Update
     serializer = PPPPlanCreateSerializer(data=request.data, partial=True)
@@ -7269,10 +7267,21 @@ def portal_ppp_plan_detail(request, plan_id):
 
     # Update fields
     updatable = [
-        "name", "description", "price", "currency", "billing_cycle",
-        "billing_days", "data_limit_gb", "download_speed", "upload_speed",
-        "features", "display_order", "is_popular", "is_active",
-        "promo_price", "promo_label",
+        "name",
+        "description",
+        "price",
+        "currency",
+        "billing_cycle",
+        "billing_days",
+        "data_limit_gb",
+        "download_speed",
+        "upload_speed",
+        "features",
+        "display_order",
+        "is_popular",
+        "is_active",
+        "promo_price",
+        "promo_label",
     ]
     for field in updatable:
         if field in data:
@@ -7962,9 +7971,7 @@ def portal_ppp_initiate_payment(request, customer_id):
             amount = int(base_price)
 
     # Check for existing pending payment for this customer
-    pending = PPPPayment.objects.filter(
-        customer=customer, status="pending"
-    ).first()
+    pending = PPPPayment.objects.filter(customer=customer, status="pending").first()
     if pending:
         # Expire old pending payment to avoid duplicates
         pending.status = "expired"
@@ -8007,12 +8014,14 @@ def portal_ppp_initiate_payment(request, customer_id):
     name_parts = (customer.full_name or customer.username).split(" ", 1)
     firstname = name_parts[0]
     lastname = name_parts[1] if len(name_parts) > 1 else ""
+    customer_email = customer.email or f"{customer.phone_number}@kitonga.klikcell.com"
 
     result = snippe.create_mobile_payment(
         phone_number=customer.phone_number,
         amount=int(amount),
         firstname=firstname,
         lastname=lastname,
+        email=customer_email,
         webhook_url=webhook_url,
         metadata=metadata,
         idempotency_key=order_reference,

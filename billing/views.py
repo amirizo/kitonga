@@ -5438,9 +5438,7 @@ def snippe_webhook(request):
             try:
                 from .models import PPPPayment
 
-                ppp_payment = PPPPayment.objects.get(
-                    order_reference=order_reference
-                )
+                ppp_payment = PPPPayment.objects.get(order_reference=order_reference)
 
                 if event_type == "payment.completed":
                     ppp_payment.mark_completed(
@@ -5462,9 +5460,7 @@ def snippe_webhook(request):
                             ppp_payment.customer, ppp_payment
                         )
                     except Exception as sms_err:
-                        logger.error(
-                            f"PPP payment confirmation SMS error: {sms_err}"
-                        )
+                        logger.error(f"PPP payment confirmation SMS error: {sms_err}")
 
                 elif event_type == "payment.failed":
                     ppp_payment.mark_failed()
@@ -5489,9 +5485,7 @@ def snippe_webhook(request):
                                 reference=f"PPP-FAIL-{ppp_payment.id}",
                             )
                     except Exception as sms_err:
-                        logger.error(
-                            f"PPP payment failed SMS error: {sms_err}"
-                        )
+                        logger.error(f"PPP payment failed SMS error: {sms_err}")
 
                 webhook_log.mark_processed()
                 return Response(
@@ -5499,9 +5493,7 @@ def snippe_webhook(request):
                 )
 
             except PPPPayment.DoesNotExist:
-                error_msg = (
-                    f"PPPPayment not found for ref: {order_reference}"
-                )
+                error_msg = f"PPPPayment not found for ref: {order_reference}"
                 logger.error(error_msg)
                 webhook_log.mark_failed(error_msg)
                 return Response(

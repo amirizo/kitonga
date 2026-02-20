@@ -437,11 +437,11 @@ def disconnect_expired_ppp_customers():
 
         for customer in expired_customers:
             try:
-                time_expired = now - customer.paid_until if customer.paid_until else None
+                time_expired = (
+                    now - customer.paid_until if customer.paid_until else None
+                )
                 expired_hours = (
-                    int(time_expired.total_seconds() / 3600)
-                    if time_expired
-                    else 0
+                    int(time_expired.total_seconds() / 3600) if time_expired else 0
                 )
 
                 logger.info(
@@ -466,9 +466,7 @@ def disconnect_expired_ppp_customers():
                 try:
                     kick_result = kick_ppp_session(customer.router, customer.username)
                     if kick_result.get("success"):
-                        logger.info(
-                            f"  ✅ PPP session kicked for {customer.username}"
-                        )
+                        logger.info(f"  ✅ PPP session kicked for {customer.username}")
                     else:
                         logger.info(
                             f"  ℹ️  No active PPP session to kick for {customer.username}"
@@ -550,9 +548,7 @@ def send_ppp_expiry_notifications():
             paid_until__lte=expiry_24h_end,
         ).exclude(billing_type="unlimited")
 
-        logger.info(
-            f"📢 PPP: Found {customers_24h.count()} customers expiring in ~24h"
-        )
+        logger.info(f"📢 PPP: Found {customers_24h.count()} customers expiring in ~24h")
 
         for customer in customers_24h:
             try:
@@ -579,9 +575,7 @@ def send_ppp_expiry_notifications():
             paid_until__lte=expiry_3h_end,
         ).exclude(billing_type="unlimited")
 
-        logger.info(
-            f"📢 PPP: Found {customers_3h.count()} customers expiring in ~3h"
-        )
+        logger.info(f"📢 PPP: Found {customers_3h.count()} customers expiring in ~3h")
 
         for customer in customers_3h:
             try:

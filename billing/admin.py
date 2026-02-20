@@ -1771,9 +1771,7 @@ class PPPPlanAdmin(admin.ModelAdmin):
     def customer_count_display(self, obj):
         count = obj.customer_count
         if count > 0:
-            return format_html(
-                '<span style="font-weight: bold;">{}</span>', count
-            )
+            return format_html('<span style="font-weight: bold;">{}</span>', count)
         return "0"
 
     customer_count_display.short_description = "Customers"
