@@ -4550,7 +4550,16 @@ def initiate_payment(request):
             )
 
 
-def _handle_ppp_billpay_webhook(webhook_data, webhook_log, order_reference, transaction_id, amount, channel, event_type, status_code):
+def _handle_ppp_billpay_webhook(
+    webhook_data,
+    webhook_log,
+    order_reference,
+    transaction_id,
+    amount,
+    channel,
+    event_type,
+    status_code,
+):
     """
     Handle ClickPesa BillPay webhook for PPP customer payments.
     Looks up PPP customer by control_number (the billPayNumber assigned by ClickPesa)
@@ -4582,7 +4591,9 @@ def _handle_ppp_billpay_webhook(webhook_data, webhook_log, order_reference, tran
             except PPPCustomer.DoesNotExist:
                 logger.warning(f"No PPP customer with control_number={bill_pay_number}")
             except PPPCustomer.MultipleObjectsReturned:
-                customer = PPPCustomer.objects.filter(control_number=bill_pay_number).first()
+                customer = PPPCustomer.objects.filter(
+                    control_number=bill_pay_number
+                ).first()
                 tenant = customer.tenant if customer else None
 
         # Strategy 2: The order_reference itself IS the auto-generated control number
@@ -4596,7 +4607,9 @@ def _handle_ppp_billpay_webhook(webhook_data, webhook_log, order_reference, tran
             except PPPCustomer.DoesNotExist:
                 pass
             except PPPCustomer.MultipleObjectsReturned:
-                customer = PPPCustomer.objects.filter(control_number=order_reference).first()
+                customer = PPPCustomer.objects.filter(
+                    control_number=order_reference
+                ).first()
                 tenant = customer.tenant if customer else None
 
         if not customer:
@@ -4611,14 +4624,21 @@ def _handle_ppp_billpay_webhook(webhook_data, webhook_log, order_reference, tran
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if event_type == "PAYMENT RECEIVED" or status_code in ["SUCCESS", "COMPLETED", "PAYMENT RECEIVED"]:
+        if event_type == "PAYMENT RECEIVED" or status_code in [
+            "SUCCESS",
+            "COMPLETED",
+            "PAYMENT RECEIVED",
+        ]:
             # Payment successful — create PPPPayment and activate customer
             from decimal import Decimal
 
-            payment_amount = Decimal(str(amount)) if amount else customer.effective_price
+            payment_amount = (
+                Decimal(str(amount)) if amount else customer.effective_price
+            )
 
             # Generate unique order_reference for this payment
             import uuid as _uuid
+
             payment_order_ref = f"PPPBILL-{customer.id}-{_uuid.uuid4().hex[:8].upper()}"
 
             ppp_payment = PPPPayment.objects.create(
@@ -4635,7 +4655,10 @@ def _handle_ppp_billpay_webhook(webhook_data, webhook_log, order_reference, tran
             )
 
             # mark_completed() extends paid_until, sets status=active, enables on router
-            ppp_payment.mark_completed(payment_reference=transaction_id or order_reference, channel="clickpesa_billpay")
+            ppp_payment.mark_completed(
+                payment_reference=transaction_id or order_reference,
+                channel="clickpesa_billpay",
+            )
 
             logger.info(
                 f"✓ PPP BillPay payment completed: customer={customer.username}, "
@@ -4650,7 +4673,9 @@ def _handle_ppp_billpay_webhook(webhook_data, webhook_log, order_reference, tran
                 if customer.phone_number:
                     nextsms = NextSMSAPI()
                     business_name = tenant.business_name or "Kitonga WiFi"
-                    plan_name = customer.plan.name if customer.plan else customer.profile.name
+                    plan_name = (
+                        customer.plan.name if customer.plan else customer.profile.name
+                    )
                     duration = customer.plan.duration_days if customer.plan else 30
 
                     sms_message = (
@@ -4677,7 +4702,10 @@ def _handle_ppp_billpay_webhook(webhook_data, webhook_log, order_reference, tran
 
             webhook_log.mark_processed()
             return Response(
-                {"success": True, "message": "PPP BillPay payment processed successfully"}
+                {
+                    "success": True,
+                    "message": "PPP BillPay payment processed successfully",
+                }
             )
 
         elif event_type == "PAYMENT FAILED" or status_code == "FAILED":
@@ -4687,7 +4715,9 @@ def _handle_ppp_billpay_webhook(webhook_data, webhook_log, order_reference, tran
 
             logger.warning(f"PPP BillPay payment failed: {order_reference}")
 
-            failed_order_ref = f"PPPBILL-FAIL-{customer.id}-{_uuid.uuid4().hex[:8].upper()}"
+            failed_order_ref = (
+                f"PPPBILL-FAIL-{customer.id}-{_uuid.uuid4().hex[:8].upper()}"
+            )
 
             PPPPayment.objects.create(
                 tenant=tenant,
@@ -4832,7 +4862,14 @@ def clickpesa_webhook(request):
                 f"PPP BillPay payment detected ({order_reference}), processing..."
             )
             return _handle_ppp_billpay_webhook(
-                webhook_data, webhook_log, order_reference, transaction_id, amount, channel, event_type, status_code
+                webhook_data,
+                webhook_log,
+                order_reference,
+                transaction_id,
+                amount,
+                channel,
+                event_type,
+                status_code,
             )
 
         # Find WiFi bundle payment by order reference
@@ -5157,6 +5194,7 @@ def clickpesa_webhook(request):
             # order_reference in the webhook IS the control number.
             # ============================================================
             from .models import PPPCustomer as _PPPCustomer
+
             ppp_customer = _PPPCustomer.objects.filter(
                 control_number=order_reference
             ).first()
@@ -5165,7 +5203,14 @@ def clickpesa_webhook(request):
                     f"PPP BillPay payment found by control_number ({order_reference}), processing..."
                 )
                 return _handle_ppp_billpay_webhook(
-                    webhook_data, webhook_log, order_reference, transaction_id, amount, channel, event_type, status_code
+                    webhook_data,
+                    webhook_log,
+                    order_reference,
+                    transaction_id,
+                    amount,
+                    channel,
+                    event_type,
+                    status_code,
                 )
 
             error_msg = f"Payment not found for order reference: {order_reference}"

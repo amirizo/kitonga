@@ -748,9 +748,7 @@ class ClickPesaAPI:
             response.raise_for_status()
 
             result = response.json()
-            logger.info(
-                f"ClickPesa BillPay order control number created: {result}"
-            )
+            logger.info(f"ClickPesa BillPay order control number created: {result}")
 
             return {
                 "success": True,
