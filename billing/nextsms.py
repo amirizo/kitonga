@@ -41,6 +41,7 @@ class NextSMSAPI:
         url = f"{self.base_url}/api/sms/v1/text/single"
 
         # Format phone number (ensure it starts with 255)
+        phone_number = phone_number.strip().lstrip("+")
         if phone_number.startswith("0"):
             phone_number = "255" + phone_number[1:]
         elif not phone_number.startswith("255"):
@@ -343,6 +344,7 @@ class TenantNextSMSAPI:
         url = f"{self.base_url}/api/sms/v1/text/single"
 
         # Format phone number (ensure it starts with 255)
+        phone_number = phone_number.strip().lstrip("+")
         if phone_number.startswith("0"):
             phone_number = "255" + phone_number[1:]
         elif not phone_number.startswith("255"):
