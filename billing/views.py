@@ -4553,53 +4553,65 @@ def initiate_payment(request):
 def _handle_ppp_billpay_webhook(webhook_data, webhook_log, order_reference, transaction_id, amount, channel, event_type, status_code):
     """
     Handle ClickPesa BillPay webhook for PPP customer payments.
-    order_reference format: PPP-{tenant_slug}-{customer_id} or PPP-{tenant_slug}-{customer_id}-{random}
+    Looks up PPP customer by control_number (the billPayNumber assigned by ClickPesa)
+    or falls back to matching the billReference pattern PPP{slug}{id}.
     """
     from .models import PPPCustomer, PPPPayment, Tenant
 
     try:
-        # Parse order_reference: PPP-{tenant_slug}-{customer_id}[-{random}]
-        parts = order_reference.split("-")
-        # PPP - tenant_slug - customer_id [- random_hex]
-        if len(parts) < 3:
-            error_msg = f"Invalid PPP bill reference format: {order_reference}"
-            logger.error(error_msg)
-            webhook_log.mark_failed(error_msg)
-            return Response(
-                {"success": False, "error": error_msg},
-                status=status.HTTP_400_BAD_REQUEST,
+        # ClickPesa BillPay webhook may include billPayNumber in the data
+        payment_data = webhook_data.get("data", webhook_data.get("payment", {}))
+        bill_pay_number = (
+            payment_data.get("billPayNumber")
+            or payment_data.get("bill_pay_number")
+            or payment_data.get("controlNumber")
+            or payment_data.get("control_number")
+        )
+
+        customer = None
+        tenant = None
+
+        # Strategy 1: Find customer by control_number (most reliable)
+        if bill_pay_number:
+            try:
+                customer = PPPCustomer.objects.get(control_number=bill_pay_number)
+                tenant = customer.tenant
+                logger.info(
+                    f"PPP customer found by control_number={bill_pay_number}: {customer.username}"
+                )
+            except PPPCustomer.DoesNotExist:
+                logger.warning(f"No PPP customer with control_number={bill_pay_number}")
+            except PPPCustomer.MultipleObjectsReturned:
+                customer = PPPCustomer.objects.filter(control_number=bill_pay_number).first()
+                tenant = customer.tenant if customer else None
+
+        # Strategy 2: Try to match bill_reference pattern from order_reference
+        if not customer and order_reference:
+            # order_reference is our billReference: PPP{slug}{id} or PPP{slug}{id}{random}
+            # Try to find any customer whose bill_reference matches
+            try:
+                customers = PPPCustomer.objects.filter(
+                    control_number__isnull=False
+                ).exclude(control_number="")
+                # Search through customers to match order_reference
+                for c in customers:
+                    slug = c.tenant.slug
+                    expected_prefix = f"PPP{slug}{c.id}"
+                    if order_reference.startswith(expected_prefix):
+                        customer = c
+                        tenant = c.tenant
+                        logger.info(
+                            f"PPP customer found by billReference match: {customer.username}"
+                        )
+                        break
+            except Exception as e:
+                logger.warning(f"Error searching PPP customers by billRef: {e}")
+
+        if not customer:
+            error_msg = (
+                f"PPP customer not found for billPay webhook: "
+                f"control_number={bill_pay_number}, order_ref={order_reference}"
             )
-
-        tenant_slug = parts[1]
-        customer_id_str = parts[2]
-
-        try:
-            customer_id = int(customer_id_str)
-        except ValueError:
-            error_msg = f"Invalid customer ID in PPP bill reference: {order_reference}"
-            logger.error(error_msg)
-            webhook_log.mark_failed(error_msg)
-            return Response(
-                {"success": False, "error": error_msg},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Find the tenant and customer
-        try:
-            tenant = Tenant.objects.get(slug=tenant_slug)
-        except Tenant.DoesNotExist:
-            error_msg = f"Tenant not found for slug: {tenant_slug}"
-            logger.error(error_msg)
-            webhook_log.mark_failed(error_msg)
-            return Response(
-                {"success": False, "error": "Tenant not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        try:
-            customer = PPPCustomer.objects.get(id=customer_id, tenant=tenant)
-        except PPPCustomer.DoesNotExist:
-            error_msg = f"PPP customer not found: id={customer_id}, tenant={tenant_slug}"
             logger.error(error_msg)
             webhook_log.mark_failed(error_msg)
             return Response(
@@ -4817,11 +4829,13 @@ def clickpesa_webhook(request):
             return subscription_payment_webhook(request)
 
         # ================================================================
-        # ROUTE PPP BILL PAYMENTS (order_reference starts with "PPP-")
+        # ROUTE PPP BILL PAYMENTS (order_reference starts with "PPP")
         # ClickPesa BillPay sends webhook when a control number is paid.
-        # We detect PPP payments here and process them.
+        # Bill references are alphanumeric: PPP{slug}{id} or PPPBILL{id}{hex}
         # ================================================================
-        if order_reference and order_reference.startswith("PPP-"):
+        if order_reference and (
+            order_reference.startswith("PPP") and not order_reference.startswith("PPPP")
+        ):
             logger.info(
                 f"PPP BillPay payment detected ({order_reference}), processing..."
             )
