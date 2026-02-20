@@ -735,10 +735,13 @@ class ClickPesaAPI:
 
         payload = {
             "billAmount": int(amount),
-            "billReference": bill_reference,
             "billDescription": description or f"Payment for {bill_reference}",
             "billPaymentMode": payment_mode,
         }
+        # Only include billReference if caller explicitly wants a custom number;
+        # omitting it lets ClickPesa auto-generate a numeric control number.
+        if bill_reference:
+            payload["billReference"] = bill_reference
 
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=30)
@@ -812,11 +815,14 @@ class ClickPesaAPI:
 
         payload = {
             "billAmount": int(amount),
-            "billReference": bill_reference,
             "billDescription": description or f"Payment for {bill_reference}",
             "billPaymentMode": payment_mode,
             "customerName": customer_name,
         }
+        # Only include billReference if caller explicitly wants a custom number;
+        # omitting it lets ClickPesa auto-generate a numeric control number.
+        if bill_reference:
+            payload["billReference"] = bill_reference
 
         if customer_phone:
             payload["customerPhone"] = self._format_phone(customer_phone)

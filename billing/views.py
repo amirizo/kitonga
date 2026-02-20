@@ -4585,27 +4585,19 @@ def _handle_ppp_billpay_webhook(webhook_data, webhook_log, order_reference, tran
                 customer = PPPCustomer.objects.filter(control_number=bill_pay_number).first()
                 tenant = customer.tenant if customer else None
 
-        # Strategy 2: Try to match bill_reference pattern from order_reference
+        # Strategy 2: The order_reference itself IS the auto-generated control number
         if not customer and order_reference:
-            # order_reference is our billReference: PPP{slug}{id} or PPP{slug}{id}{random}
-            # Try to find any customer whose bill_reference matches
             try:
-                customers = PPPCustomer.objects.filter(
-                    control_number__isnull=False
-                ).exclude(control_number="")
-                # Search through customers to match order_reference
-                for c in customers:
-                    slug = c.tenant.slug
-                    expected_prefix = f"PPP{slug}{c.id}"
-                    if order_reference.startswith(expected_prefix):
-                        customer = c
-                        tenant = c.tenant
-                        logger.info(
-                            f"PPP customer found by billReference match: {customer.username}"
-                        )
-                        break
-            except Exception as e:
-                logger.warning(f"Error searching PPP customers by billRef: {e}")
+                customer = PPPCustomer.objects.get(control_number=order_reference)
+                tenant = customer.tenant
+                logger.info(
+                    f"PPP customer found by order_reference as control_number={order_reference}: {customer.username}"
+                )
+            except PPPCustomer.DoesNotExist:
+                pass
+            except PPPCustomer.MultipleObjectsReturned:
+                customer = PPPCustomer.objects.filter(control_number=order_reference).first()
+                tenant = customer.tenant if customer else None
 
         if not customer:
             error_msg = (
@@ -4829,13 +4821,13 @@ def clickpesa_webhook(request):
             return subscription_payment_webhook(request)
 
         # ================================================================
-        # ROUTE PPP BILL PAYMENTS (order_reference starts with "PPP")
-        # ClickPesa BillPay sends webhook when a control number is paid.
-        # Bill references are alphanumeric: PPP{slug}{id} or PPPBILL{id}{hex}
+        # ROUTE PPP BILL PAYMENTS
+        # ClickPesa BillPay auto-generates numeric control numbers.
+        # We check if the order_reference matches a PPP customer's
+        # control_number as a fallback after WiFi/SUB lookups.
+        # If billReference was set explicitly (starts with "PPP"), route directly.
         # ================================================================
-        if order_reference and (
-            order_reference.startswith("PPP") and not order_reference.startswith("PPPP")
-        ):
+        if order_reference and order_reference.startswith("PPP"):
             logger.info(
                 f"PPP BillPay payment detected ({order_reference}), processing..."
             )
@@ -5158,6 +5150,23 @@ def clickpesa_webhook(request):
                 return subscription_payment_webhook(request)
             except TenantSubscriptionPayment.DoesNotExist:
                 pass
+
+            # ============================================================
+            # FALLBACK: Try PPP BillPay by control_number
+            # ClickPesa auto-generates numeric control numbers, so the
+            # order_reference in the webhook IS the control number.
+            # ============================================================
+            from .models import PPPCustomer as _PPPCustomer
+            ppp_customer = _PPPCustomer.objects.filter(
+                control_number=order_reference
+            ).first()
+            if ppp_customer:
+                logger.info(
+                    f"PPP BillPay payment found by control_number ({order_reference}), processing..."
+                )
+                return _handle_ppp_billpay_webhook(
+                    webhook_data, webhook_log, order_reference, transaction_id, amount, channel, event_type, status_code
+                )
 
             error_msg = f"Payment not found for order reference: {order_reference}"
             logger.error(error_msg)

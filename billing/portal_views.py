@@ -6710,11 +6710,11 @@ def _create_ppp_customer_bill(customer):
         description = (
             f"{business_name} - {plan_name} - {customer.full_name or customer.username}"
         )
-        bill_reference = f"PPP{customer.tenant.slug}{customer.id}"
 
+        # Don't pass bill_reference so ClickPesa auto-generates a numeric control number
         result = clickpesa.create_customer_control_number(
             amount=price,
-            bill_reference=bill_reference,
+            bill_reference="",
             customer_name=customer.full_name or customer.username,
             customer_phone=customer.phone_number,
             customer_email=customer.email,
@@ -8052,7 +8052,7 @@ def portal_ppp_create_bill(request, customer_id):
         business_name = tenant.business_name or "Kitonga WiFi"
         plan_name = customer.plan.name if customer.plan else customer.profile.name
 
-        bill_reference = f"PPP{tenant.slug}{customer.id}{uuid.uuid4().hex[:6].upper()}"
+        bill_reference = ""  # Let ClickPesa auto-generate a numeric control number
         description = (
             f"{business_name} - {plan_name} - {customer.full_name or customer.username}"
         )
