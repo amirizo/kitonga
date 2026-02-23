@@ -5571,6 +5571,11 @@ def snippe_webhook(request):
 
     Receives ``payment.completed``, ``payment.failed``,
     ``payout.completed``, and ``payout.failed`` events.
+
+    Webhook Headers (from Snippe):
+        X-Webhook-Event     – Event type (e.g. payment.completed)
+        X-Webhook-Timestamp  – Unix timestamp when webhook was sent
+        X-Webhook-Signature  – HMAC-SHA256 signature for verification
     """
     webhook_log = None
 
@@ -5578,7 +5583,7 @@ def snippe_webhook(request):
         webhook_data = request.data
         logger.info(f"Snippe webhook received: {json.dumps(webhook_data)}")
 
-        # --- Optional signature verification ---
+        # --- Signature verification ---
         signature = request.META.get("HTTP_X_WEBHOOK_SIGNATURE", "")
         if signature:
             raw_body = (
@@ -5594,7 +5599,11 @@ def snippe_webhook(request):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-        event_type = webhook_data.get("type", "")
+        # Use body 'type' field; fall back to X-Webhook-Event header
+        event_type = webhook_data.get("type", "") or request.META.get(
+            "HTTP_X_WEBHOOK_EVENT", ""
+        )
+        event_id = webhook_data.get("id", "")
         event_data = webhook_data.get("data", {})
 
         reference = event_data.get("reference", "")
@@ -5749,6 +5758,168 @@ def snippe_webhook(request):
                 webhook_log.mark_failed(error_msg)
                 return Response(
                     {"success": False, "error": "PPP Payment not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        # VPN (Remote Access) payment routing
+        if order_reference.startswith("VPN"):
+            try:
+                from .models import RemoteAccessPayment
+
+                vpn_payment = RemoteAccessPayment.objects.select_related(
+                    "remote_user", "remote_user__vpn_config", "tenant", "plan"
+                ).get(order_reference=order_reference)
+
+                if event_type == "payment.completed":
+                    vpn_payment.mark_completed()
+                    logger.info(
+                        f"VPN payment completed: {order_reference} "
+                        f"user={vpn_payment.remote_user.name} "
+                        f"tenant={vpn_payment.tenant.slug}"
+                    )
+
+                    # Re-enable WireGuard peer on the router if it was disabled
+                    remote_user = vpn_payment.remote_user
+                    try:
+                        from .mikrotik import (
+                            enable_wireguard_peer,
+                            setup_wireguard_bandwidth_queue,
+                        )
+
+                        enable_result = enable_wireguard_peer(remote_user)
+                        if enable_result.get("success"):
+                            logger.info(
+                                f"✅ VPN peer re-enabled on router for {remote_user.name}"
+                            )
+                        else:
+                            logger.warning(
+                                f"⚠️ VPN peer enable failed for {remote_user.name}: "
+                                f"{enable_result.get('message')}"
+                            )
+
+                        # Apply bandwidth queue from plan
+                        setup_wireguard_bandwidth_queue(remote_user)
+                    except Exception as router_err:
+                        logger.error(
+                            f"VPN router enable after payment error: {router_err}"
+                        )
+
+                    # Log the event
+                    try:
+                        from .models import RemoteAccessLog
+
+                        RemoteAccessLog.objects.create(
+                            tenant=vpn_payment.tenant,
+                            remote_user=remote_user,
+                            event_type="payment",
+                            event_details=(
+                                f"Payment completed: TSh {vpn_payment.amount:,.0f} "
+                                f"for {vpn_payment.billing_days} days. "
+                                f"Ref: {order_reference}"
+                            ),
+                        )
+                    except Exception:
+                        pass
+
+                    # Send payment confirmation SMS
+                    try:
+                        from .nextsms import TenantNextSMSAPI
+
+                        tenant = vpn_payment.tenant
+                        sms_api = TenantNextSMSAPI(tenant)
+                        if sms_api.is_configured() and vpn_payment.phone_number:
+                            business = tenant.business_name or "WiFi"
+                            expires_str = (
+                                remote_user.expires_at.strftime("%d %b %Y %H:%M")
+                                if remote_user.expires_at
+                                else "Unlimited"
+                            )
+                            sms_api.send_sms(
+                                vpn_payment.phone_number,
+                                f"{business} VPN: Payment of TSh {vpn_payment.amount:,.0f} "
+                                f"received. Your remote access is active until {expires_str}.",
+                                reference=f"VPN-CONF-{vpn_payment.id}",
+                            )
+                    except Exception as sms_err:
+                        logger.error(f"VPN payment confirmation SMS error: {sms_err}")
+
+                    # Trigger webhook notification
+                    try:
+                        from .webhook_service import WebhookService
+
+                        WebhookService.dispatch_event(
+                            tenant=vpn_payment.tenant,
+                            event_type="payment.completed",
+                            data={
+                                "payment_type": "vpn",
+                                "order_reference": order_reference,
+                                "amount": str(vpn_payment.amount),
+                                "remote_user_id": str(remote_user.id),
+                                "remote_user_name": remote_user.name,
+                                "billing_days": vpn_payment.billing_days,
+                                "expires_at": (
+                                    remote_user.expires_at.isoformat()
+                                    if remote_user.expires_at
+                                    else None
+                                ),
+                            },
+                        )
+                    except Exception:
+                        pass
+
+                elif event_type == "payment.failed":
+                    vpn_payment.mark_failed()
+                    logger.warning(
+                        f"VPN payment failed: {order_reference} "
+                        f"user={vpn_payment.remote_user.name}"
+                    )
+
+                    failure_reason = event_data.get("failure_reason", "Payment failed")
+
+                    # Log the event
+                    try:
+                        from .models import RemoteAccessLog
+
+                        RemoteAccessLog.objects.create(
+                            tenant=vpn_payment.tenant,
+                            remote_user=vpn_payment.remote_user,
+                            event_type="payment",
+                            event_details=(
+                                f"Payment failed: TSh {vpn_payment.amount:,.0f}. "
+                                f"Reason: {failure_reason}. Ref: {order_reference}"
+                            ),
+                        )
+                    except Exception:
+                        pass
+
+                    # Notify user of failed payment
+                    try:
+                        from .nextsms import TenantNextSMSAPI
+
+                        tenant = vpn_payment.tenant
+                        sms_api = TenantNextSMSAPI(tenant)
+                        if sms_api.is_configured() and vpn_payment.phone_number:
+                            business = tenant.business_name or "WiFi"
+                            sms_api.send_sms(
+                                vpn_payment.phone_number,
+                                f"{business} VPN: Payment of TSh {vpn_payment.amount:,.0f} "
+                                f"failed. Please try again.",
+                                reference=f"VPN-FAIL-{vpn_payment.id}",
+                            )
+                    except Exception as sms_err:
+                        logger.error(f"VPN payment failed SMS error: {sms_err}")
+
+                webhook_log.mark_processed()
+                return Response(
+                    {"success": True, "message": "VPN payment webhook processed"}
+                )
+
+            except RemoteAccessPayment.DoesNotExist:
+                error_msg = f"RemoteAccessPayment not found for ref: {order_reference}"
+                logger.error(error_msg)
+                webhook_log.mark_failed(error_msg)
+                return Response(
+                    {"success": False, "error": "VPN Payment not found"},
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
