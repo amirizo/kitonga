@@ -5580,17 +5580,19 @@ def snippe_webhook(request):
     webhook_log = None
 
     try:
+        # Read raw body FIRST (before request.data consumes the stream)
+        raw_body = (
+            request.body.decode("utf-8")
+            if isinstance(request.body, bytes)
+            else str(request.body)
+        )
+
         webhook_data = request.data
         logger.info(f"Snippe webhook received: {json.dumps(webhook_data)}")
 
         # --- Signature verification ---
         signature = request.META.get("HTTP_X_WEBHOOK_SIGNATURE", "")
         if signature:
-            raw_body = (
-                request.body.decode("utf-8")
-                if isinstance(request.body, bytes)
-                else str(request.body)
-            )
             snippe = SnippeAPI()
             if not snippe.verify_signature(raw_body, signature):
                 logger.warning("Snippe webhook signature verification failed")
