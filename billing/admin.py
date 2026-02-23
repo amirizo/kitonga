@@ -45,6 +45,12 @@ from .models import (
     PPPPlan,
     PPPCustomer,
     PPPPayment,
+    # Remote Access (VPN) Models
+    TenantVPNConfig,
+    RemoteUser,
+    RemoteAccessLog,
+    RemoteAccessPlan,
+    RemoteAccessPayment,
 )
 
 
@@ -102,6 +108,7 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
                     "max_vouchers_per_month",
                     "max_locations",
                     "max_staff_accounts",
+                    "max_remote_users",
                 )
             },
         ),
@@ -116,6 +123,7 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
                     "priority_support",
                     "analytics_dashboard",
                     "sms_notifications",
+                    "remote_user_access",
                 )
             },
         ),
@@ -1609,6 +1617,479 @@ class TenantAnalyticsSnapshotAdmin(admin.ModelAdmin):
         return f"TZS {obj.total_revenue:,.0f}"
 
     total_revenue_display.short_description = "Revenue"
+
+
+# =============================================================================
+# REMOTE USER ACCESS (VPN) ADMIN — Enterprise Plan
+# =============================================================================
+
+
+class RemoteUserInline(admin.TabularInline):
+    """Inline for remote users within VPN config"""
+
+    model = RemoteUser
+    extra = 0
+    fields = [
+        "name",
+        "plan",
+        "assigned_ip",
+        "status",
+        "is_active",
+        "expires_at",
+        "config_downloaded",
+        "is_configured_on_router",
+        "last_handshake",
+    ]
+    readonly_fields = ["last_handshake", "config_downloaded", "is_configured_on_router"]
+
+
+@admin.register(TenantVPNConfig)
+class TenantVPNConfigAdmin(admin.ModelAdmin):
+    """Manage per-tenant WireGuard VPN configurations"""
+
+    list_display = [
+        "tenant",
+        "router",
+        "interface_name",
+        "listen_port",
+        "address_pool",
+        "is_active",
+        "is_configured_on_router",
+        "last_synced_at",
+    ]
+    list_filter = ["is_active", "is_configured_on_router"]
+    search_fields = ["tenant__business_name", "router__name"]
+    readonly_fields = [
+        "id",
+        "server_public_key",
+        "last_synced_at",
+        "last_sync_error",
+        "created_at",
+        "updated_at",
+    ]
+    inlines = [RemoteUserInline]
+
+    fieldsets = (
+        (
+            "Tenant & Router",
+            {
+                "fields": ("id", "tenant", "router"),
+            },
+        ),
+        (
+            "WireGuard Interface",
+            {
+                "fields": (
+                    "interface_name",
+                    "listen_port",
+                    "server_private_key",
+                    "server_public_key",
+                ),
+            },
+        ),
+        (
+            "Network Configuration",
+            {
+                "fields": (
+                    "address_pool",
+                    "server_address",
+                    "dns_servers",
+                    "mtu",
+                    "persistent_keepalive",
+                    "allowed_ips",
+                ),
+            },
+        ),
+        (
+            "Router Integration",
+            {
+                "fields": (
+                    "enable_nat",
+                    "enable_firewall_rules",
+                    "is_configured_on_router",
+                    "last_synced_at",
+                    "last_sync_error",
+                ),
+            },
+        ),
+        (
+            "Status",
+            {
+                "fields": ("is_active", "created_at", "updated_at"),
+            },
+        ),
+    )
+
+
+@admin.register(RemoteUser)
+class RemoteUserAdmin(admin.ModelAdmin):
+    """Manage remote VPN users (WireGuard peers)"""
+
+    list_display = [
+        "name",
+        "tenant",
+        "plan_name",
+        "assigned_ip",
+        "status",
+        "is_active",
+        "is_configured_on_router",
+        "expires_at",
+        "last_handshake",
+        "created_at",
+    ]
+    list_filter = [
+        "status",
+        "is_active",
+        "is_configured_on_router",
+        "config_downloaded",
+        "plan",
+        "tenant",
+    ]
+    search_fields = [
+        "name",
+        "email",
+        "phone",
+        "assigned_ip",
+        "tenant__business_name",
+    ]
+    readonly_fields = [
+        "id",
+        "public_key",
+        "is_configured_on_router",
+        "config_downloaded",
+        "last_handshake",
+        "created_at",
+        "updated_at",
+    ]
+    list_editable = ["status", "is_active"]
+    date_hierarchy = "created_at"
+
+    def plan_name(self, obj):
+        return obj.plan.name if obj.plan else "—"
+
+    plan_name.short_description = "Plan"
+
+
+@admin.register(RemoteAccessLog)
+class RemoteAccessLogAdmin(admin.ModelAdmin):
+    """View remote access VPN event logs"""
+
+    list_display = [
+        "remote_user",
+        "tenant",
+        "event_type",
+        "client_endpoint",
+        "bytes_sent",
+        "bytes_received",
+        "timestamp",
+    ]
+    list_filter = ["event_type", "tenant"]
+    search_fields = [
+        "remote_user__name",
+        "tenant__business_name",
+        "client_endpoint",
+    ]
+    readonly_fields = [
+        "id",
+        "remote_user",
+        "tenant",
+        "event_type",
+        "event_details",
+        "client_endpoint",
+        "bytes_sent",
+        "bytes_received",
+        "timestamp",
+        "created_at",
+    ]
+    date_hierarchy = "timestamp"
+
+    def has_add_permission(self, request):
+        return False  # Logs are created programmatically
+
+    def has_change_permission(self, request, obj=None):
+        return False  # Logs are read-only
+
+
+@admin.register(RemoteAccessPlan)
+class RemoteAccessPlanAdmin(admin.ModelAdmin):
+    """Manage remote access VPN plans that tenants sell to their users"""
+
+    list_display = [
+        "name",
+        "tenant_name",
+        "price_display",
+        "billing_cycle",
+        "speed_display",
+        "data_display",
+        "subscriber_count_display",
+        "popular_badge",
+        "is_active",
+    ]
+    list_filter = ["is_active", "billing_cycle", "tenant", "is_popular"]
+    search_fields = ["name", "description", "tenant__business_name"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    ordering = ["tenant", "display_order"]
+
+    fieldsets = (
+        (
+            "Plan Info",
+            {
+                "fields": (
+                    "id",
+                    "tenant",
+                    "name",
+                    "description",
+                    "is_active",
+                ),
+            },
+        ),
+        (
+            "Pricing",
+            {
+                "fields": (
+                    "price",
+                    "currency",
+                    "promo_price",
+                    "promo_label",
+                ),
+            },
+        ),
+        (
+            "Billing Cycle",
+            {
+                "fields": (
+                    "billing_cycle",
+                    "billing_days",
+                ),
+            },
+        ),
+        (
+            "Bandwidth & Data",
+            {
+                "fields": (
+                    "bandwidth_limit_down",
+                    "bandwidth_limit_up",
+                    "download_speed",
+                    "upload_speed",
+                    "data_limit_gb",
+                ),
+            },
+        ),
+        (
+            "Access Scope",
+            {
+                "fields": (
+                    "max_devices_per_user",
+                    "allowed_ips",
+                    "full_tunnel",
+                ),
+            },
+        ),
+        (
+            "Display",
+            {
+                "fields": (
+                    "features",
+                    "display_order",
+                    "is_popular",
+                ),
+            },
+        ),
+        (
+            "Timestamps",
+            {
+                "fields": ("created_at", "updated_at"),
+                "classes": ("collapse",),
+            },
+        ),
+    )
+
+    def tenant_name(self, obj):
+        return obj.tenant.business_name
+
+    tenant_name.short_description = "Tenant"
+
+    def price_display(self, obj):
+        if obj.promo_price is not None:
+            return format_html(
+                '<span style="text-decoration: line-through; color: #999;">TZS {}</span> '
+                '<span style="color: #10b981; font-weight: bold;">TZS {}</span>',
+                f"{obj.price:,.0f}",
+                f"{obj.promo_price:,.0f}",
+            )
+        return f"TZS {obj.price:,.0f}"
+
+    price_display.short_description = "Price"
+
+    def speed_display(self, obj):
+        return obj.speed_display
+
+    speed_display.short_description = "Speed"
+
+    def data_display(self, obj):
+        return obj.data_display
+
+    data_display.short_description = "Data"
+
+    def subscriber_count_display(self, obj):
+        count = obj.subscriber_count
+        if count > 0:
+            return format_html('<span style="font-weight: bold;">{}</span>', count)
+        return "0"
+
+    subscriber_count_display.short_description = "Subscribers"
+
+    def popular_badge(self, obj):
+        if obj.is_popular:
+            return format_html(
+                '<span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px;">⭐ POPULAR</span>'
+            )
+        return "—"
+
+    popular_badge.short_description = "Popular"
+
+
+@admin.register(RemoteAccessPayment)
+class RemoteAccessPaymentAdmin(admin.ModelAdmin):
+    """Track remote access VPN payments"""
+
+    list_display = [
+        "order_reference",
+        "remote_user_name",
+        "tenant_name",
+        "plan_name",
+        "amount_display",
+        "billing_days",
+        "status_badge",
+        "payment_channel",
+        "created_at",
+        "completed_at",
+    ]
+    list_filter = ["status", "payment_channel", "tenant", "billing_days"]
+    search_fields = [
+        "order_reference",
+        "payment_reference",
+        "transaction_id",
+        "phone_number",
+        "remote_user__name",
+        "tenant__business_name",
+    ]
+    readonly_fields = [
+        "id",
+        "order_reference",
+        "payment_reference",
+        "transaction_id",
+        "created_at",
+        "updated_at",
+        "completed_at",
+    ]
+    ordering = ["-created_at"]
+    date_hierarchy = "created_at"
+
+    fieldsets = (
+        (
+            "Payment Info",
+            {
+                "fields": (
+                    "id",
+                    "tenant",
+                    "remote_user",
+                    "plan",
+                    "order_reference",
+                ),
+            },
+        ),
+        (
+            "Amount & Duration",
+            {
+                "fields": (
+                    "amount",
+                    "currency",
+                    "billing_days",
+                ),
+            },
+        ),
+        (
+            "Payment Method",
+            {
+                "fields": (
+                    "payment_channel",
+                    "phone_number",
+                    "payment_reference",
+                    "transaction_id",
+                ),
+            },
+        ),
+        (
+            "Status & Timestamps",
+            {
+                "fields": (
+                    "status",
+                    "created_at",
+                    "updated_at",
+                    "completed_at",
+                ),
+            },
+        ),
+    )
+
+    actions = ["mark_as_completed", "mark_as_failed"]
+
+    def remote_user_name(self, obj):
+        return obj.remote_user.name
+
+    remote_user_name.short_description = "Remote User"
+
+    def tenant_name(self, obj):
+        return obj.tenant.business_name
+
+    tenant_name.short_description = "Tenant"
+
+    def plan_name(self, obj):
+        return obj.plan.name if obj.plan else "—"
+
+    plan_name.short_description = "Plan"
+
+    def amount_display(self, obj):
+        return f"TZS {obj.amount:,.0f}"
+
+    amount_display.short_description = "Amount"
+
+    def status_badge(self, obj):
+        colors = {
+            "pending": "#f59e0b",
+            "completed": "#10b981",
+            "failed": "#ef4444",
+            "expired": "#6b7280",
+            "refunded": "#8b5cf6",
+        }
+        color = colors.get(obj.status, "#6b7280")
+        return format_html(
+            '<span style="background: {}; color: white; padding: 2px 8px; border-radius: 4px;">{}</span>',
+            color,
+            obj.status.upper(),
+        )
+
+    status_badge.short_description = "Status"
+
+    def mark_as_completed(self, request, queryset):
+        """Mark selected payments as completed and extend user access"""
+        for payment in queryset.filter(status="pending"):
+            payment.mark_completed()
+        self.message_user(
+            request,
+            f"Processed {queryset.filter(status='completed').count()} payment(s).",
+        )
+
+    mark_as_completed.short_description = "Mark as completed (extends access)"
+
+    def mark_as_failed(self, request, queryset):
+        """Mark selected payments as failed"""
+        for payment in queryset.filter(status="pending"):
+            payment.mark_failed()
+        self.message_user(request, "Selected payments marked as failed.")
+
+    mark_as_failed.short_description = "Mark as failed"
 
 
 # =============================================================================

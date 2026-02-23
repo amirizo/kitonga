@@ -49,6 +49,7 @@ class SubscriptionPlan(models.Model):
     max_vouchers_per_month = models.IntegerField(default=500)
     max_locations = models.IntegerField(default=1)
     max_staff_accounts = models.IntegerField(default=2)
+    max_remote_users = models.IntegerField(default=0)  # 0 = feature disabled
 
     # Features
     custom_branding = models.BooleanField(default=False)
@@ -65,6 +66,9 @@ class SubscriptionPlan(models.Model):
     auto_sms_campaigns = models.BooleanField(default=False)  # Scheduled/triggered SMS
     webhook_notifications = models.BooleanField(default=False)  # Real-time callbacks
     data_export = models.BooleanField(default=False)  # Export to CSV/Excel/PDF
+    remote_user_access = models.BooleanField(
+        default=False
+    )  # Per-tenant VPN exit for remote users
 
     # Revenue sharing (platform takes percentage of WiFi payments)
     revenue_share_percentage = models.DecimalField(
@@ -223,6 +227,14 @@ class Tenant(models.Model):
                 "used": self.staff_members.filter(is_active=True).count(),
                 "limit": plan.max_staff_accounts,
             },
+            "remote_users": {
+                "used": (
+                    self.remote_users.filter(is_active=True).count()
+                    if hasattr(self, "remote_users")
+                    else 0
+                ),
+                "limit": plan.max_remote_users,
+            },
         }
 
     def can_add_router(self):
@@ -239,6 +251,19 @@ class Tenant(models.Model):
         if not self.subscription_plan:
             return False
         return self.wifi_users.count() < self.subscription_plan.max_wifi_users
+
+    def can_add_remote_user(self):
+        """Check if tenant can add another remote VPN user"""
+        if not self.subscription_plan:
+            return False
+        if not self.subscription_plan.remote_user_access:
+            return False
+        if self.subscription_plan.max_remote_users <= 0:
+            return False
+        return (
+            self.remote_users.filter(is_active=True).count()
+            < self.subscription_plan.max_remote_users
+        )
 
 
 class EmailOTP(models.Model):
@@ -635,6 +660,725 @@ class RouterHotspotCustomization(models.Model):
 
     def __str__(self):
         return f"Hotspot customization for {self.router.name}"
+
+
+# =============================================================================
+# REMOTE USER ACCESS (VPN) MODELS
+# =============================================================================
+
+
+class TenantVPNConfig(models.Model):
+    """
+    Per-tenant WireGuard VPN configuration.
+    Each tenant gets one WireGuard interface on their router.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.OneToOneField(
+        Tenant, on_delete=models.CASCADE, related_name="vpn_config"
+    )
+    router = models.ForeignKey(
+        "Router",
+        on_delete=models.CASCADE,
+        related_name="vpn_configs",
+        help_text="Router where WireGuard interface is configured",
+    )
+
+    # WireGuard Interface Settings
+    interface_name = models.CharField(
+        max_length=15,
+        default="wg-remote",
+        help_text="WireGuard interface name on the router (max 15 chars)",
+    )
+    listen_port = models.IntegerField(
+        default=51820, help_text="UDP port for WireGuard on the router"
+    )
+
+    # Server Keys (stored encrypted in production)
+    server_private_key = models.CharField(
+        max_length=64, help_text="WireGuard server private key (base64)"
+    )
+    server_public_key = models.CharField(
+        max_length=64, help_text="WireGuard server public key (base64)"
+    )
+
+    # Network Configuration
+    address_pool = models.CharField(
+        max_length=18,
+        default="10.100.0.0/24",
+        help_text="VPN address pool CIDR (e.g. 10.100.0.0/24)",
+    )
+    server_address = models.GenericIPAddressField(
+        default="10.100.0.1", help_text="Server-side VPN IP address"
+    )
+    dns_servers = models.CharField(
+        max_length=100,
+        default="1.1.1.1, 8.8.8.8",
+        help_text="DNS servers pushed to clients",
+    )
+    mtu = models.IntegerField(default=1420, help_text="MTU for WireGuard tunnel")
+    persistent_keepalive = models.IntegerField(
+        default=25, help_text="Keepalive interval in seconds (0 to disable)"
+    )
+
+    # Router-side configuration flags
+    enable_nat = models.BooleanField(
+        default=True, help_text="Enable NAT/masquerade for VPN traffic to reach LAN"
+    )
+    enable_firewall_rules = models.BooleanField(
+        default=True, help_text="Auto-create firewall rules for VPN traffic"
+    )
+
+    # Allowed traffic / routing
+    allowed_ips = models.CharField(
+        max_length=500,
+        default="0.0.0.0/0",
+        help_text="Default allowed IPs for clients (full tunnel or split)",
+    )
+
+    # Status
+    is_active = models.BooleanField(default=True)
+    is_configured_on_router = models.BooleanField(
+        default=False,
+        help_text="Whether the WireGuard interface has been pushed to the router",
+    )
+    last_synced_at = models.DateTimeField(
+        null=True, blank=True, help_text="Last time config was synced to the router"
+    )
+    last_sync_error = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Tenant VPN Configuration"
+        verbose_name_plural = "Tenant VPN Configurations"
+
+    def __str__(self):
+        return f"VPN Config: {self.tenant.business_name} ({self.interface_name})"
+
+    def get_next_available_ip(self):
+        """
+        Get the next available IP address from the address pool.
+        Skips the server address and any already-assigned addresses.
+        """
+        import ipaddress
+
+        network = ipaddress.ip_network(self.address_pool, strict=False)
+        used_ips = set(
+            self.remote_users.filter(is_active=True).values_list(
+                "assigned_ip", flat=True
+            )
+        )
+        used_ips.add(str(self.server_address))
+
+        # Skip network address and broadcast
+        for host in network.hosts():
+            ip_str = str(host)
+            if ip_str not in used_ips:
+                return ip_str
+
+        return None  # Pool exhausted
+
+
+class RemoteUser(models.Model):
+    """
+    A remote VPN user (WireGuard peer) assigned to a tenant.
+    Each remote user gets a unique key pair and IP from the tenant's VPN pool.
+    """
+
+    STATUS_CHOICES = [
+        ("active", "Active"),
+        ("disabled", "Disabled"),
+        ("expired", "Expired"),
+        ("revoked", "Revoked"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="remote_users"
+    )
+    vpn_config = models.ForeignKey(
+        TenantVPNConfig,
+        on_delete=models.CASCADE,
+        related_name="remote_users",
+        help_text="The VPN configuration this user belongs to",
+    )
+
+    # User identification
+    name = models.CharField(
+        max_length=100, help_text="Display name for this remote user"
+    )
+    email = models.EmailField(
+        blank=True, help_text="Optional email for config delivery"
+    )
+    phone = models.CharField(
+        max_length=20, blank=True, help_text="Optional phone number"
+    )
+    notes = models.TextField(blank=True, help_text="Admin notes about this user")
+
+    # Plan (optional — links to the commercial plan this user purchased)
+    plan = models.ForeignKey(
+        "RemoteAccessPlan",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="remote_users",
+        help_text="The remote access plan this user is subscribed to",
+    )
+
+    # WireGuard Peer Keys
+    public_key = models.CharField(
+        max_length=64, help_text="Client WireGuard public key (base64)"
+    )
+    private_key = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Client private key (only stored temporarily for config generation)",
+    )
+    preshared_key = models.CharField(
+        max_length=64, blank=True, help_text="Optional preshared key for extra security"
+    )
+
+    # Network
+    assigned_ip = models.GenericIPAddressField(
+        help_text="IP address assigned to this peer from the VPN pool"
+    )
+    allowed_ips = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="Override allowed IPs for this specific peer",
+    )
+
+    # Access Control
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="active")
+    is_active = models.BooleanField(default=True)
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this user's access expires (null = never)",
+    )
+
+    # Bandwidth limits (in kbps, 0 = unlimited)
+    bandwidth_limit_up = models.IntegerField(
+        default=0, help_text="Upload bandwidth limit in kbps (0 = unlimited)"
+    )
+    bandwidth_limit_down = models.IntegerField(
+        default=0, help_text="Download bandwidth limit in kbps (0 = unlimited)"
+    )
+
+    # Tracking
+    config_downloaded = models.BooleanField(
+        default=False, help_text="Whether the user has downloaded their config file"
+    )
+    is_configured_on_router = models.BooleanField(
+        default=False, help_text="Whether this peer has been pushed to the router"
+    )
+    last_handshake = models.DateTimeField(
+        null=True, blank=True, help_text="Last WireGuard handshake time from router"
+    )
+
+    # Audit
+    created_by = models.ForeignKey(
+        DjangoUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_remote_users",
+        help_text="Staff user who created this remote user",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Remote User"
+        verbose_name_plural = "Remote Users"
+        ordering = ["-created_at"]
+        unique_together = [
+            ("vpn_config", "assigned_ip"),
+            ("vpn_config", "public_key"),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.assigned_ip}) - {self.tenant.business_name}"
+
+    @property
+    def is_expired(self):
+        if self.expires_at and self.expires_at < timezone.now():
+            return True
+        return False
+
+    def generate_client_config(self):
+        """
+        Generate a WireGuard client configuration string for this user.
+        """
+        vpn = self.vpn_config
+        config_lines = [
+            "[Interface]",
+            (
+                f"PrivateKey = {self.private_key}"
+                if self.private_key
+                else "# PrivateKey = <INSERT_YOUR_PRIVATE_KEY>"
+            ),
+            f"Address = {self.assigned_ip}/32",
+            f"DNS = {vpn.dns_servers}",
+            f"MTU = {vpn.mtu}",
+            "",
+            "[Peer]",
+            f"PublicKey = {vpn.server_public_key}",
+        ]
+        if self.preshared_key:
+            config_lines.append(f"PresharedKey = {self.preshared_key}")
+
+        # Use peer-specific allowed_ips or fall back to VPN config default
+        allowed = self.allowed_ips or vpn.allowed_ips
+        config_lines.append(f"AllowedIPs = {allowed}")
+
+        # Endpoint = router's public IP:port
+        config_lines.append(f"Endpoint = {vpn.router.host}:{vpn.listen_port}")
+
+        if vpn.persistent_keepalive > 0:
+            config_lines.append(f"PersistentKeepalive = {vpn.persistent_keepalive}")
+
+        return "\n".join(config_lines)
+
+
+class RemoteAccessLog(models.Model):
+    """
+    Logs for remote user VPN connection events.
+    Used for auditing, analytics, and troubleshooting.
+    """
+
+    EVENT_CHOICES = [
+        ("connected", "Connected"),
+        ("disconnected", "Disconnected"),
+        ("handshake", "Handshake"),
+        ("config_generated", "Config Generated"),
+        ("config_downloaded", "Config Downloaded"),
+        ("peer_added", "Peer Added to Router"),
+        ("peer_removed", "Peer Removed from Router"),
+        ("expired", "Access Expired"),
+        ("revoked", "Access Revoked"),
+        ("reactivated", "Access Reactivated"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    remote_user = models.ForeignKey(
+        RemoteUser,
+        on_delete=models.CASCADE,
+        related_name="access_logs",
+    )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="remote_access_logs",
+        help_text="Denormalized for faster querying",
+    )
+
+    event_type = models.CharField(max_length=20, choices=EVENT_CHOICES)
+    event_details = models.TextField(
+        blank=True, help_text="Additional event details/JSON"
+    )
+
+    # Connection metadata
+    client_endpoint = models.CharField(
+        max_length=50, blank=True, help_text="Client IP:port as seen by the server"
+    )
+    bytes_sent = models.BigIntegerField(default=0, help_text="Bytes sent to client")
+    bytes_received = models.BigIntegerField(
+        default=0, help_text="Bytes received from client"
+    )
+
+    timestamp = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Remote Access Log"
+        verbose_name_plural = "Remote Access Logs"
+        ordering = ["-timestamp"]
+        indexes = [
+            models.Index(fields=["tenant", "-timestamp"]),
+            models.Index(fields=["remote_user", "-timestamp"]),
+            models.Index(fields=["event_type"]),
+        ]
+
+    def __str__(self):
+        return f"{self.remote_user.name} - {self.event_type} @ {self.timestamp}"
+
+
+class RemoteAccessPlan(models.Model):
+    """
+    Commercial remote access (VPN) plan that tenants sell to their remote users.
+    Analogous to Bundle (hotspot) and PPPPlan (PPPoE), but for WireGuard VPN.
+    Defines pricing, duration, bandwidth limits, and device caps per plan tier.
+    """
+
+    BILLING_CYCLE_CHOICES = [
+        ("daily", "Daily"),
+        ("weekly", "Weekly"),
+        ("monthly", "Monthly"),
+        ("quarterly", "Quarterly (3 months)"),
+        ("biannual", "Bi-Annual (6 months)"),
+        ("annual", "Annual (12 months)"),
+        ("custom", "Custom Days"),
+        ("unlimited", "Unlimited (No Expiry)"),
+    ]
+
+    CYCLE_DAYS_MAP = {
+        "daily": 1,
+        "weekly": 7,
+        "monthly": 30,
+        "quarterly": 90,
+        "biannual": 180,
+        "annual": 365,
+    }
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="remote_access_plans"
+    )
+
+    # Plan identification
+    name = models.CharField(
+        max_length=150,
+        help_text="Customer-facing plan name, e.g. 'Remote Basic Monthly'",
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="Customer-facing description of the plan",
+    )
+
+    # Pricing
+    price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        help_text="Price per billing cycle",
+    )
+    currency = models.CharField(max_length=3, default="TZS")
+
+    # Promotional pricing
+    promo_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Promotional/discounted price. Null = no promo.",
+    )
+    promo_label = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Promo badge text, e.g. 'Save 20%' or 'Launch Offer'",
+    )
+
+    # Billing cycle & duration
+    billing_cycle = models.CharField(
+        max_length=20,
+        choices=BILLING_CYCLE_CHOICES,
+        default="monthly",
+    )
+    billing_days = models.IntegerField(
+        default=30,
+        help_text="Duration in days this plan grants. Auto-set from billing_cycle unless custom.",
+    )
+
+    # Bandwidth limits (kbps, 0 = unlimited)
+    bandwidth_limit_down = models.IntegerField(
+        default=0,
+        help_text="Download bandwidth limit in kbps (0 = unlimited)",
+    )
+    bandwidth_limit_up = models.IntegerField(
+        default=0,
+        help_text="Upload bandwidth limit in kbps (0 = unlimited)",
+    )
+
+    # Speed display (human-readable, for portal/invoices)
+    download_speed = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Human-readable download speed e.g. '10 Mbps'",
+    )
+    upload_speed = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Human-readable upload speed e.g. '5 Mbps'",
+    )
+
+    # Data cap (optional, GB per cycle)
+    data_limit_gb = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Data cap in GB per cycle. Null = unlimited.",
+    )
+
+    # Device / connection limits per user on this plan
+    max_devices_per_user = models.IntegerField(
+        default=1,
+        help_text="Number of simultaneous WireGuard peers allowed per remote user",
+    )
+
+    # Access scope
+    allowed_ips = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="Override allowed IPs for users on this plan (empty = use VPN config default)",
+    )
+    full_tunnel = models.BooleanField(
+        default=True,
+        help_text="True = route all traffic through VPN (0.0.0.0/0). False = split tunnel.",
+    )
+
+    # Plan features / selling points (JSON list)
+    features = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Feature strings shown in portal, e.g. ["Full tunnel", "10 Mbps", "Unlimited data"]',
+    )
+
+    # Display & ordering
+    display_order = models.IntegerField(
+        default=0,
+        help_text="Lower number = shown first in portal",
+    )
+    is_popular = models.BooleanField(
+        default=False,
+        help_text="Mark as popular/recommended to highlight in portal",
+    )
+    is_active = models.BooleanField(default=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tenant", "display_order", "price"]
+        verbose_name = "Remote Access Plan"
+        verbose_name_plural = "Remote Access Plans"
+
+    def __str__(self):
+        return f"{self.tenant.business_name} — {self.name} (TSh {self.price:,.0f}/{self.billing_cycle})"
+
+    def save(self, *args, **kwargs):
+        # Auto-set billing_days from cycle if not custom/unlimited
+        if (
+            self.billing_cycle not in ("custom", "unlimited")
+            and self.billing_cycle in self.CYCLE_DAYS_MAP
+        ):
+            self.billing_days = self.CYCLE_DAYS_MAP[self.billing_cycle]
+        elif self.billing_cycle == "unlimited":
+            self.billing_days = 0  # 0 means no expiry
+        super().save(*args, **kwargs)
+
+    @property
+    def effective_price(self):
+        """Return promo price if set, otherwise regular price."""
+        if self.promo_price is not None:
+            return self.promo_price
+        return self.price
+
+    @property
+    def price_per_day(self):
+        """Calculate the per-day cost for comparison."""
+        if self.billing_days and self.billing_days > 0:
+            return self.effective_price / self.billing_days
+        return self.effective_price
+
+    @property
+    def speed_display(self):
+        """Human-readable speed string."""
+        if self.download_speed and self.upload_speed:
+            return f"↓{self.download_speed} / ↑{self.upload_speed}"
+        if self.download_speed:
+            return f"↓{self.download_speed}"
+        return "Unlimited"
+
+    @property
+    def data_display(self):
+        """Human-readable data limit string."""
+        if self.data_limit_gb is not None:
+            return f"{self.data_limit_gb} GB"
+        return "Unlimited"
+
+    @property
+    def duration_display(self):
+        """Human-readable duration string."""
+        if self.billing_cycle == "unlimited":
+            return "Unlimited"
+        if self.billing_days >= 365:
+            years = self.billing_days // 365
+            return f"{years} year{'s' if years > 1 else ''}"
+        if self.billing_days >= 30:
+            months = self.billing_days // 30
+            return f"{months} month{'s' if months > 1 else ''}"
+        if self.billing_days >= 7:
+            weeks = self.billing_days // 7
+            return f"{weeks} week{'s' if weeks > 1 else ''}"
+        return f"{self.billing_days} day{'s' if self.billing_days != 1 else ''}"
+
+    @property
+    def subscriber_count(self):
+        """Number of active remote users currently on this plan."""
+        return self.remote_users.filter(is_active=True).count()
+
+
+class RemoteAccessPayment(models.Model):
+    """
+    Payment record for remote access VPN plans.
+    Tracks payments from remote users for their VPN access.
+    Follows the same pattern as PPPPayment.
+    """
+
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+        ("expired", "Expired"),
+        ("refunded", "Refunded"),
+    ]
+
+    CHANNEL_CHOICES = [
+        ("snippe", "Snippe"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="remote_access_payments"
+    )
+    remote_user = models.ForeignKey(
+        RemoteUser,
+        on_delete=models.CASCADE,
+        related_name="payments",
+        help_text="The remote user this payment is for",
+    )
+    plan = models.ForeignKey(
+        "RemoteAccessPlan",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payments",
+        help_text="The plan purchased",
+    )
+
+    # Payment details
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=3, default="TZS")
+    billing_days = models.IntegerField(
+        default=30,
+        help_text="Number of days this payment grants",
+    )
+
+    # References
+    order_reference = models.CharField(
+        max_length=100,
+        unique=True,
+        help_text="Unique order reference for this payment",
+    )
+    payment_reference = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="External payment reference (from gateway)",
+    )
+    transaction_id = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Transaction ID from payment gateway",
+    )
+
+    # Payment method
+    payment_channel = models.CharField(
+        max_length=20,
+        choices=CHANNEL_CHOICES,
+        default="snippe",
+    )
+    phone_number = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="Phone number used for mobile money payment",
+    )
+
+    # Status
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Remote Access Payment"
+        verbose_name_plural = "Remote Access Payments"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.order_reference} - {self.remote_user.name} - {self.status}"
+
+    def generate_order_reference(self):
+        """Generate a unique order reference."""
+        import random
+        import string
+
+        prefix = "VPN"
+        random_part = "".join(
+            random.choices(string.ascii_uppercase + string.digits, k=8)
+        )
+        return f"{prefix}-{random_part}"
+
+    def save(self, *args, **kwargs):
+        if not self.order_reference:
+            self.order_reference = self.generate_order_reference()
+        super().save(*args, **kwargs)
+
+    def mark_completed(self):
+        """
+        Mark payment as completed and extend the remote user's access.
+        """
+        if self.status == "completed":
+            return  # Already processed
+
+        self.status = "completed"
+        self.completed_at = timezone.now()
+        self.save(update_fields=["status", "completed_at", "updated_at"])
+
+        # Extend remote user access
+        remote_user = self.remote_user
+        now = timezone.now()
+
+        if self.billing_days > 0:
+            if remote_user.expires_at and remote_user.expires_at > now:
+                # Still has time — extend from current expiry
+                remote_user.expires_at = remote_user.expires_at + timedelta(
+                    days=self.billing_days
+                )
+            else:
+                # Expired or new — start from now
+                remote_user.expires_at = now + timedelta(days=self.billing_days)
+        else:
+            # Unlimited plan — set no expiry
+            remote_user.expires_at = None
+
+        # Apply bandwidth limits from plan if available
+        if self.plan:
+            remote_user.bandwidth_limit_down = self.plan.bandwidth_limit_down
+            remote_user.bandwidth_limit_up = self.plan.bandwidth_limit_up
+
+        remote_user.status = "active"
+        remote_user.is_active = True
+        remote_user.save(
+            update_fields=[
+                "expires_at",
+                "status",
+                "is_active",
+                "bandwidth_limit_down",
+                "bandwidth_limit_up",
+                "updated_at",
+            ]
+        )
+
+    def mark_failed(self):
+        """Mark payment as failed."""
+        self.status = "failed"
+        self.save(update_fields=["status", "updated_at"])
 
 
 class TenantSubscriptionPayment(models.Model):
