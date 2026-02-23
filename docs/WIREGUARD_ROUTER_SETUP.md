@@ -120,13 +120,14 @@ On the MikroTik:
 
 ## IP Address Allocation
 
-| Tenant     | Router Name | WireGuard IP |
-| ---------- | ----------- | ------------ |
-| VPS Server | -           | 10.100.0.1   |
-| Tenant 1   | -           | 10.100.0.10  |
-| Tenant 2   | -           | 10.100.0.20  |
-| Tenant 3   | -           | 10.100.0.30  |
-| ...        | ...         | ...          |
+| Tenant       | Router Name    | WireGuard IP |
+| ------------ | -------------- | ------------ |
+| VPS Server   | -              | 10.100.0.1   |
+| Kitonga WiFi | Kitonga WiFi   | 10.100.0.10  |
+| Kitonga WiFi | Kitonga Remote | 10.100.0.40  |
+| Tenant 2     | -              | 10.100.0.20  |
+| DULA-WIFI    | DULLA WIFI     | 10.100.0.30  |
+| ...          | ...            | ...          |
 
 ## MikroTik API User Setup
 
