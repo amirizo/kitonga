@@ -66,6 +66,9 @@ class SubscriptionPlan(models.Model):
     auto_sms_campaigns = models.BooleanField(default=False)  # Scheduled/triggered SMS
     webhook_notifications = models.BooleanField(default=False)  # Real-time callbacks
     data_export = models.BooleanField(default=False)  # Export to CSV/Excel/PDF
+    ppp_support = models.BooleanField(
+        default=False
+    )  # PPPoE customer management & billing
     remote_user_access = models.BooleanField(
         default=False
     )  # Per-tenant VPN exit for remote users

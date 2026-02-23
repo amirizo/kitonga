@@ -113,7 +113,7 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
             },
         ),
         (
-            "Features",
+            "Basic Features",
             {
                 "fields": (
                     "custom_branding",
@@ -123,8 +123,22 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
                     "priority_support",
                     "analytics_dashboard",
                     "sms_notifications",
-                    "remote_user_access",
+                    "sms_broadcast",
                 )
+            },
+        ),
+        (
+            "Premium Features (Business/Enterprise)",
+            {
+                "fields": (
+                    "advanced_analytics",
+                    "auto_sms_campaigns",
+                    "webhook_notifications",
+                    "data_export",
+                    "ppp_support",
+                    "remote_user_access",
+                ),
+                "description": "PPPoE support enables PPP customer management. Remote user access enables WireGuard VPN.",
             },
         ),
     )
@@ -156,6 +170,10 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
             features.append("API")
         if obj.white_label:
             features.append("White Label")
+        if obj.ppp_support:
+            features.append("PPPoE")
+        if obj.remote_user_access:
+            features.append("VPN/Remote")
         return ", ".join(features) if features else "Basic"
 
     features_summary.short_description = "Features"

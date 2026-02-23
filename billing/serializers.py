@@ -313,6 +313,14 @@ class SubscriptionPlanSerializer(serializers.ModelSerializer):
             "priority_support": obj.priority_support,
             "analytics_dashboard": obj.analytics_dashboard,
             "sms_notifications": obj.sms_notifications,
+            "sms_broadcast": obj.sms_broadcast,
+            "advanced_analytics": obj.advanced_analytics,
+            "auto_sms_campaigns": obj.auto_sms_campaigns,
+            "webhook_notifications": obj.webhook_notifications,
+            "data_export": obj.data_export,
+            "ppp_support": obj.ppp_support,
+            "remote_user_access": obj.remote_user_access,
+            "max_remote_users": obj.max_remote_users,
         }
 
 
