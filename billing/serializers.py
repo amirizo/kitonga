@@ -19,6 +19,11 @@ from .models import (
     PPPProfile,
     PPPPlan,
     PPPCustomer,
+    TenantVPNConfig,
+    RemoteUser,
+    RemoteAccessPlan,
+    RemoteAccessLog,
+    RemoteAccessPayment,
 )
 from .utils import normalize_phone_number, validate_tanzania_phone_number
 
@@ -1509,3 +1514,296 @@ class PPPCustomerCreateSerializer(serializers.Serializer):
         default=False,
         help_text="If true, immediately push secret to MikroTik router",
     )
+
+
+# =============================================================================
+# REMOTE ACCESS (VPN) SERIALIZERS — Enterprise Plan
+# =============================================================================
+
+
+class TenantVPNConfigSerializer(serializers.Serializer):
+    """Serializer for TenantVPNConfig (read)"""
+
+    id = serializers.UUIDField(read_only=True)
+    tenant = serializers.UUIDField(source="tenant.id", read_only=True)
+    router_id = serializers.IntegerField(source="router.id", read_only=True)
+    router_name = serializers.CharField(source="router.name", read_only=True)
+
+    interface_name = serializers.CharField(read_only=True)
+    listen_port = serializers.IntegerField(read_only=True)
+    server_public_key = serializers.CharField(read_only=True)
+
+    address_pool = serializers.CharField(read_only=True)
+    server_address = serializers.CharField(read_only=True)
+    dns_servers = serializers.CharField(read_only=True)
+    mtu = serializers.IntegerField(read_only=True)
+    persistent_keepalive = serializers.IntegerField(read_only=True)
+    allowed_ips = serializers.CharField(read_only=True)
+
+    enable_nat = serializers.BooleanField(read_only=True)
+    enable_firewall_rules = serializers.BooleanField(read_only=True)
+
+    is_active = serializers.BooleanField(read_only=True)
+    is_configured_on_router = serializers.BooleanField(read_only=True)
+    last_synced_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    last_sync_error = serializers.CharField(read_only=True)
+
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+
+class TenantVPNConfigCreateSerializer(serializers.Serializer):
+    """Serializer for creating / updating a TenantVPNConfig"""
+
+    router_id = serializers.IntegerField(
+        help_text="Router where WireGuard interface will be configured"
+    )
+    interface_name = serializers.CharField(
+        max_length=15, default="wg-remote", required=False
+    )
+    listen_port = serializers.IntegerField(
+        default=51820, min_value=1024, max_value=65535, required=False
+    )
+    address_pool = serializers.CharField(
+        max_length=18,
+        default="10.100.0.0/24",
+        required=False,
+        help_text="VPN address pool in CIDR notation",
+    )
+    server_address = serializers.IPAddressField(default="10.100.0.1", required=False)
+    dns_servers = serializers.CharField(
+        max_length=100, default="1.1.1.1, 8.8.8.8", required=False
+    )
+    mtu = serializers.IntegerField(default=1420, required=False)
+    persistent_keepalive = serializers.IntegerField(default=25, required=False)
+    allowed_ips = serializers.CharField(
+        max_length=500, default="0.0.0.0/0", required=False
+    )
+    enable_nat = serializers.BooleanField(default=True, required=False)
+    enable_firewall_rules = serializers.BooleanField(default=True, required=False)
+    sync_to_router = serializers.BooleanField(
+        default=False,
+        required=False,
+        help_text="If true, immediately push WireGuard interface to the router",
+    )
+
+    def validate_address_pool(self, value):
+        from .wireguard_utils import validate_vpn_address_pool
+
+        result = validate_vpn_address_pool(value)
+        if not result["valid"]:
+            raise serializers.ValidationError(
+                f"Invalid VPN address pool: {result['error']}"
+            )
+        return value
+
+
+class RemoteAccessPlanSerializer(serializers.Serializer):
+    """Serializer for RemoteAccessPlan (read)"""
+
+    id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    description = serializers.CharField(read_only=True)
+    price = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    currency = serializers.CharField(read_only=True)
+    promo_price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True, allow_null=True
+    )
+    promo_label = serializers.CharField(read_only=True)
+    billing_cycle = serializers.CharField(read_only=True)
+    billing_days = serializers.IntegerField(read_only=True)
+    bandwidth_limit_down = serializers.IntegerField(read_only=True)
+    bandwidth_limit_up = serializers.IntegerField(read_only=True)
+    download_speed = serializers.CharField(read_only=True)
+    upload_speed = serializers.CharField(read_only=True)
+    data_limit_gb = serializers.DecimalField(
+        max_digits=10, decimal_places=2, read_only=True, allow_null=True
+    )
+    max_devices_per_user = serializers.IntegerField(read_only=True)
+    allowed_ips = serializers.CharField(read_only=True)
+    full_tunnel = serializers.BooleanField(read_only=True)
+    features = serializers.JSONField(read_only=True)
+    display_order = serializers.IntegerField(read_only=True)
+    is_popular = serializers.BooleanField(read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
+
+    # Computed properties
+    effective_price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+    price_per_day = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+    speed_display = serializers.CharField(read_only=True)
+    data_display = serializers.CharField(read_only=True)
+    duration_display = serializers.CharField(read_only=True)
+    subscriber_count = serializers.IntegerField(read_only=True)
+
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+
+class RemoteAccessPlanCreateSerializer(serializers.Serializer):
+    """Serializer for creating / updating a RemoteAccessPlan"""
+
+    name = serializers.CharField(max_length=150)
+    description = serializers.CharField(required=False, default="")
+    price = serializers.DecimalField(max_digits=12, decimal_places=2)
+    currency = serializers.CharField(max_length=3, required=False, default="TZS")
+    promo_price = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True
+    )
+    promo_label = serializers.CharField(max_length=50, required=False, default="")
+    billing_cycle = serializers.ChoiceField(
+        choices=[
+            "daily",
+            "weekly",
+            "monthly",
+            "quarterly",
+            "biannual",
+            "annual",
+            "custom",
+            "unlimited",
+        ],
+        default="monthly",
+    )
+    billing_days = serializers.IntegerField(required=False, default=30)
+    bandwidth_limit_down = serializers.IntegerField(required=False, default=0)
+    bandwidth_limit_up = serializers.IntegerField(required=False, default=0)
+    download_speed = serializers.CharField(max_length=20, required=False, default="")
+    upload_speed = serializers.CharField(max_length=20, required=False, default="")
+    data_limit_gb = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, allow_null=True
+    )
+    max_devices_per_user = serializers.IntegerField(required=False, default=1)
+    allowed_ips = serializers.CharField(max_length=500, required=False, default="")
+    full_tunnel = serializers.BooleanField(required=False, default=True)
+    features = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
+    display_order = serializers.IntegerField(required=False, default=0)
+    is_popular = serializers.BooleanField(required=False, default=False)
+    is_active = serializers.BooleanField(required=False, default=True)
+
+
+class RemoteUserSerializer(serializers.Serializer):
+    """Serializer for RemoteUser (read)"""
+
+    id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    email = serializers.EmailField(read_only=True)
+    phone = serializers.CharField(read_only=True)
+    notes = serializers.CharField(read_only=True)
+
+    plan_id = serializers.UUIDField(source="plan.id", read_only=True, allow_null=True)
+    plan_name = serializers.CharField(source="plan.name", read_only=True, default=None)
+
+    public_key = serializers.CharField(read_only=True)
+    assigned_ip = serializers.CharField(read_only=True)
+    allowed_ips = serializers.CharField(read_only=True)
+
+    status = serializers.CharField(read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
+    expires_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    is_expired = serializers.BooleanField(read_only=True)
+
+    bandwidth_limit_up = serializers.IntegerField(read_only=True)
+    bandwidth_limit_down = serializers.IntegerField(read_only=True)
+
+    config_downloaded = serializers.BooleanField(read_only=True)
+    is_configured_on_router = serializers.BooleanField(read_only=True)
+    last_handshake = serializers.DateTimeField(read_only=True, allow_null=True)
+
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+
+class RemoteUserCreateSerializer(serializers.Serializer):
+    """Serializer for creating a RemoteUser (provisions keys + config)"""
+
+    name = serializers.CharField(max_length=100)
+    email = serializers.EmailField(required=False, default="")
+    phone = serializers.CharField(max_length=20, required=False, default="")
+    notes = serializers.CharField(required=False, default="")
+    plan_id = serializers.UUIDField(required=False, allow_null=True)
+    use_preshared_key = serializers.BooleanField(default=True, required=False)
+    sync_to_router = serializers.BooleanField(
+        default=False,
+        required=False,
+        help_text="If true, immediately add peer to router",
+    )
+
+
+class RemoteUserUpdateSerializer(serializers.Serializer):
+    """Serializer for updating a RemoteUser"""
+
+    name = serializers.CharField(max_length=100, required=False)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    notes = serializers.CharField(required=False, allow_blank=True)
+    plan_id = serializers.UUIDField(required=False, allow_null=True)
+    bandwidth_limit_up = serializers.IntegerField(required=False, min_value=0)
+    bandwidth_limit_down = serializers.IntegerField(required=False, min_value=0)
+    expires_at = serializers.DateTimeField(required=False, allow_null=True)
+    status = serializers.ChoiceField(
+        choices=["active", "disabled", "revoked"], required=False
+    )
+
+
+class RemoteAccessLogSerializer(serializers.Serializer):
+    """Serializer for RemoteAccessLog (read)"""
+
+    id = serializers.UUIDField(read_only=True)
+    remote_user_id = serializers.UUIDField(source="remote_user.id", read_only=True)
+    remote_user_name = serializers.CharField(source="remote_user.name", read_only=True)
+    event_type = serializers.CharField(read_only=True)
+    event_details = serializers.CharField(read_only=True)
+    client_endpoint = serializers.CharField(read_only=True)
+    bytes_sent = serializers.IntegerField(read_only=True)
+    bytes_received = serializers.IntegerField(read_only=True)
+    timestamp = serializers.DateTimeField(read_only=True)
+
+
+class RemoteAccessPaymentSerializer(serializers.Serializer):
+    """Serializer for RemoteAccessPayment (read)"""
+
+    id = serializers.UUIDField(read_only=True)
+    remote_user_id = serializers.UUIDField(source="remote_user.id", read_only=True)
+    remote_user_name = serializers.CharField(source="remote_user.name", read_only=True)
+    plan_name = serializers.CharField(source="plan.name", read_only=True, default=None)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    currency = serializers.CharField(read_only=True)
+    billing_days = serializers.IntegerField(read_only=True)
+    order_reference = serializers.CharField(read_only=True)
+    payment_reference = serializers.CharField(read_only=True)
+    transaction_id = serializers.CharField(read_only=True)
+    payment_channel = serializers.CharField(read_only=True)
+    phone_number = serializers.CharField(read_only=True)
+    status = serializers.CharField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    completed_at = serializers.DateTimeField(read_only=True, allow_null=True)
+
+
+class RemoteUserPaymentInitiateSerializer(serializers.Serializer):
+    """Serializer for initiating a VPN payment for a remote user"""
+
+    plan_id = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+        help_text="Remote access plan to purchase. Uses current plan if not specified.",
+    )
+    billing_days = serializers.IntegerField(
+        required=False,
+        default=0,
+        help_text="Override billing days. 0 = use plan default.",
+    )
+    phone_number = serializers.CharField(
+        max_length=15,
+        required=False,
+        help_text="Mobile money phone number. Defaults to remote user's phone.",
+    )
+
+    def validate_phone_number(self, value):
+        if value:
+            return validate_phone_number_field(value)
+        return value

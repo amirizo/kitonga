@@ -28,6 +28,11 @@ from .models import (
     Payment,
     Voucher,
     TenantPayout,
+    TenantVPNConfig,
+    RemoteUser,
+    RemoteAccessPlan,
+    RemoteAccessLog,
+    RemoteAccessPayment,
 )
 from .serializers import (
     RouterWizardSerializer,
@@ -43,6 +48,16 @@ from .serializers import (
     LocationSerializer,
     BundleSerializer,
     TenantStaffSerializer,
+    TenantVPNConfigSerializer,
+    TenantVPNConfigCreateSerializer,
+    RemoteAccessPlanSerializer,
+    RemoteAccessPlanCreateSerializer,
+    RemoteUserSerializer,
+    RemoteUserCreateSerializer,
+    RemoteUserUpdateSerializer,
+    RemoteAccessLogSerializer,
+    RemoteAccessPaymentSerializer,
+    RemoteUserPaymentInitiateSerializer,
 )
 from .permissions import TenantAPIKeyPermission, TenantOrAdminPermission
 from .analytics import TenantAnalytics, ComparisonAnalytics, ExportManager
@@ -8377,5 +8392,1135 @@ def portal_ppp_payment_history(request, customer_id):
             "customer": customer.username,
             "total_payments": len(payment_data),
             "payments": payment_data,
+        }
+    )
+
+
+# =============================================================================
+# REMOTE ACCESS (VPN / WIREGUARD) PORTAL ENDPOINTS — Enterprise Plan
+# =============================================================================
+
+
+def check_remote_access_permission(tenant):
+    """
+    Check that the tenant's subscription plan allows remote user access.
+    Returns (allowed: bool, error: str).
+    """
+    if not tenant:
+        return False, "Tenant not found"
+    if not tenant.is_subscription_valid():
+        return False, "Subscription expired or invalid"
+    plan = tenant.subscription_plan
+    if not plan:
+        return False, "No subscription plan"
+    if not plan.remote_user_access:
+        return (
+            False,
+            "Remote access is not available on your current plan. Upgrade to Enterprise.",
+        )
+    return True, ""
+
+
+# ---- VPN Configuration ----
+
+
+@api_view(["GET", "POST", "PUT"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_vpn_config(request):
+    """
+    GET  — Retrieve current VPN configuration for the tenant.
+    POST — Create a new VPN configuration.
+    PUT  — Update existing VPN configuration.
+
+    Endpoint: /api/portal/vpn/config/
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if request.method == "GET":
+        try:
+            vpn_config = TenantVPNConfig.objects.get(tenant=tenant)
+            serializer = TenantVPNConfigSerializer(vpn_config)
+            return Response({"success": True, "vpn_config": serializer.data})
+        except TenantVPNConfig.DoesNotExist:
+            return Response(
+                {
+                    "success": True,
+                    "vpn_config": None,
+                    "message": "No VPN configuration found. Create one to get started.",
+                }
+            )
+
+    # POST or PUT
+    serializer = TenantVPNConfigCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    data = serializer.validated_data
+    router_id = data.pop("router_id")
+    sync_to_router = data.pop("sync_to_router", False)
+
+    try:
+        router = Router.objects.get(id=router_id, tenant=tenant, is_active=True)
+    except Router.DoesNotExist:
+        return Response(
+            {"success": False, "error": "Router not found or not active"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    from .wireguard_utils import generate_wireguard_keypair
+
+    if request.method == "POST":
+        # Check if config already exists
+        if TenantVPNConfig.objects.filter(tenant=tenant).exists():
+            return Response(
+                {
+                    "success": False,
+                    "error": "VPN configuration already exists. Use PUT to update.",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        keypair = generate_wireguard_keypair()
+        vpn_config = TenantVPNConfig.objects.create(
+            tenant=tenant,
+            router=router,
+            server_private_key=keypair["private_key"],
+            server_public_key=keypair["public_key"],
+            **data,
+        )
+        message = "VPN configuration created"
+    else:
+        # PUT — update
+        try:
+            vpn_config = TenantVPNConfig.objects.get(tenant=tenant)
+        except TenantVPNConfig.DoesNotExist:
+            return Response(
+                {
+                    "success": False,
+                    "error": "No VPN configuration to update. Use POST to create.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        vpn_config.router = router
+        for key, value in data.items():
+            setattr(vpn_config, key, value)
+        vpn_config.save()
+        message = "VPN configuration updated"
+
+    # Optionally sync to router
+    sync_result = None
+    if sync_to_router:
+        from .mikrotik import sync_vpn_config_to_router
+
+        sync_result = sync_vpn_config_to_router(vpn_config)
+        if sync_result["success"]:
+            message += " and synced to router"
+        else:
+            message += f" but router sync failed: {sync_result['message']}"
+
+    resp_serializer = TenantVPNConfigSerializer(vpn_config)
+    return Response(
+        {
+            "success": True,
+            "message": message,
+            "vpn_config": resp_serializer.data,
+            "sync_result": sync_result,
+        },
+        status=(
+            status.HTTP_201_CREATED if request.method == "POST" else status.HTTP_200_OK
+        ),
+    )
+
+
+@api_view(["POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_vpn_sync(request):
+    """
+    Full sync of VPN configuration + all active peers to the router.
+
+    Endpoint: POST /api/portal/vpn/sync/
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        vpn_config = TenantVPNConfig.objects.get(tenant=tenant)
+    except TenantVPNConfig.DoesNotExist:
+        return Response(
+            {
+                "success": False,
+                "error": "No VPN configuration found. Create one first.",
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    from .mikrotik import sync_vpn_config_to_router
+
+    result = sync_vpn_config_to_router(vpn_config)
+
+    return Response(
+        {
+            "success": result["success"],
+            "message": result["message"],
+            "interface_result": result.get("interface_result"),
+            "peer_results": result.get("peer_results"),
+            "firewall_result": result.get("firewall_result"),
+            "errors": result.get("errors", []),
+        },
+        status=status.HTTP_200_OK if result["success"] else status.HTTP_502_BAD_GATEWAY,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_vpn_teardown(request):
+    """
+    Full teardown — remove WireGuard interface, all peers, firewall rules,
+    and bandwidth queues from the router.
+
+    Endpoint: POST /api/portal/vpn/teardown/
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        vpn_config = TenantVPNConfig.objects.get(tenant=tenant)
+    except TenantVPNConfig.DoesNotExist:
+        return Response(
+            {"success": False, "error": "No VPN configuration found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    from .mikrotik import full_teardown_vpn
+
+    result = full_teardown_vpn(vpn_config)
+
+    return Response(
+        {
+            "success": result["success"],
+            "message": (
+                "VPN fully removed from router"
+                if result["success"]
+                else "Teardown encountered errors"
+            ),
+            "details": result.get("details"),
+            "errors": result.get("errors", []),
+        }
+    )
+
+
+@api_view(["GET"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_vpn_status(request):
+    """
+    Get live WireGuard peer status from the router (handshake, traffic, endpoint).
+
+    Endpoint: GET /api/portal/vpn/status/
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        vpn_config = TenantVPNConfig.objects.get(tenant=tenant)
+    except TenantVPNConfig.DoesNotExist:
+        return Response(
+            {"success": False, "error": "No VPN configuration found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    from .mikrotik import get_wireguard_peer_status
+
+    result = get_wireguard_peer_status(vpn_config)
+
+    # Enrich with local DB data
+    peer_map = {}
+    for peer in result.get("peers", []):
+        peer_map[peer["public_key"]] = peer
+
+    remote_users = RemoteUser.objects.filter(vpn_config=vpn_config)
+    enriched = []
+    for ru in remote_users:
+        live_data = peer_map.get(ru.public_key, {})
+        enriched.append(
+            {
+                "id": str(ru.id),
+                "name": ru.name,
+                "assigned_ip": ru.assigned_ip,
+                "status": ru.status,
+                "is_active": ru.is_active,
+                "expires_at": ru.expires_at.isoformat() if ru.expires_at else None,
+                "is_expired": ru.is_expired,
+                "last_handshake_db": (
+                    ru.last_handshake.isoformat() if ru.last_handshake else None
+                ),
+                "last_handshake_live": live_data.get("last_handshake", ""),
+                "endpoint": live_data.get("endpoint", ""),
+                "endpoint_port": live_data.get("endpoint_port", ""),
+                "rx": live_data.get("rx", "0"),
+                "tx": live_data.get("tx", "0"),
+                "disabled_on_router": live_data.get("disabled", "false"),
+                "is_configured_on_router": ru.is_configured_on_router,
+            }
+        )
+
+    return Response(
+        {
+            "success": result["success"],
+            "vpn_interface": vpn_config.interface_name,
+            "is_configured_on_router": vpn_config.is_configured_on_router,
+            "total_peers": len(enriched),
+            "peers": enriched,
+            "errors": result.get("errors", []),
+        }
+    )
+
+
+# ---- Remote Access Plans ----
+
+
+@api_view(["GET", "POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_remote_plans(request):
+    """
+    GET  — List all remote access plans for this tenant.
+    POST — Create a new remote access plan.
+
+    Endpoint: /api/portal/vpn/plans/
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if request.method == "GET":
+        plans = RemoteAccessPlan.objects.filter(tenant=tenant).order_by(
+            "display_order", "price"
+        )
+        active_only = request.query_params.get("active_only", "false").lower() == "true"
+        if active_only:
+            plans = plans.filter(is_active=True)
+        serializer = RemoteAccessPlanSerializer(plans, many=True)
+        return Response(
+            {"success": True, "total": plans.count(), "plans": serializer.data}
+        )
+
+    # POST
+    serializer = RemoteAccessPlanCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    plan = RemoteAccessPlan.objects.create(tenant=tenant, **serializer.validated_data)
+    resp = RemoteAccessPlanSerializer(plan)
+    return Response(
+        {"success": True, "message": "Plan created", "plan": resp.data},
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["GET", "PUT", "DELETE"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_remote_plan_detail(request, plan_id):
+    """
+    GET    — Get plan details.
+    PUT    — Update a plan.
+    DELETE — Deactivate (soft-delete) a plan.
+
+    Endpoint: /api/portal/vpn/plans/<plan_id>/
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        plan = RemoteAccessPlan.objects.get(id=plan_id, tenant=tenant)
+    except RemoteAccessPlan.DoesNotExist:
+        return Response(
+            {"success": False, "error": "Plan not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if request.method == "GET":
+        serializer = RemoteAccessPlanSerializer(plan)
+        return Response({"success": True, "plan": serializer.data})
+
+    if request.method == "DELETE":
+        plan.is_active = False
+        plan.save(update_fields=["is_active", "updated_at"])
+        return Response({"success": True, "message": f"Plan '{plan.name}' deactivated"})
+
+    # PUT
+    serializer = RemoteAccessPlanCreateSerializer(data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    for key, value in serializer.validated_data.items():
+        setattr(plan, key, value)
+    plan.save()
+    resp = RemoteAccessPlanSerializer(plan)
+    return Response({"success": True, "message": "Plan updated", "plan": resp.data})
+
+
+# ---- Remote Users (CRUD + Provisioning) ----
+
+
+@api_view(["GET", "POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_remote_users(request):
+    """
+    GET  — List all remote users for this tenant.
+    POST — Create (provision) a new remote user with WireGuard keys.
+
+    Endpoint: /api/portal/vpn/users/
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if request.method == "GET":
+        users = RemoteUser.objects.filter(tenant=tenant).select_related(
+            "plan", "vpn_config"
+        )
+
+        # Filters
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            users = users.filter(status=status_filter)
+
+        search = request.query_params.get("search")
+        if search:
+            users = users.filter(
+                Q(name__icontains=search)
+                | Q(email__icontains=search)
+                | Q(phone__icontains=search)
+                | Q(assigned_ip__icontains=search)
+            )
+
+        serializer = RemoteUserSerializer(users, many=True)
+        return Response(
+            {
+                "success": True,
+                "total": users.count(),
+                "users": serializer.data,
+            }
+        )
+
+    # POST — provision new remote user
+    serializer = RemoteUserCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    data = serializer.validated_data
+
+    # Ensure VPN config exists
+    try:
+        vpn_config = TenantVPNConfig.objects.get(tenant=tenant)
+    except TenantVPNConfig.DoesNotExist:
+        return Response(
+            {
+                "success": False,
+                "error": "No VPN configuration found. Set up VPN config first.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Check tenant limit
+    if not tenant.can_add_remote_user():
+        return Response(
+            {"success": False, "error": "Remote user limit reached for your plan."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # Resolve plan
+    plan = None
+    plan_id = data.pop("plan_id", None)
+    if plan_id:
+        try:
+            plan = RemoteAccessPlan.objects.get(
+                id=plan_id, tenant=tenant, is_active=True
+            )
+        except RemoteAccessPlan.DoesNotExist:
+            return Response(
+                {"success": False, "error": "Remote access plan not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+    sync_to_router = data.pop("sync_to_router", False)
+    use_psk = data.pop("use_preshared_key", True)
+
+    # Get created_by from token auth
+    created_by = (
+        request.user if request.user and request.user.is_authenticated else None
+    )
+
+    from .wireguard_utils import provision_remote_user_keys
+
+    prov_result = provision_remote_user_keys(
+        vpn_config=vpn_config,
+        name=data["name"],
+        email=data.get("email", ""),
+        phone=data.get("phone", ""),
+        notes=data.get("notes", ""),
+        plan=plan,
+        created_by=created_by,
+        use_preshared_key=use_psk,
+    )
+
+    if not prov_result["success"]:
+        return Response(
+            {"success": False, "error": prov_result["error"]},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    remote_user = prov_result["remote_user"]
+
+    # Optionally sync peer to router + bandwidth queue
+    sync_peer_result = None
+    if sync_to_router:
+        from .mikrotik import add_wireguard_peer, setup_wireguard_bandwidth_queue
+
+        sync_peer_result = add_wireguard_peer(remote_user)
+        if sync_peer_result["success"]:
+            setup_wireguard_bandwidth_queue(remote_user)
+
+    resp = RemoteUserSerializer(remote_user)
+    return Response(
+        {
+            "success": True,
+            "message": f"Remote user '{remote_user.name}' provisioned ({remote_user.assigned_ip})",
+            "user": resp.data,
+            "private_key": prov_result["private_key"],
+            "config_text": prov_result["config_text"],
+            "sync_result": sync_peer_result,
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["GET", "PUT", "DELETE"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_remote_user_detail(request, user_id):
+    """
+    GET    — Get remote user details.
+    PUT    — Update remote user fields.
+    DELETE — Revoke / remove remote user.
+
+    Endpoint: /api/portal/vpn/users/<user_id>/
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        remote_user = RemoteUser.objects.select_related("plan", "vpn_config").get(
+            id=user_id, tenant=tenant
+        )
+    except RemoteUser.DoesNotExist:
+        return Response(
+            {"success": False, "error": "Remote user not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if request.method == "GET":
+        serializer = RemoteUserSerializer(remote_user)
+        return Response({"success": True, "user": serializer.data})
+
+    if request.method == "DELETE":
+        # Remove peer from router
+        from .mikrotik import remove_wireguard_peer, remove_wireguard_bandwidth_queue
+
+        remove_wireguard_peer(remote_user)
+        remove_wireguard_bandwidth_queue(remote_user)
+
+        # Log the revocation
+        RemoteAccessLog.objects.create(
+            tenant=tenant,
+            remote_user=remote_user,
+            event_type="revoked",
+            event_details=f"User '{remote_user.name}' revoked and removed from router",
+        )
+
+        remote_user.status = "revoked"
+        remote_user.is_active = False
+        remote_user.save(update_fields=["status", "is_active", "updated_at"])
+
+        return Response(
+            {
+                "success": True,
+                "message": f"Remote user '{remote_user.name}' revoked and removed from router",
+            }
+        )
+
+    # PUT — update
+    serializer = RemoteUserUpdateSerializer(data=request.data, partial=True)
+    if not serializer.is_valid():
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    data = serializer.validated_data
+
+    # Handle plan change
+    plan_id = data.pop("plan_id", None)
+    if plan_id is not None:
+        if plan_id:
+            try:
+                plan = RemoteAccessPlan.objects.get(
+                    id=plan_id, tenant=tenant, is_active=True
+                )
+                remote_user.plan = plan
+            except RemoteAccessPlan.DoesNotExist:
+                return Response(
+                    {"success": False, "error": "Plan not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        else:
+            remote_user.plan = None
+
+    # Handle status change (enable/disable on router)
+    new_status = data.pop("status", None)
+    if new_status and new_status != remote_user.status:
+        from .mikrotik import disable_wireguard_peer, enable_wireguard_peer
+
+        if new_status == "disabled":
+            disable_wireguard_peer(remote_user)
+            remote_user.status = "disabled"
+            remote_user.is_active = False
+            RemoteAccessLog.objects.create(
+                tenant=tenant,
+                remote_user=remote_user,
+                event_type="revoked",
+                event_details="User disabled via portal",
+            )
+        elif new_status == "active":
+            enable_wireguard_peer(remote_user)
+            remote_user.status = "active"
+            remote_user.is_active = True
+            RemoteAccessLog.objects.create(
+                tenant=tenant,
+                remote_user=remote_user,
+                event_type="reactivated",
+                event_details="User re-enabled via portal",
+            )
+        elif new_status == "revoked":
+            from .mikrotik import (
+                remove_wireguard_peer,
+                remove_wireguard_bandwidth_queue,
+            )
+
+            remove_wireguard_peer(remote_user)
+            remove_wireguard_bandwidth_queue(remote_user)
+            remote_user.status = "revoked"
+            remote_user.is_active = False
+
+    # Apply remaining fields
+    for key, value in data.items():
+        setattr(remote_user, key, value)
+    remote_user.save()
+
+    # If bandwidth changed, update queue on router
+    if (
+        "bandwidth_limit_up" in serializer.validated_data
+        or "bandwidth_limit_down" in serializer.validated_data
+    ):
+        from .mikrotik import setup_wireguard_bandwidth_queue
+
+        setup_wireguard_bandwidth_queue(remote_user)
+
+    resp = RemoteUserSerializer(remote_user)
+    return Response(
+        {"success": True, "message": "Remote user updated", "user": resp.data}
+    )
+
+
+@api_view(["POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_remote_user_sync(request, user_id):
+    """
+    Sync a single remote user's peer to the router.
+
+    Endpoint: POST /api/portal/vpn/users/<user_id>/sync/
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        remote_user = RemoteUser.objects.get(id=user_id, tenant=tenant)
+    except RemoteUser.DoesNotExist:
+        return Response(
+            {"success": False, "error": "Remote user not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    from .mikrotik import add_wireguard_peer, setup_wireguard_bandwidth_queue
+
+    peer_result = add_wireguard_peer(remote_user)
+    queue_result = None
+    if peer_result["success"]:
+        queue_result = setup_wireguard_bandwidth_queue(remote_user)
+
+    RemoteAccessLog.objects.create(
+        tenant=tenant,
+        remote_user=remote_user,
+        event_type="peer_added" if peer_result["success"] else "peer_removed",
+        event_details=peer_result["message"],
+    )
+
+    return Response(
+        {
+            "success": peer_result["success"],
+            "message": peer_result["message"],
+            "peer_result": peer_result,
+            "queue_result": queue_result,
+        }
+    )
+
+
+@api_view(["GET"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_remote_user_config(request, user_id):
+    """
+    Download the WireGuard client config for a remote user.
+    Returns the .conf file content and optionally a QR code data string.
+
+    Endpoint: GET /api/portal/vpn/users/<user_id>/config/
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        remote_user = RemoteUser.objects.select_related("vpn_config").get(
+            id=user_id, tenant=tenant
+        )
+    except RemoteUser.DoesNotExist:
+        return Response(
+            {"success": False, "error": "Remote user not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    config_text = remote_user.generate_client_config()
+
+    # Mark as downloaded
+    if not remote_user.config_downloaded:
+        remote_user.config_downloaded = True
+        remote_user.save(update_fields=["config_downloaded", "updated_at"])
+
+        RemoteAccessLog.objects.create(
+            tenant=tenant,
+            remote_user=remote_user,
+            event_type="config_downloaded",
+            event_details="Config file downloaded via portal",
+        )
+
+    # Return as .conf file or JSON
+    fmt = request.query_params.get("format", "json")
+    if fmt == "file":
+        response = HttpResponse(config_text, content_type="text/plain")
+        response["Content-Disposition"] = (
+            f'attachment; filename="wg-{remote_user.name.replace(" ", "_")}.conf"'
+        )
+        return response
+
+    from .wireguard_utils import generate_qr_code_data
+
+    return Response(
+        {
+            "success": True,
+            "user": {
+                "id": str(remote_user.id),
+                "name": remote_user.name,
+                "assigned_ip": remote_user.assigned_ip,
+            },
+            "config_text": config_text,
+            "qr_code_data": generate_qr_code_data(config_text),
+            "has_private_key": bool(remote_user.private_key),
+        }
+    )
+
+
+# ---- Remote User Payments ----
+
+
+@api_view(["POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_remote_user_pay(request, user_id):
+    """
+    Initiate a mobile money payment for a remote user's VPN access.
+
+    Endpoint: POST /api/portal/vpn/users/<user_id>/pay/
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        remote_user = RemoteUser.objects.select_related("plan").get(
+            id=user_id, tenant=tenant
+        )
+    except RemoteUser.DoesNotExist:
+        return Response(
+            {"success": False, "error": "Remote user not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    serializer = RemoteUserPaymentInitiateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    data = serializer.validated_data
+
+    # Resolve plan
+    plan_id = data.get("plan_id")
+    plan = None
+    if plan_id:
+        try:
+            plan = RemoteAccessPlan.objects.get(
+                id=plan_id, tenant=tenant, is_active=True
+            )
+        except RemoteAccessPlan.DoesNotExist:
+            return Response(
+                {"success": False, "error": "Plan not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+    else:
+        plan = remote_user.plan
+
+    if not plan:
+        return Response(
+            {
+                "success": False,
+                "error": "No plan specified and user has no current plan.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    billing_days = data.get("billing_days") or plan.billing_days
+    if billing_days < 1:
+        billing_days = plan.billing_days or 30
+
+    import math
+
+    if billing_days == plan.billing_days:
+        amount = int(plan.effective_price)
+    else:
+        daily_rate = plan.effective_price / max(plan.billing_days, 1)
+        amount = math.ceil(daily_rate * billing_days)
+
+    phone = data.get("phone_number") or remote_user.phone
+    if not phone:
+        return Response(
+            {"success": False, "error": "Phone number required for payment."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Expire old pending payments
+    RemoteAccessPayment.objects.filter(
+        remote_user=remote_user, status="pending"
+    ).update(status="expired")
+
+    # Create payment record
+    payment = RemoteAccessPayment.objects.create(
+        tenant=tenant,
+        remote_user=remote_user,
+        plan=plan,
+        amount=amount,
+        billing_days=billing_days,
+        phone_number=phone,
+        payment_channel="snippe",
+        status="pending",
+    )
+
+    logger.info(
+        f"VPN payment initiated: ref={payment.order_reference} user={remote_user.name} "
+        f"amount={amount} days={billing_days} tenant={tenant.slug}"
+    )
+
+    # Initiate Snippe payment
+    from .snippe import SnippeAPI
+    from django.conf import settings as django_settings
+
+    webhook_url = getattr(django_settings, "SNIPPE_WEBHOOK_URL", "") or ""
+
+    snippe = SnippeAPI()
+    metadata = {
+        "order_reference": payment.order_reference,
+        "payment_type": "vpn",
+        "remote_user_id": str(remote_user.id),
+        "tenant": tenant.slug,
+    }
+
+    name_parts = (remote_user.name or "VPN User").split(" ", 1)
+    firstname = name_parts[0]
+    lastname = name_parts[1] if len(name_parts) > 1 else ""
+    email = remote_user.email or f"{phone}@kitonga.klikcell.com"
+
+    result = snippe.create_mobile_payment(
+        phone_number=phone,
+        amount=int(amount),
+        firstname=firstname,
+        lastname=lastname,
+        email=email,
+        webhook_url=webhook_url,
+        metadata=metadata,
+        idempotency_key=payment.order_reference,
+    )
+
+    if result.get("success"):
+        snippe_ref = result.get("reference", "")
+        if snippe_ref:
+            payment.payment_reference = snippe_ref
+            payment.save(update_fields=["payment_reference"])
+
+        return Response(
+            {
+                "success": True,
+                "message": f"Payment request of TSh {amount:,} sent to {phone}",
+                "payment": {
+                    "id": str(payment.id),
+                    "order_reference": payment.order_reference,
+                    "snippe_reference": snippe_ref,
+                    "amount": str(amount),
+                    "billing_days": billing_days,
+                    "plan_name": plan.name,
+                    "status": "pending",
+                    "phone_number": phone,
+                },
+            },
+            status=status.HTTP_201_CREATED,
+        )
+    else:
+        payment.mark_failed()
+        error_msg = result.get("message", result.get("error", "Payment failed"))
+        return Response(
+            {"success": False, "error": f"Payment initiation failed: {error_msg}"},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+
+@api_view(["GET"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_remote_user_payments(request, user_id):
+    """
+    Get payment history for a remote user.
+
+    Endpoint: GET /api/portal/vpn/users/<user_id>/payments/
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        remote_user = RemoteUser.objects.get(id=user_id, tenant=tenant)
+    except RemoteUser.DoesNotExist:
+        return Response(
+            {"success": False, "error": "Remote user not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    payments = RemoteAccessPayment.objects.filter(remote_user=remote_user).order_by(
+        "-created_at"
+    )
+    serializer = RemoteAccessPaymentSerializer(payments, many=True)
+
+    return Response(
+        {
+            "success": True,
+            "remote_user": remote_user.name,
+            "total_payments": payments.count(),
+            "payments": serializer.data,
+        }
+    )
+
+
+# ---- Remote Access Logs ----
+
+
+@api_view(["GET"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_remote_access_logs(request):
+    """
+    Get remote access logs for the tenant. Supports filtering by user and event type.
+
+    Endpoint: GET /api/portal/vpn/logs/
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    logs = RemoteAccessLog.objects.filter(tenant=tenant).select_related("remote_user")
+
+    # Filters
+    user_id = request.query_params.get("user_id")
+    if user_id:
+        logs = logs.filter(remote_user_id=user_id)
+
+    event_type = request.query_params.get("event_type")
+    if event_type:
+        logs = logs.filter(event_type=event_type)
+
+    limit = min(int(request.query_params.get("limit", 100)), 500)
+    logs = logs[:limit]
+
+    serializer = RemoteAccessLogSerializer(logs, many=True)
+    return Response(
+        {
+            "success": True,
+            "total": len(serializer.data),
+            "logs": serializer.data,
+        }
+    )
+
+
+# ---- Expiry Management ----
+
+
+@api_view(["POST"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_remote_user_extend(request, user_id):
+    """
+    Manually extend a remote user's access by a number of days.
+
+    Endpoint: POST /api/portal/vpn/users/<user_id>/extend/
+    Body: { "days": 30 }
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        remote_user = RemoteUser.objects.get(id=user_id, tenant=tenant)
+    except RemoteUser.DoesNotExist:
+        return Response(
+            {"success": False, "error": "Remote user not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    days = int(request.data.get("days", 0))
+    if days < 1 or days > 365:
+        return Response(
+            {"success": False, "error": "days must be between 1 and 365"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    now = timezone.now()
+    if remote_user.expires_at and remote_user.expires_at > now:
+        remote_user.expires_at = remote_user.expires_at + timedelta(days=days)
+    else:
+        remote_user.expires_at = now + timedelta(days=days)
+
+    # Reactivate if expired
+    if remote_user.status in ("expired", "disabled"):
+        remote_user.status = "active"
+        remote_user.is_active = True
+
+        from .mikrotik import enable_wireguard_peer
+
+        enable_wireguard_peer(remote_user)
+
+    remote_user.save()
+
+    RemoteAccessLog.objects.create(
+        tenant=tenant,
+        remote_user=remote_user,
+        event_type="reactivated",
+        event_details=f"Access extended by {days} days. New expiry: {remote_user.expires_at}",
+    )
+
+    serializer = RemoteUserSerializer(remote_user)
+    return Response(
+        {
+            "success": True,
+            "message": f"Access extended by {days} days",
+            "user": serializer.data,
         }
     )
