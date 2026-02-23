@@ -15791,3 +15791,9 @@ python: error: sh -c '/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebu
 xcode-select: Failed to locate 'python', requesting installation of command line developer tools.
 python: error: sh -c '/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -sdk macosx -find python 2> /dev/null' failed with exit code 17664: (null) (errno=No such file or directory)
 xcode-select: Failed to locate 'python', requesting installation of command line developer tools.
+python: error: sh -c '/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -sdk macosx -find python 2> /dev/null' failed with exit code 17664: (null) (errno=No such file or directory)
+xcode-select: Failed to locate 'python', requesting installation of command line developer tools.
+python: error: sh -c '/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -sdk macosx -find python 2> /dev/null' failed with exit code 17664: (null) (errno=No such file or directory)
+python: error: sh -c '/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -sdk macosx -find python 2> /dev/null' failed with exit code 17664: (null) (errno=No such file or directory)
+xcode-select: Failed to locate 'python', requesting installation of command line developer tools.
+xcode-select: Failed to locate 'python', requesting installation of command line developer tools.

@@ -3642,3 +3642,936 @@ def kick_ppp_session(router, username: str) -> dict:
         safe_close(api)
 
     return result
+
+
+# ==========================================================================
+# WireGuard VPN Integration (RouterOS v7+)
+# ==========================================================================
+
+
+def create_wireguard_interface(vpn_config) -> dict:
+    """
+    Create or update a WireGuard interface on the tenant's router.
+
+    Args:
+        vpn_config: TenantVPNConfig model instance.
+
+    Returns:
+        dict with success, mikrotik_id, message, errors.
+    """
+    result = {"success": False, "mikrotik_id": "", "message": "", "errors": []}
+
+    router = vpn_config.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        result["message"] = "Router connection failed"
+        return result
+
+    try:
+        wg_resource = api.get_resource("/interface/wireguard")
+
+        params = {
+            "name": vpn_config.interface_name,
+            "listen-port": str(vpn_config.listen_port),
+            "mtu": str(vpn_config.mtu),
+            "private-key": vpn_config.server_private_key,
+        }
+
+        existing = wg_resource.get(name=vpn_config.interface_name)
+
+        if existing:
+            item = existing[0]
+            mk_id = item.get(".id") or item.get("id")
+            if mk_id:
+                wg_resource.set(id=mk_id, **params)
+                result["mikrotik_id"] = mk_id
+                result["success"] = True
+                result["message"] = (
+                    f"WireGuard interface '{vpn_config.interface_name}' updated on router"
+                )
+                logger.info(
+                    f"Updated WireGuard interface {vpn_config.interface_name} on {router.name}"
+                )
+        else:
+            wg_resource.add(**params)
+            created = wg_resource.get(name=vpn_config.interface_name)
+            mk_id = ""
+            if created:
+                mk_id = created[0].get(".id") or created[0].get("id") or ""
+            result["mikrotik_id"] = mk_id
+            result["success"] = True
+            result["message"] = (
+                f"WireGuard interface '{vpn_config.interface_name}' created on router"
+            )
+            logger.info(
+                f"Created WireGuard interface {vpn_config.interface_name} on {router.name}"
+            )
+
+        # Assign IP address to the WireGuard interface
+        if result["success"]:
+            _assign_wireguard_ip(api, vpn_config)
+
+    except Exception as e:
+        logger.error(
+            f"create_wireguard_interface failed for {vpn_config.interface_name}: {e}"
+        )
+        result["errors"].append(str(e))
+        result["message"] = f"WireGuard interface sync failed: {e}"
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def _assign_wireguard_ip(api, vpn_config):
+    """
+    Assign the server VPN IP to the WireGuard interface.
+    Internal helper — caller manages the API connection.
+    """
+    import ipaddress as _ipaddress
+
+    try:
+        ip_resource = api.get_resource("/ip/address")
+        network = _ipaddress.ip_network(vpn_config.address_pool, strict=False)
+        address_cidr = f"{vpn_config.server_address}/{network.prefixlen}"
+
+        existing = ip_resource.get(interface=vpn_config.interface_name)
+        already_set = False
+        for entry in existing:
+            if entry.get("address") == address_cidr:
+                already_set = True
+                break
+
+        if not already_set:
+            for entry in existing:
+                old_id = entry.get(".id") or entry.get("id")
+                if old_id:
+                    ip_resource.remove(id=old_id)
+
+            ip_resource.add(
+                address=address_cidr,
+                interface=vpn_config.interface_name,
+                comment=f"Kitonga VPN - {vpn_config.tenant.business_name}",
+            )
+            logger.info(
+                f"Assigned {address_cidr} to {vpn_config.interface_name} on {vpn_config.router.name}"
+            )
+
+    except Exception as e:
+        logger.warning(f"_assign_wireguard_ip failed: {e}")
+
+
+def remove_wireguard_interface(vpn_config) -> dict:
+    """
+    Remove a WireGuard interface and its IP address from the router.
+
+    Args:
+        vpn_config: TenantVPNConfig model instance.
+
+    Returns:
+        dict with success, message, errors.
+    """
+    result = {"success": False, "message": "", "errors": []}
+
+    router = vpn_config.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    try:
+        wg_resource = api.get_resource("/interface/wireguard")
+        existing = wg_resource.get(name=vpn_config.interface_name)
+        if existing:
+            mk_id = existing[0].get(".id") or existing[0].get("id")
+            if mk_id:
+                wg_resource.remove(id=mk_id)
+                logger.info(
+                    f"Removed WireGuard interface {vpn_config.interface_name} from {router.name}"
+                )
+
+        vpn_config.is_configured_on_router = False
+        vpn_config.last_sync_error = ""
+        vpn_config.save(
+            update_fields=["is_configured_on_router", "last_sync_error", "updated_at"]
+        )
+        result["success"] = True
+        result["message"] = (
+            f"WireGuard interface '{vpn_config.interface_name}' removed from router"
+        )
+
+    except Exception as e:
+        logger.error(
+            f"remove_wireguard_interface failed for {vpn_config.interface_name}: {e}"
+        )
+        result["errors"].append(str(e))
+        result["message"] = f"Remove failed: {e}"
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def add_wireguard_peer(remote_user) -> dict:
+    """
+    Add a WireGuard peer on the router for a RemoteUser.
+
+    Args:
+        remote_user: RemoteUser model instance.
+
+    Returns:
+        dict with success, mikrotik_id, message, errors.
+    """
+    result = {"success": False, "mikrotik_id": "", "message": "", "errors": []}
+
+    vpn_config = remote_user.vpn_config
+    router = vpn_config.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        result["message"] = "Router connection failed"
+        return result
+
+    try:
+        peers_resource = api.get_resource("/interface/wireguard/peers")
+
+        params = {
+            "interface": vpn_config.interface_name,
+            "public-key": remote_user.public_key,
+            "allowed-address": f"{remote_user.assigned_ip}/32",
+            "comment": f"Kitonga: {remote_user.name} | {remote_user.tenant.business_name}",
+        }
+        if remote_user.preshared_key:
+            params["preshared-key"] = remote_user.preshared_key
+        if vpn_config.persistent_keepalive > 0:
+            params["persistent-keepalive"] = str(vpn_config.persistent_keepalive)
+        if remote_user.status in ("disabled", "expired", "revoked"):
+            params["disabled"] = "yes"
+        else:
+            params["disabled"] = "no"
+
+        existing = peers_resource.get(**{"public-key": remote_user.public_key})
+
+        if existing:
+            item = existing[0]
+            mk_id = item.get(".id") or item.get("id")
+            if mk_id:
+                peers_resource.set(id=mk_id, **params)
+                result["mikrotik_id"] = mk_id
+                result["success"] = True
+                result["message"] = (
+                    f"WireGuard peer '{remote_user.name}' updated on router"
+                )
+                logger.info(
+                    f"Updated WireGuard peer {remote_user.name} ({remote_user.assigned_ip}) on {router.name}"
+                )
+        else:
+            peers_resource.add(**params)
+            created = peers_resource.get(**{"public-key": remote_user.public_key})
+            mk_id = ""
+            if created:
+                mk_id = created[0].get(".id") or created[0].get("id") or ""
+            result["mikrotik_id"] = mk_id
+            result["success"] = True
+            result["message"] = f"WireGuard peer '{remote_user.name}' created on router"
+            logger.info(
+                f"Created WireGuard peer {remote_user.name} ({remote_user.assigned_ip}) on {router.name}"
+            )
+
+        if result["success"]:
+            remote_user.is_configured_on_router = True
+            remote_user.save(update_fields=["is_configured_on_router", "updated_at"])
+
+    except Exception as e:
+        logger.error(f"add_wireguard_peer failed for {remote_user.name}: {e}")
+        result["errors"].append(str(e))
+        result["message"] = f"Peer sync failed: {e}"
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def remove_wireguard_peer(remote_user) -> dict:
+    """
+    Remove a WireGuard peer from the router.
+
+    Args:
+        remote_user: RemoteUser model instance.
+
+    Returns:
+        dict with success, message, errors.
+    """
+    result = {"success": False, "message": "", "errors": []}
+
+    vpn_config = remote_user.vpn_config
+    router = vpn_config.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    try:
+        peers_resource = api.get_resource("/interface/wireguard/peers")
+        existing = peers_resource.get(**{"public-key": remote_user.public_key})
+
+        if existing:
+            mk_id = existing[0].get(".id") or existing[0].get("id")
+            if mk_id:
+                peers_resource.remove(id=mk_id)
+                logger.info(
+                    f"Removed WireGuard peer {remote_user.name} from {router.name}"
+                )
+
+        remote_user.is_configured_on_router = False
+        remote_user.save(update_fields=["is_configured_on_router", "updated_at"])
+        result["success"] = True
+        result["message"] = f"WireGuard peer '{remote_user.name}' removed from router"
+
+    except Exception as e:
+        logger.error(f"remove_wireguard_peer failed for {remote_user.name}: {e}")
+        result["errors"].append(str(e))
+        result["message"] = f"Remove failed: {e}"
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def disable_wireguard_peer(remote_user) -> dict:
+    """
+    Disable a WireGuard peer on the router (set disabled=yes).
+
+    Args:
+        remote_user: RemoteUser model instance.
+
+    Returns:
+        dict with success, message, errors.
+    """
+    result = {"success": False, "message": "", "errors": []}
+
+    vpn_config = remote_user.vpn_config
+    router = vpn_config.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    try:
+        peers_resource = api.get_resource("/interface/wireguard/peers")
+        existing = peers_resource.get(**{"public-key": remote_user.public_key})
+
+        if existing:
+            mk_id = existing[0].get(".id") or existing[0].get("id")
+            if mk_id:
+                peers_resource.set(id=mk_id, disabled="yes")
+                result["success"] = True
+                result["message"] = (
+                    f"WireGuard peer '{remote_user.name}' disabled on router"
+                )
+                logger.info(
+                    f"Disabled WireGuard peer {remote_user.name} on {router.name}"
+                )
+        else:
+            result["success"] = True
+            result["message"] = (
+                f"Peer '{remote_user.name}' not found on router (already removed)"
+            )
+
+    except Exception as e:
+        logger.error(f"disable_wireguard_peer failed for {remote_user.name}: {e}")
+        result["errors"].append(str(e))
+        result["message"] = f"Disable failed: {e}"
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def enable_wireguard_peer(remote_user) -> dict:
+    """
+    Re-enable a WireGuard peer on the router (set disabled=no).
+    If the peer doesn't exist, it will be created.
+
+    Args:
+        remote_user: RemoteUser model instance.
+
+    Returns:
+        dict with success, message, errors.
+    """
+    result = {"success": False, "message": "", "errors": []}
+
+    vpn_config = remote_user.vpn_config
+    router = vpn_config.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    try:
+        peers_resource = api.get_resource("/interface/wireguard/peers")
+        existing = peers_resource.get(**{"public-key": remote_user.public_key})
+
+        if existing:
+            mk_id = existing[0].get(".id") or existing[0].get("id")
+            if mk_id:
+                peers_resource.set(id=mk_id, disabled="no")
+                result["success"] = True
+                result["message"] = (
+                    f"WireGuard peer '{remote_user.name}' re-enabled on router"
+                )
+                logger.info(
+                    f"Re-enabled WireGuard peer {remote_user.name} on {router.name}"
+                )
+        else:
+            # Peer doesn't exist — create it
+            safe_close(api)
+            add_result = add_wireguard_peer(remote_user)
+            result["success"] = add_result["success"]
+            result["message"] = add_result["message"]
+            result["errors"] = add_result["errors"]
+            return result
+
+    except Exception as e:
+        logger.error(f"enable_wireguard_peer failed for {remote_user.name}: {e}")
+        result["errors"].append(str(e))
+        result["message"] = f"Enable failed: {e}"
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def sync_vpn_config_to_router(vpn_config) -> dict:
+    """
+    Full sync of a TenantVPNConfig to the router.
+    Creates/updates the WireGuard interface, assigns IP,
+    sets up firewall/NAT rules, and syncs ALL active peers.
+
+    Args:
+        vpn_config: TenantVPNConfig model instance.
+
+    Returns:
+        dict with success, interface_result, peer_results,
+        firewall_result, message, errors.
+    """
+    result = {
+        "success": False,
+        "interface_result": {},
+        "peer_results": [],
+        "firewall_result": {},
+        "message": "",
+        "errors": [],
+    }
+
+    # Step 1: Create / update WireGuard interface
+    iface_result = create_wireguard_interface(vpn_config)
+    result["interface_result"] = iface_result
+    if not iface_result["success"]:
+        result["errors"].extend(iface_result["errors"])
+        result["message"] = f"Interface setup failed: {iface_result['message']}"
+        vpn_config.last_sync_error = result["message"]
+        vpn_config.save(update_fields=["last_sync_error", "updated_at"])
+        return result
+
+    # Step 2: Setup firewall / NAT rules
+    if vpn_config.enable_nat or vpn_config.enable_firewall_rules:
+        fw_result = setup_vpn_firewall_rules(vpn_config)
+        result["firewall_result"] = fw_result
+        if not fw_result["success"]:
+            result["errors"].extend(fw_result.get("errors", []))
+
+    # Step 3: Sync all active peers
+    from billing.models import RemoteUser as _RemoteUser
+
+    active_peers = _RemoteUser.objects.filter(
+        vpn_config=vpn_config,
+        is_active=True,
+        status="active",
+    )
+
+    peer_ok = 0
+    peer_fail = 0
+    for peer in active_peers:
+        peer_result = add_wireguard_peer(peer)
+        result["peer_results"].append(
+            {
+                "name": peer.name,
+                "ip": peer.assigned_ip,
+                **peer_result,
+            }
+        )
+        if peer_result["success"]:
+            peer_ok += 1
+        else:
+            peer_fail += 1
+
+    # Step 4: Update VPN config status
+    vpn_config.is_configured_on_router = True
+    vpn_config.last_synced_at = timezone.now()
+    vpn_config.last_sync_error = (
+        f"{peer_fail} peer(s) failed to sync" if peer_fail > 0 else ""
+    )
+    vpn_config.save(
+        update_fields=[
+            "is_configured_on_router",
+            "last_synced_at",
+            "last_sync_error",
+            "updated_at",
+        ]
+    )
+
+    result["success"] = True
+    result["message"] = (
+        f"VPN synced: interface OK, {peer_ok} peers synced, {peer_fail} peers failed"
+    )
+    logger.info(
+        f"sync_vpn_config_to_router completed for {vpn_config.tenant.business_name}: {result['message']}"
+    )
+
+    return result
+
+
+def setup_vpn_firewall_rules(vpn_config) -> dict:
+    """
+    Set up NAT masquerade and firewall accept rules for VPN traffic.
+
+    Args:
+        vpn_config: TenantVPNConfig model instance.
+
+    Returns:
+        dict with success, nat_rule_created, filter_rules_created, errors.
+    """
+    result = {
+        "success": False,
+        "nat_rule_created": False,
+        "filter_rules_created": 0,
+        "errors": [],
+    }
+
+    router = vpn_config.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    comment_tag = f"kitonga-vpn-{vpn_config.interface_name}"
+
+    try:
+        # NAT masquerade rule
+        if vpn_config.enable_nat:
+            try:
+                nat_resource = api.get_resource("/ip/firewall/nat")
+                existing_nat = nat_resource.get(comment=comment_tag)
+                if not existing_nat:
+                    nat_resource.add(
+                        chain="srcnat",
+                        action="masquerade",
+                        **{"src-address": vpn_config.address_pool},
+                        comment=comment_tag,
+                    )
+                    result["nat_rule_created"] = True
+                    logger.info(
+                        f"Created NAT masquerade rule for {vpn_config.address_pool} on {router.name}"
+                    )
+            except Exception as e:
+                result["errors"].append(f"NAT rule: {e}")
+                logger.warning(f"Failed to create NAT rule: {e}")
+
+        # Firewall filter rules
+        if vpn_config.enable_firewall_rules:
+            try:
+                filter_resource = api.get_resource("/ip/firewall/filter")
+
+                # Allow UDP on WireGuard listen port (input chain)
+                fw_comment = f"{comment_tag}-fw"
+                existing_fw = filter_resource.get(comment=fw_comment)
+                if not existing_fw:
+                    filter_resource.add(
+                        chain="input",
+                        protocol="udp",
+                        **{"dst-port": str(vpn_config.listen_port)},
+                        action="accept",
+                        comment=fw_comment,
+                    )
+                    result["filter_rules_created"] += 1
+
+                # Allow forwarding from VPN subnet
+                fwd_comment = f"{comment_tag}-fwd"
+                existing_fwd = filter_resource.get(comment=fwd_comment)
+                if not existing_fwd:
+                    filter_resource.add(
+                        chain="forward",
+                        **{"src-address": vpn_config.address_pool},
+                        action="accept",
+                        comment=fwd_comment,
+                    )
+                    result["filter_rules_created"] += 1
+
+                # Allow forwarding to VPN subnet (return traffic)
+                fwd_ret_comment = f"{comment_tag}-fwd-ret"
+                existing_fwd_ret = filter_resource.get(comment=fwd_ret_comment)
+                if not existing_fwd_ret:
+                    filter_resource.add(
+                        chain="forward",
+                        **{"dst-address": vpn_config.address_pool},
+                        action="accept",
+                        comment=fwd_ret_comment,
+                    )
+                    result["filter_rules_created"] += 1
+
+                logger.info(
+                    f"Created {result['filter_rules_created']} firewall rules for {vpn_config.interface_name} on {router.name}"
+                )
+            except Exception as e:
+                result["errors"].append(f"Firewall rules: {e}")
+                logger.warning(f"Failed to create firewall rules: {e}")
+
+        result["success"] = True
+
+    except Exception as e:
+        logger.error(
+            f"setup_vpn_firewall_rules failed for {vpn_config.interface_name}: {e}"
+        )
+        result["errors"].append(str(e))
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def remove_vpn_firewall_rules(vpn_config) -> dict:
+    """
+    Remove all Kitonga VPN firewall and NAT rules from the router.
+
+    Args:
+        vpn_config: TenantVPNConfig model instance.
+
+    Returns:
+        dict with success, rules_removed, errors.
+    """
+    result = {"success": False, "rules_removed": 0, "errors": []}
+
+    router = vpn_config.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    comment_prefix = f"kitonga-vpn-{vpn_config.interface_name}"
+
+    try:
+        # Remove NAT rules
+        try:
+            nat_resource = api.get_resource("/ip/firewall/nat")
+            for rule in nat_resource.get():
+                comment = rule.get("comment", "")
+                if comment and comment.startswith(comment_prefix):
+                    rule_id = rule.get(".id") or rule.get("id")
+                    if rule_id:
+                        nat_resource.remove(id=rule_id)
+                        result["rules_removed"] += 1
+        except Exception as e:
+            result["errors"].append(f"NAT cleanup: {e}")
+
+        # Remove filter rules
+        try:
+            filter_resource = api.get_resource("/ip/firewall/filter")
+            for rule in filter_resource.get():
+                comment = rule.get("comment", "")
+                if comment and comment.startswith(comment_prefix):
+                    rule_id = rule.get(".id") or rule.get("id")
+                    if rule_id:
+                        filter_resource.remove(id=rule_id)
+                        result["rules_removed"] += 1
+        except Exception as e:
+            result["errors"].append(f"Filter cleanup: {e}")
+
+        result["success"] = True
+        logger.info(
+            f"Removed {result['rules_removed']} VPN firewall rules for {vpn_config.interface_name} from {router.name}"
+        )
+
+    except Exception as e:
+        logger.error(
+            f"remove_vpn_firewall_rules failed for {vpn_config.interface_name}: {e}"
+        )
+        result["errors"].append(str(e))
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def get_wireguard_peer_status(vpn_config) -> dict:
+    """
+    Fetch live WireGuard peer status from the router.
+
+    Args:
+        vpn_config: TenantVPNConfig model instance.
+
+    Returns:
+        dict with success, peers list, errors.
+    """
+    result = {"success": False, "peers": [], "errors": []}
+
+    router = vpn_config.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    try:
+        peers_resource = api.get_resource("/interface/wireguard/peers")
+        all_peers = peers_resource.get(interface=vpn_config.interface_name)
+
+        for p in all_peers:
+            result["peers"].append(
+                {
+                    "id": p.get(".id") or p.get("id"),
+                    "public_key": p.get("public-key", ""),
+                    "allowed_address": p.get("allowed-address", ""),
+                    "endpoint": p.get("current-endpoint-address", ""),
+                    "endpoint_port": p.get("current-endpoint-port", ""),
+                    "last_handshake": p.get("last-handshake", ""),
+                    "rx": p.get("rx", "0"),
+                    "tx": p.get("tx", "0"),
+                    "disabled": p.get("disabled", "false"),
+                    "comment": p.get("comment", ""),
+                }
+            )
+
+        result["success"] = True
+        logger.debug(
+            f"Fetched {len(result['peers'])} WireGuard peers from {vpn_config.interface_name} on {router.name}"
+        )
+
+    except Exception as e:
+        logger.error(
+            f"get_wireguard_peer_status failed for {vpn_config.interface_name}: {e}"
+        )
+        result["errors"].append(str(e))
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def update_peer_handshake_data(vpn_config) -> dict:
+    """
+    Fetch live handshake/traffic data from the router and update
+    RemoteUser records. Called periodically by cron/management command.
+
+    Args:
+        vpn_config: TenantVPNConfig model instance.
+
+    Returns:
+        dict with success, updated_count, errors.
+    """
+    from billing.models import RemoteUser as _RemoteUser
+
+    result = {"success": False, "updated_count": 0, "errors": []}
+
+    status_result = get_wireguard_peer_status(vpn_config)
+    if not status_result["success"]:
+        result["errors"] = status_result["errors"]
+        return result
+
+    peer_lookup = {
+        p["public_key"]: p for p in status_result["peers"] if p.get("public_key")
+    }
+
+    for user in _RemoteUser.objects.filter(vpn_config=vpn_config, is_active=True):
+        peer_data = peer_lookup.get(user.public_key)
+        if peer_data:
+            handshake_str = peer_data.get("last_handshake", "")
+            if handshake_str and handshake_str != "0":
+                user.last_handshake = timezone.now()
+                user.save(update_fields=["last_handshake", "updated_at"])
+                result["updated_count"] += 1
+
+    result["success"] = True
+    logger.debug(
+        f"Updated handshake data for {result['updated_count']} peers on {vpn_config.interface_name}"
+    )
+    return result
+
+
+def setup_wireguard_bandwidth_queue(remote_user) -> dict:
+    """
+    Create a simple queue on the router to enforce bandwidth limits
+    for a WireGuard peer.
+
+    Args:
+        remote_user: RemoteUser model instance.
+
+    Returns:
+        dict with success, message, errors.
+    """
+    result = {"success": False, "message": "", "errors": []}
+
+    if remote_user.bandwidth_limit_up == 0 and remote_user.bandwidth_limit_down == 0:
+        result["success"] = True
+        result["message"] = "No bandwidth limits — queue not needed"
+        return result
+
+    vpn_config = remote_user.vpn_config
+    router = vpn_config.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    try:
+        queue_resource = api.get_resource("/queue/simple")
+        queue_name = f"vpn-{remote_user.name}-{remote_user.assigned_ip}"
+
+        up_limit = (
+            f"{remote_user.bandwidth_limit_up}k"
+            if remote_user.bandwidth_limit_up > 0
+            else "0"
+        )
+        down_limit = (
+            f"{remote_user.bandwidth_limit_down}k"
+            if remote_user.bandwidth_limit_down > 0
+            else "0"
+        )
+        max_limit = f"{up_limit}/{down_limit}"
+
+        params = {
+            "name": queue_name,
+            "target": f"{remote_user.assigned_ip}/32",
+            "max-limit": max_limit,
+            "comment": f"kitonga-vpn-bw | {remote_user.name} | {remote_user.tenant.business_name}",
+        }
+
+        existing = queue_resource.get(name=queue_name)
+        if existing:
+            mk_id = existing[0].get(".id") or existing[0].get("id")
+            if mk_id:
+                queue_resource.set(id=mk_id, **params)
+                result["success"] = True
+                result["message"] = f"Bandwidth queue '{queue_name}' updated"
+                logger.info(f"Updated bandwidth queue {queue_name} on {router.name}")
+        else:
+            queue_resource.add(**params)
+            result["success"] = True
+            result["message"] = f"Bandwidth queue '{queue_name}' created"
+            logger.info(
+                f"Created bandwidth queue {queue_name} ({max_limit}) on {router.name}"
+            )
+
+    except Exception as e:
+        logger.error(
+            f"setup_wireguard_bandwidth_queue failed for {remote_user.name}: {e}"
+        )
+        result["errors"].append(str(e))
+        result["message"] = f"Queue setup failed: {e}"
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def remove_wireguard_bandwidth_queue(remote_user) -> dict:
+    """
+    Remove the simple queue associated with a WireGuard peer.
+
+    Args:
+        remote_user: RemoteUser model instance.
+
+    Returns:
+        dict with success, message, errors.
+    """
+    result = {"success": False, "message": "", "errors": []}
+
+    vpn_config = remote_user.vpn_config
+    router = vpn_config.router
+    api = get_tenant_mikrotik_api(router)
+    if api is None:
+        result["errors"].append(f"Cannot connect to router {router.host}:{router.port}")
+        return result
+
+    try:
+        queue_resource = api.get_resource("/queue/simple")
+        queue_name = f"vpn-{remote_user.name}-{remote_user.assigned_ip}"
+
+        existing = queue_resource.get(name=queue_name)
+        if existing:
+            mk_id = existing[0].get(".id") or existing[0].get("id")
+            if mk_id:
+                queue_resource.remove(id=mk_id)
+                logger.info(f"Removed bandwidth queue {queue_name} from {router.name}")
+
+        result["success"] = True
+        result["message"] = f"Bandwidth queue '{queue_name}' removed"
+
+    except Exception as e:
+        logger.error(
+            f"remove_wireguard_bandwidth_queue failed for {remote_user.name}: {e}"
+        )
+        result["errors"].append(str(e))
+        result["message"] = f"Queue removal failed: {e}"
+    finally:
+        safe_close(api)
+
+    return result
+
+
+def full_teardown_vpn(vpn_config) -> dict:
+    """
+    Complete teardown: remove all peers, firewall rules, queues,
+    and the WireGuard interface from the router.
+
+    Args:
+        vpn_config: TenantVPNConfig model instance.
+
+    Returns:
+        dict with success, details, errors.
+    """
+    from billing.models import RemoteUser as _RemoteUser
+
+    result = {
+        "success": False,
+        "details": {
+            "peers_removed": 0,
+            "queues_removed": 0,
+            "firewall_rules_removed": 0,
+            "interface_removed": False,
+        },
+        "errors": [],
+    }
+
+    all_peers = _RemoteUser.objects.filter(vpn_config=vpn_config)
+
+    # Step 1: Remove bandwidth queues
+    for peer in all_peers:
+        q_result = remove_wireguard_bandwidth_queue(peer)
+        if q_result["success"]:
+            result["details"]["queues_removed"] += 1
+        else:
+            result["errors"].extend(q_result.get("errors", []))
+
+    # Step 2: Remove firewall / NAT rules
+    fw_result = remove_vpn_firewall_rules(vpn_config)
+    result["details"]["firewall_rules_removed"] = fw_result.get("rules_removed", 0)
+    if not fw_result["success"]:
+        result["errors"].extend(fw_result.get("errors", []))
+
+    # Step 3: Remove WireGuard interface (removes all peers on it too)
+    iface_result = remove_wireguard_interface(vpn_config)
+    result["details"]["interface_removed"] = iface_result["success"]
+    if not iface_result["success"]:
+        result["errors"].extend(iface_result.get("errors", []))
+
+    # Step 4: Mark all peers as not configured
+    all_peers.update(is_configured_on_router=False)
+    result["details"]["peers_removed"] = all_peers.count()
+
+    result["success"] = iface_result["success"]
+    logger.info(
+        f"full_teardown_vpn for {vpn_config.tenant.business_name}: {result['details']}"
+    )
+
+    return result
