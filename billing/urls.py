@@ -794,4 +794,82 @@ urlpatterns = [
         portal_views.portal_ppp_query_bill,
         name="portal_ppp_query_bill",
     ),
+    # =========================================================================
+    # REMOTE ACCESS (VPN / WIREGUARD) MANAGEMENT — Enterprise
+    # =========================================================================
+    # VPN Configuration
+    path(
+        "portal/vpn/config/",
+        portal_views.portal_vpn_config,
+        name="portal_vpn_config",
+    ),
+    path(
+        "portal/vpn/sync/",
+        portal_views.portal_vpn_sync,
+        name="portal_vpn_sync",
+    ),
+    path(
+        "portal/vpn/teardown/",
+        portal_views.portal_vpn_teardown,
+        name="portal_vpn_teardown",
+    ),
+    path(
+        "portal/vpn/status/",
+        portal_views.portal_vpn_status,
+        name="portal_vpn_status",
+    ),
+    # Remote Access Plans
+    path(
+        "portal/vpn/plans/",
+        portal_views.portal_remote_plans,
+        name="portal_remote_plans",
+    ),
+    path(
+        "portal/vpn/plans/<uuid:plan_id>/",
+        portal_views.portal_remote_plan_detail,
+        name="portal_remote_plan_detail",
+    ),
+    # Remote Users (CRUD + Provisioning)
+    path(
+        "portal/vpn/users/",
+        portal_views.portal_remote_users,
+        name="portal_remote_users",
+    ),
+    path(
+        "portal/vpn/users/<uuid:user_id>/",
+        portal_views.portal_remote_user_detail,
+        name="portal_remote_user_detail",
+    ),
+    path(
+        "portal/vpn/users/<uuid:user_id>/sync/",
+        portal_views.portal_remote_user_sync,
+        name="portal_remote_user_sync",
+    ),
+    path(
+        "portal/vpn/users/<uuid:user_id>/config/",
+        portal_views.portal_remote_user_config,
+        name="portal_remote_user_config",
+    ),
+    path(
+        "portal/vpn/users/<uuid:user_id>/extend/",
+        portal_views.portal_remote_user_extend,
+        name="portal_remote_user_extend",
+    ),
+    # Remote User Payments
+    path(
+        "portal/vpn/users/<uuid:user_id>/pay/",
+        portal_views.portal_remote_user_pay,
+        name="portal_remote_user_pay",
+    ),
+    path(
+        "portal/vpn/users/<uuid:user_id>/payments/",
+        portal_views.portal_remote_user_payments,
+        name="portal_remote_user_payments",
+    ),
+    # Remote Access Logs
+    path(
+        "portal/vpn/logs/",
+        portal_views.portal_remote_access_logs,
+        name="portal_remote_access_logs",
+    ),
 ]

@@ -605,3 +605,359 @@ def send_ppp_expiry_notifications():
     except Exception as e:
         logger.error(f"Error in send_ppp_expiry_notifications task: {e}")
         return {"success": False, "error": str(e)}
+
+
+# ==================== REMOTE ACCESS (VPN) TASKS ====================
+
+
+def disconnect_expired_remote_users():
+    """
+    Disable WireGuard peers for remote users whose access has expired.
+    Runs every 5 minutes via cron.
+
+    1. Find RemoteUser records with status='active' and expires_at in the past
+    2. Disable the peer on the MikroTik router
+    3. Remove bandwidth queue
+    4. Update status to 'expired' in database
+    5. Log the event
+    6. Optionally trigger webhook notification
+    """
+    try:
+        from .models import RemoteUser, RemoteAccessLog
+        from .mikrotik import disable_wireguard_peer, remove_wireguard_bandwidth_queue
+
+        now = timezone.now()
+
+        expired_users = RemoteUser.objects.filter(
+            status="active",
+            is_active=True,
+            expires_at__isnull=False,
+            expires_at__lte=now,
+        ).select_related("vpn_config", "tenant")
+
+        disabled_count = 0
+        failed_count = 0
+        webhook_sent = 0
+
+        logger.info(
+            f"🔍 VPN: Found {expired_users.count()} expired remote users to disable"
+        )
+
+        for remote_user in expired_users:
+            try:
+                time_expired = now - remote_user.expires_at
+                expired_hours = int(time_expired.total_seconds() / 3600)
+
+                logger.info(
+                    f"⏰ VPN: Processing expired remote user: {remote_user.name} "
+                    f"(tenant: {remote_user.tenant.slug}, "
+                    f"IP: {remote_user.assigned_ip}, expired {expired_hours}h ago)"
+                )
+
+                # 1) Disable peer on router
+                disable_result = disable_wireguard_peer(remote_user)
+                if disable_result.get("success"):
+                    logger.info(
+                        f"  ✅ WireGuard peer disabled on router for {remote_user.name}"
+                    )
+                else:
+                    logger.warning(
+                        f"  ⚠️  Router disable failed for {remote_user.name}: "
+                        f"{disable_result.get('message')}"
+                    )
+
+                # 2) Remove bandwidth queue
+                try:
+                    remove_wireguard_bandwidth_queue(remote_user)
+                except Exception as q_err:
+                    logger.warning(
+                        f"  ⚠️  Queue removal failed for {remote_user.name}: {q_err}"
+                    )
+
+                # 3) Update database
+                remote_user.status = "expired"
+                remote_user.is_active = False
+                remote_user.save(update_fields=["status", "is_active", "updated_at"])
+                disabled_count += 1
+
+                # 4) Log the event
+                RemoteAccessLog.objects.create(
+                    tenant=remote_user.tenant,
+                    remote_user=remote_user,
+                    event_type="expired",
+                    event_details=(
+                        f"Access expired. Was active until {remote_user.expires_at}. "
+                        f"Peer disabled on router."
+                    ),
+                )
+
+                # 5) Trigger webhook notification
+                try:
+                    from .webhook_service import WebhookService
+
+                    WebhookService.dispatch_event(
+                        tenant=remote_user.tenant,
+                        event_type="user.expired",
+                        data={
+                            "user_type": "remote_vpn",
+                            "remote_user_id": str(remote_user.id),
+                            "name": remote_user.name,
+                            "assigned_ip": remote_user.assigned_ip,
+                            "expired_at": remote_user.expires_at.isoformat(),
+                        },
+                    )
+                    webhook_sent += 1
+                except Exception as wh_err:
+                    logger.debug(
+                        f"  ℹ️  Webhook trigger skipped for {remote_user.name}: {wh_err}"
+                    )
+
+                logger.info(
+                    f"✅ VPN remote user {remote_user.name} disabled after expiry"
+                )
+
+            except Exception as user_error:
+                logger.error(
+                    f"❌ Error processing expired remote user {remote_user.name}: {user_error}"
+                )
+                failed_count += 1
+
+        logger.info(
+            f"🎯 VPN expired user cleanup: {disabled_count} disabled, "
+            f"{webhook_sent} webhooks sent, {failed_count} failures"
+        )
+
+        return {
+            "success": True,
+            "disabled": disabled_count,
+            "webhook_sent": webhook_sent,
+            "failed": failed_count,
+            "total_checked": expired_users.count(),
+        }
+
+    except Exception as e:
+        logger.error(f"Error in disconnect_expired_remote_users task: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def send_remote_user_expiry_notifications():
+    """
+    Send notifications to remote users whose VPN access is about to expire.
+    Runs hourly via cron.
+
+    Notifications sent at:
+    - 24 hours before expiry
+    - 3 hours before expiry
+    """
+    try:
+        from datetime import timedelta
+        from .models import RemoteUser, RemoteAccessLog
+
+        now = timezone.now()
+        notified_count = 0
+        failed_count = 0
+
+        # 24-hour warning window (±30 min to avoid duplicates)
+        window_24h_start = now + timedelta(hours=23, minutes=30)
+        window_24h_end = now + timedelta(hours=24, minutes=30)
+
+        users_24h = RemoteUser.objects.filter(
+            status="active",
+            is_active=True,
+            expires_at__gte=window_24h_start,
+            expires_at__lte=window_24h_end,
+        ).select_related("tenant")
+
+        logger.info(f"📢 VPN: Found {users_24h.count()} remote users expiring in ~24h")
+
+        for user in users_24h:
+            try:
+                _send_vpn_expiry_notification(user, hours_remaining=24)
+                notified_count += 1
+            except Exception as e:
+                failed_count += 1
+                logger.error(f"VPN expiry notification error for {user.name}: {e}")
+
+        # 3-hour warning window
+        window_3h_start = now + timedelta(hours=2, minutes=30)
+        window_3h_end = now + timedelta(hours=3, minutes=30)
+
+        users_3h = RemoteUser.objects.filter(
+            status="active",
+            is_active=True,
+            expires_at__gte=window_3h_start,
+            expires_at__lte=window_3h_end,
+        ).select_related("tenant")
+
+        logger.info(f"📢 VPN: Found {users_3h.count()} remote users expiring in ~3h")
+
+        for user in users_3h:
+            try:
+                _send_vpn_expiry_notification(user, hours_remaining=3)
+                notified_count += 1
+            except Exception as e:
+                failed_count += 1
+                logger.error(f"VPN expiry notification error for {user.name}: {e}")
+
+        logger.info(
+            f"📢 VPN expiry notifications: {notified_count} sent, {failed_count} failed"
+        )
+
+        return {
+            "success": True,
+            "notified": notified_count,
+            "failed": failed_count,
+        }
+
+    except Exception as e:
+        logger.error(f"Error in send_remote_user_expiry_notifications: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def _send_vpn_expiry_notification(remote_user, hours_remaining=24):
+    """
+    Send an SMS or email notification to a remote user about upcoming expiry.
+    Uses the tenant's NextSMS configuration.
+    """
+    from .models import RemoteAccessLog
+
+    tenant = remote_user.tenant
+
+    # Try SMS notification if phone is available
+    if remote_user.phone:
+        try:
+            from .nextsms import NextSMSAPI
+
+            sms_api = NextSMSAPI(tenant=tenant)
+            message = (
+                f"{tenant.business_name} VPN: Your remote access expires in "
+                f"{hours_remaining} hours. Contact your provider to renew."
+            )
+            result = sms_api.send_sms(remote_user.phone, message)
+            if result.get("success"):
+                logger.info(f"📱 VPN expiry SMS sent to {remote_user.phone}")
+        except Exception as e:
+            logger.debug(f"VPN expiry SMS failed for {remote_user.name}: {e}")
+
+    # Log the notification
+    RemoteAccessLog.objects.create(
+        tenant=tenant,
+        remote_user=remote_user,
+        event_type="expired",
+        event_details=f"Expiry notification sent ({hours_remaining}h warning)",
+    )
+
+
+def health_check_vpn_interfaces():
+    """
+    Health check for all active VPN interfaces across all tenants.
+    Runs every 15-30 minutes via cron.
+
+    1. For each active TenantVPNConfig, fetch live peer status from router
+    2. Update last_handshake data for each remote user
+    3. Detect peers that are configured but not reachable
+    4. Log any router connectivity issues
+    """
+    try:
+        from .models import TenantVPNConfig, RemoteUser, RemoteAccessLog
+        from .mikrotik import (
+            get_wireguard_peer_status,
+            update_peer_handshake_data,
+            get_tenant_mikrotik_api,
+        )
+
+        configs = TenantVPNConfig.objects.filter(
+            is_active=True,
+            is_configured_on_router=True,
+        ).select_related("tenant", "router")
+
+        total_configs = configs.count()
+        healthy = 0
+        unhealthy = 0
+        peers_updated = 0
+        errors = []
+
+        logger.info(f"🏥 VPN Health Check: Checking {total_configs} VPN interfaces")
+
+        for vpn_config in configs:
+            try:
+                # Test router connectivity first
+                api = get_tenant_mikrotik_api(vpn_config.router)
+                if api is None:
+                    unhealthy += 1
+                    error_msg = f"Router unreachable: {vpn_config.router.host}"
+                    vpn_config.last_sync_error = error_msg
+                    vpn_config.save(update_fields=["last_sync_error", "updated_at"])
+                    errors.append(f"{vpn_config.tenant.slug}: {error_msg}")
+
+                    # Trigger webhook for router offline
+                    try:
+                        from .webhook_service import WebhookService
+
+                        WebhookService.dispatch_event(
+                            tenant=vpn_config.tenant,
+                            event_type="router.offline",
+                            data={
+                                "router_id": vpn_config.router.id,
+                                "router_name": vpn_config.router.name,
+                                "vpn_interface": vpn_config.interface_name,
+                                "error": error_msg,
+                            },
+                        )
+                    except Exception:
+                        pass
+
+                    continue
+
+                from .mikrotik import safe_close
+
+                safe_close(api)
+
+                # Update handshake data for all peers
+                handshake_result = update_peer_handshake_data(vpn_config)
+                if handshake_result["success"]:
+                    peers_updated += handshake_result.get("updated_count", 0)
+                    healthy += 1
+
+                    # Clear any previous error
+                    if vpn_config.last_sync_error:
+                        vpn_config.last_sync_error = ""
+                        vpn_config.last_synced_at = timezone.now()
+                        vpn_config.save(
+                            update_fields=[
+                                "last_sync_error",
+                                "last_synced_at",
+                                "updated_at",
+                            ]
+                        )
+                else:
+                    unhealthy += 1
+                    errors.append(
+                        f"{vpn_config.tenant.slug}: "
+                        f"Handshake update failed - {handshake_result.get('errors')}"
+                    )
+
+            except Exception as e:
+                unhealthy += 1
+                errors.append(f"{vpn_config.tenant.slug}: {str(e)}")
+                logger.error(
+                    f"VPN health check failed for {vpn_config.tenant.slug}: {e}"
+                )
+
+        logger.info(
+            f"🏥 VPN Health Check complete: {healthy} healthy, {unhealthy} unhealthy, "
+            f"{peers_updated} peers updated out of {total_configs} total interfaces"
+        )
+
+        return {
+            "success": True,
+            "total_interfaces": total_configs,
+            "healthy": healthy,
+            "unhealthy": unhealthy,
+            "peers_updated": peers_updated,
+            "errors": errors,
+        }
+
+    except Exception as e:
+        logger.error(f"Error in health_check_vpn_interfaces task: {e}")
+        return {"success": False, "error": str(e)}

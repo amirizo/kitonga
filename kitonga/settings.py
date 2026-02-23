@@ -620,11 +620,33 @@ CRONJOBS = [
         "billing.tasks.send_ppp_expiry_notifications",
         ">> /var/log/kitonga_cron.log 2>&1",
     ),
+    # VPN: Disconnect expired remote users every 5 minutes
+    # Disables WireGuard peer on router, sets status to 'expired', sends webhook
+    (
+        "*/5 * * * *",
+        "billing.tasks.disconnect_expired_remote_users",
+        ">> /var/log/kitonga_cron.log 2>&1",
+    ),
+    # VPN: Send expiry warning SMS every hour
+    # Warns remote users 24h and 3h before their VPN access expires
+    (
+        "0 * * * *",
+        "billing.tasks.send_remote_user_expiry_notifications",
+        ">> /var/log/kitonga_cron.log 2>&1",
+    ),
+    # VPN: Health check all VPN interfaces every 15 minutes
+    # Updates peer handshake data, detects offline routers, triggers webhooks
+    (
+        "*/15 * * * *",
+        "billing.tasks.health_check_vpn_interfaces",
+        ">> /var/log/kitonga_cron.log 2>&1",
+    ),
 ]
 
 # For development/testing, you can also manually run:
 # python manage.py disconnect_expired_users
 # python manage.py send_expiry_notifications
+# python manage.py vpn_tasks --all
 
 # Development Configuration Summary (for debugging)
 if DEBUG:

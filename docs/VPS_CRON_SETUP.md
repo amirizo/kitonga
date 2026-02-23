@@ -68,6 +68,16 @@ crontab -e
 # Kitonga WiFi - Clean Up Old Devices
 # Runs daily at 2 AM to deactivate devices not seen in 30+ days
 0 2 * * * cd /var/www/kitonga && /var/www/kitonga/venv/bin/python manage.py cleanup_inactive_devices >> /var/www/kitonga/logs/cron.log 2>&1
+
+# ── VPN / Remote Access Tasks ──
+# Disable expired remote VPN users every 5 minutes
+*/5 * * * * cd /var/www/kitonga && /var/www/kitonga/venv/bin/python manage.py vpn_tasks --expire >> /var/www/kitonga/logs/cron.log 2>&1
+
+# Send VPN expiry warnings every hour (24h and 3h before)
+0 * * * * cd /var/www/kitonga && /var/www/kitonga/venv/bin/python manage.py vpn_tasks --notify >> /var/www/kitonga/logs/cron.log 2>&1
+
+# Health check VPN interfaces every 15 minutes
+*/15 * * * * cd /var/www/kitonga && /var/www/kitonga/venv/bin/python manage.py vpn_tasks --health >> /var/www/kitonga/logs/cron.log 2>&1
 ```
 
 4. **Save and exit** (Ctrl+X, then Y, then Enter for nano)
@@ -276,7 +286,6 @@ grep "❌" /var/www/kitonga/logs/cron.log | grep "$(date +'%Y-%m-%d %H')" | wc -
 ## 🚨 IMPORTANT: After Deployment
 
 1. **Test immediately** after setting up cron:
-
    - Create a test user with short expiry (5 minutes)
    - Wait for expiry
    - Verify they receive SMS
@@ -284,7 +293,6 @@ grep "❌" /var/www/kitonga/logs/cron.log | grep "$(date +'%Y-%m-%d %H')" | wc -
    - Check MikroTik shows user disabled
 
 2. **Monitor logs for first 24 hours** to ensure:
-
    - Cron runs every 5 minutes
    - No permission errors
    - No database connection issues

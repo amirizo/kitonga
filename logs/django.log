@@ -3138,3 +3138,6 @@ ERROR 2026-02-19 17:25:02,183 tasks 54452 8649141312 Error in disconnect_expired
 ERROR 2026-02-19 17:30:02,911 tasks 59198 8649141312 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
 ERROR 2026-02-19 17:35:02,568 tasks 59784 8649141312 Error in disconnect_expired_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
 INFO 2026-02-23 13:37:38,346 autoreload 13996 8604380224 Watching for file changes with StatReloader
+ERROR 2026-02-23 14:46:05,869 tasks 27672 8604380224 Error in disconnect_expired_remote_users task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-02-23 14:46:05,888 tasks 27672 8604380224 Error in send_remote_user_expiry_notifications: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
+ERROR 2026-02-23 14:46:05,893 tasks 27672 8604380224 Error in health_check_vpn_interfaces task: (1045, "Access denied for user 'root'@'localhost' (using password: YES)")
