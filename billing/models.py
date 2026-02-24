@@ -1440,7 +1440,7 @@ class RemoteAccessPayment(models.Model):
         import random
         import string
 
-        prefix = "VPN"
+        prefix = "KTN"
         random_part = "".join(
             random.choices(string.ascii_uppercase + string.digits, k=8)
         )

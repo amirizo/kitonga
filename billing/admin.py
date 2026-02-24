@@ -2484,7 +2484,12 @@ class AppUserProfileAdmin(admin.ModelAdmin):
         "created_at",
     ]
     list_filter = ["user__is_active", "created_at"]
-    search_fields = ["phone_number", "user__first_name", "user__last_name", "user__email"]
+    search_fields = [
+        "phone_number",
+        "user__first_name",
+        "user__last_name",
+        "user__email",
+    ]
     readonly_fields = ["created_at", "updated_at"]
     raw_id_fields = ["user"]
     ordering = ["-created_at"]
