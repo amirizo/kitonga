@@ -51,6 +51,9 @@ from .models import (
     RemoteAccessLog,
     RemoteAccessPlan,
     RemoteAccessPayment,
+    # App User Models
+    AppUserProfile,
+    PhoneOTP,
 )
 
 
@@ -2462,6 +2465,105 @@ class PPPPaymentAdmin(admin.ModelAdmin):
         )
 
     status_badge.short_description = "Status"
+
+
+# =============================================================================
+# APP USER MANAGEMENT (Kitonga WiFi Remote App)
+# =============================================================================
+
+
+@admin.register(AppUserProfile)
+class AppUserProfileAdmin(admin.ModelAdmin):
+    """Manage mobile app user profiles"""
+
+    list_display = [
+        "phone_number",
+        "user_name",
+        "user_email",
+        "is_active_badge",
+        "created_at",
+    ]
+    list_filter = ["user__is_active", "created_at"]
+    search_fields = ["phone_number", "user__first_name", "user__last_name", "user__email"]
+    readonly_fields = ["created_at", "updated_at"]
+    raw_id_fields = ["user"]
+    ordering = ["-created_at"]
+
+    fieldsets = (
+        ("Profile", {"fields": ("user", "phone_number")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
+
+    def user_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
+
+    user_name.short_description = "Name"
+
+    def user_email(self, obj):
+        return obj.user.email
+
+    user_email.short_description = "Email"
+
+    def is_active_badge(self, obj):
+        if obj.user.is_active:
+            return format_html(
+                '<span style="background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px;">VERIFIED</span>'
+            )
+        return format_html(
+            '<span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px;">UNVERIFIED</span>'
+        )
+
+    is_active_badge.short_description = "Phone Status"
+
+
+@admin.register(PhoneOTP)
+class PhoneOTPAdmin(admin.ModelAdmin):
+    """View phone OTP records for app users"""
+
+    list_display = [
+        "phone_number",
+        "purpose",
+        "otp_code",
+        "status_badge",
+        "attempts",
+        "created_at",
+        "expires_at",
+    ]
+    list_filter = ["purpose", "is_used", "created_at"]
+    search_fields = ["phone_number", "otp_code"]
+    readonly_fields = [
+        "phone_number",
+        "otp_code",
+        "purpose",
+        "is_used",
+        "attempts",
+        "created_at",
+        "expires_at",
+        "used_at",
+    ]
+    ordering = ["-created_at"]
+    date_hierarchy = "created_at"
+
+    def status_badge(self, obj):
+        if obj.is_used:
+            return format_html(
+                '<span style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px;">USED</span>'
+            )
+        if not obj.is_valid():
+            return format_html(
+                '<span style="background: #ef4444; color: white; padding: 2px 8px; border-radius: 4px;">EXPIRED</span>'
+            )
+        return format_html(
+            '<span style="background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px;">ACTIVE</span>'
+        )
+
+    status_badge.short_description = "Status"
+
+    def has_add_permission(self, request):
+        return False  # OTPs are created programmatically
+
+    def has_change_permission(self, request, obj=None):
+        return False  # OTPs are read-only
 
 
 # Set admin site properties
