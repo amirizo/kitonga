@@ -81,7 +81,7 @@ def verify_webhook_signature(
     clean_sig = signature
     for prefix in ("v1=", "sha256="):
         if clean_sig.startswith(prefix):
-            clean_sig = clean_sig[len(prefix):]
+            clean_sig = clean_sig[len(prefix) :]
             break
 
     # Try multiple signing strategies (Snippe may include timestamp)

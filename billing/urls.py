@@ -5,6 +5,7 @@ URL routing for billing API
 from django.urls import path
 from . import views
 from . import portal_views
+from . import app_views
 
 urlpatterns = [
     # Authentication endpoints
@@ -872,4 +873,35 @@ urlpatterns = [
         portal_views.portal_remote_access_logs,
         name="portal_remote_access_logs",
     ),
+    # =========================================================================
+    # KITONGA WIFI REMOTE APP — Customer Self-Service Endpoints
+    # =========================================================================
+    # Authentication (public)
+    path("app/signup/", app_views.app_signup, name="app_signup"),
+    path("app/login/", app_views.app_login, name="app_login"),
+    # Account (requires Token auth)
+    path("app/account/", app_views.app_account, name="app_account"),
+    # Tenants / Locations (requires Token auth)
+    path("app/tenants/", app_views.app_tenants, name="app_tenants"),
+    # Plans per location (requires Token auth)
+    path("app/plans/", app_views.app_plans, name="app_plans"),
+    # Payment (requires Token auth)
+    path(
+        "app/initiate-payment/",
+        app_views.app_initiate_payment,
+        name="app_initiate_payment",
+    ),
+    path(
+        "app/verify-payment/",
+        app_views.app_verify_payment,
+        name="app_verify_payment",
+    ),
+    # WireGuard config delivery (requires Token auth)
+    path(
+        "app/wireguard-config/",
+        app_views.app_wireguard_config,
+        name="app_wireguard_config",
+    ),
+    # User status lookup (public — no auth)
+    path("app/user-status/", app_views.app_user_status, name="app_user_status"),
 ]

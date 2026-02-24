@@ -1,0 +1,965 @@
+"""
+Kitonga WiFi Remote App — Customer-Facing API Views
+
+These endpoints serve the WebView-based mobile app (iOS/Android).
+They allow end-users to:
+  1. Sign up / Log in
+  2. Browse WiFi locations (tenants)
+  3. Choose a VPN data plan
+  4. Pay via Snippe Payment
+  5. Receive their WireGuard config
+  6. Check plan status by phone number
+
+All responses follow the data shapes defined in the
+"Kitonga WiFi Remote App — Backend Integration Guide".
+"""
+
+import logging
+
+from django.conf import settings
+from django.contrib.auth import authenticate
+from django.contrib.auth.models import User as DjangoUser
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.authtoken.models import Token
+from rest_framework.decorators import (
+    api_view,
+    authentication_classes,
+    permission_classes,
+)
+from rest_framework.authentication import TokenAuthentication
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+
+from .models import (
+    Tenant,
+    TenantVPNConfig,
+    RemoteUser,
+    RemoteAccessPlan,
+    RemoteAccessPayment,
+    RemoteAccessLog,
+)
+from .wireguard_utils import generate_wireguard_keypair, generate_preshared_key
+
+logger = logging.getLogger(__name__)
+
+
+# =========================================================================
+# Helper: resolve DjangoUser → RemoteUser (find their active VPN profile)
+# =========================================================================
+
+def _get_remote_user_for_django_user(user: DjangoUser):
+    """
+    Return the most recently-created active RemoteUser linked to this
+    Django user (matched by email).  Returns None when no link exists.
+    """
+    return (
+        RemoteUser.objects.filter(email=user.email, is_active=True)
+        .select_related("vpn_config", "vpn_config__router", "plan", "tenant")
+        .order_by("-created_at")
+        .first()
+    )
+
+
+# =========================================================================
+# §2  Authentication — Signup
+# =========================================================================
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def app_signup(request):
+    """
+    Register a new app user.
+
+    POST /api/app/signup/
+    Body: { "name": "...", "email": "...", "password": "...", "password_confirm": "..." }
+    Returns: { "token": "...", "user": { "id": ..., "name": "...", "email": "..." } }
+    """
+    name = (request.data.get("name") or "").strip()
+    email = (request.data.get("email") or "").strip().lower()
+    password = request.data.get("password") or ""
+    password_confirm = request.data.get("password_confirm") or ""
+
+    # Validation
+    errors = {}
+    if not name:
+        errors["name"] = ["This field is required."]
+    if not email:
+        errors["email"] = ["This field is required."]
+    if not password:
+        errors["password"] = ["This field is required."]
+    if password and len(password) < 6:
+        errors["password"] = ["Password must be at least 6 characters."]
+    if password != password_confirm:
+        errors["password_confirm"] = ["Passwords do not match."]
+
+    if DjangoUser.objects.filter(username=email).exists():
+        errors["email"] = ["An account with this email already exists."]
+
+    if errors:
+        return Response(
+            {"detail": "Validation error.", "errors": errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Create Django user
+    first_name = name.split(" ", 1)[0]
+    last_name = name.split(" ", 1)[1] if " " in name else ""
+
+    user = DjangoUser.objects.create_user(
+        username=email,
+        email=email,
+        password=password,
+        first_name=first_name,
+        last_name=last_name,
+        is_active=True,
+        is_staff=False,
+    )
+
+    token, _ = Token.objects.get_or_create(user=user)
+
+    logger.info(f"App signup: new user {email} (id={user.id})")
+
+    return Response(
+        {
+            "token": token.key,
+            "user": {
+                "id": user.id,
+                "name": user.get_full_name() or name,
+                "email": user.email,
+            },
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+# =========================================================================
+# §2  Authentication — Login
+# =========================================================================
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def app_login(request):
+    """
+    Log in an existing app user.
+
+    POST /api/app/login/
+    Body: { "email": "...", "password": "..." }
+    Returns: { "token": "...", "user": { "id": ..., "name": "...", "email": "..." } }
+    """
+    email = (request.data.get("email") or "").strip().lower()
+    password = request.data.get("password") or ""
+
+    if not email or not password:
+        return Response(
+            {"detail": "Email and password are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    user = authenticate(username=email, password=password)
+
+    if not user:
+        return Response(
+            {"detail": "Invalid credentials."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    if not user.is_active:
+        return Response(
+            {"detail": "Account is inactive. Contact support."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    token, _ = Token.objects.get_or_create(user=user)
+
+    logger.info(f"App login: {email} (id={user.id})")
+
+    return Response({
+        "token": token.key,
+        "user": {
+            "id": user.id,
+            "name": user.get_full_name() or email,
+            "email": user.email,
+        },
+    })
+
+
+# =========================================================================
+# §3  Tenants — Location List
+# =========================================================================
+
+@api_view(["GET"])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def app_tenants(request):
+    """
+    List active Kitonga WiFi locations (tenants) that have VPN configured.
+
+    GET /api/app/tenants/
+    Returns: [ { "id": 1, "name": "...", "location": "...", ... } ]
+    """
+    tenants = (
+        Tenant.objects.filter(
+            is_active=True,
+            subscription_status__in=["active", "trial"],
+        )
+        .select_related("subscription_plan")
+        .order_by("business_name")
+    )
+
+    # Only show tenants that have VPN configured
+    tenant_ids_with_vpn = TenantVPNConfig.objects.filter(
+        is_active=True,
+    ).values_list("tenant_id", flat=True)
+
+    tenants = tenants.filter(id__in=tenant_ids_with_vpn)
+
+    results = []
+    for t in tenants:
+        logo_url = None
+        if t.logo:
+            try:
+                logo_url = request.build_absolute_uri(t.logo.url)
+            except Exception:
+                pass
+
+        # Build location string from business_address or fallback
+        location = t.business_address or f"{t.country}"
+        if not location or location == "TZ":
+            location = "Tanzania"
+
+        results.append({
+            "id": str(t.id),
+            "name": t.business_name,
+            "location": location,
+            "description": t.notes or None,
+            "logo": logo_url,
+        })
+
+    return Response(results)
+
+
+# =========================================================================
+# §4  Plans — Per Location
+# =========================================================================
+
+@api_view(["GET"])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def app_plans(request):
+    """
+    List VPN plans for a given tenant (location).
+
+    GET /api/app/plans/?tenant_id=<uuid>
+    Returns: [ { "id": 101, "name": "...", "price": 1000, ... } ]
+    """
+    tenant_id = request.query_params.get("tenant_id", "").strip()
+
+    if not tenant_id:
+        return Response(
+            {"detail": "tenant_id query parameter is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        tenant = Tenant.objects.get(id=tenant_id, is_active=True)
+    except (Tenant.DoesNotExist, ValueError):
+        return Response(
+            {"detail": "Location not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    plans = RemoteAccessPlan.objects.filter(
+        tenant=tenant,
+        is_active=True,
+    ).order_by("display_order", "price")
+
+    results = []
+    for p in plans:
+        speed_mbps = None
+        if p.download_speed:
+            # Try to extract numeric value from "10 Mbps"
+            try:
+                speed_mbps = int("".join(c for c in p.download_speed if c.isdigit()))
+            except (ValueError, TypeError):
+                pass
+
+        # Build features list
+        features = list(p.features) if p.features else []
+        if not features:
+            # Auto-generate features from plan attributes
+            if p.download_speed:
+                features.append(p.download_speed)
+            if p.data_limit_gb is not None:
+                features.append(f"{p.data_limit_gb} GB")
+            else:
+                features.append("Unlimited data")
+            if p.max_devices_per_user > 1:
+                features.append(f"{p.max_devices_per_user} devices")
+
+        results.append({
+            "id": str(p.id),
+            "name": p.name,
+            "price": float(p.effective_price),
+            "currency": p.currency,
+            "duration_days": p.billing_days,
+            "description": p.description or None,
+            "speed_mbps": speed_mbps,
+            "features": features if features else None,
+        })
+
+    return Response(results)
+
+
+# =========================================================================
+# §5  Payment — Initiate & Verify
+# =========================================================================
+
+@api_view(["POST"])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def app_initiate_payment(request):
+    """
+    Initiate a Snippe payment session for a VPN plan.
+    This creates a checkout session URL for the app's iframe.
+
+    POST /api/app/initiate-payment/
+    Body: {
+        "plan_id": "<uuid>",
+        "tenant_id": "<uuid>",
+        "phone_number": "+255..."  (optional)
+    }
+    Returns: {
+        "status": "pending",
+        "order_reference": "VPN-XXXXXXXX",
+        "checkout_url": "https://...",      // for iframe
+        "snippe_reference": "...",
+        "amount": 10000,
+        "plan_name": "...",
+        "currency": "TZS"
+    }
+    """
+    user = request.user
+    plan_id = request.data.get("plan_id", "")
+    tenant_id = request.data.get("tenant_id", "")
+    phone_number = (request.data.get("phone_number") or "").strip()
+
+    if not plan_id or not tenant_id:
+        return Response(
+            {"detail": "plan_id and tenant_id are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Resolve tenant
+    try:
+        tenant = Tenant.objects.get(id=tenant_id, is_active=True)
+    except (Tenant.DoesNotExist, ValueError):
+        return Response(
+            {"detail": "Location not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Resolve plan
+    try:
+        plan = RemoteAccessPlan.objects.get(
+            id=plan_id, tenant=tenant, is_active=True
+        )
+    except (RemoteAccessPlan.DoesNotExist, ValueError):
+        return Response(
+            {"detail": "Plan not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Ensure tenant has VPN configured
+    try:
+        vpn_config = TenantVPNConfig.objects.get(tenant=tenant, is_active=True)
+    except TenantVPNConfig.DoesNotExist:
+        return Response(
+            {"detail": "This location does not have VPN configured yet."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Find or create RemoteUser for this Django user under this tenant
+    remote_user = RemoteUser.objects.filter(
+        email=user.email, tenant=tenant, vpn_config=vpn_config
+    ).first()
+
+    if not remote_user:
+        # Auto-provision a new remote user with WireGuard keys
+        next_ip = vpn_config.get_next_available_ip()
+        if not next_ip:
+            return Response(
+                {"detail": "No available VPN addresses. Contact support."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        keypair = generate_wireguard_keypair()
+        psk = generate_preshared_key()
+
+        remote_user = RemoteUser.objects.create(
+            tenant=tenant,
+            vpn_config=vpn_config,
+            name=user.get_full_name() or user.email,
+            email=user.email,
+            phone=phone_number,
+            plan=plan,
+            public_key=keypair["public_key"],
+            private_key=keypair["private_key"],
+            preshared_key=psk,
+            assigned_ip=next_ip,
+            status="disabled",  # Will be activated after payment
+            is_active=False,
+        )
+
+        logger.info(
+            f"App: auto-provisioned RemoteUser {remote_user.name} "
+            f"(ip={next_ip}) for tenant={tenant.slug}"
+        )
+
+    # Update phone if provided
+    if phone_number and not remote_user.phone:
+        remote_user.phone = phone_number
+        remote_user.save(update_fields=["phone", "updated_at"])
+
+    amount = int(plan.effective_price)
+
+    # Expire old pending payments for this user
+    RemoteAccessPayment.objects.filter(
+        remote_user=remote_user, status="pending"
+    ).update(status="expired")
+
+    # Create payment record
+    payment = RemoteAccessPayment.objects.create(
+        tenant=tenant,
+        remote_user=remote_user,
+        plan=plan,
+        amount=amount,
+        currency=plan.currency,
+        billing_days=plan.billing_days,
+        phone_number=phone_number or remote_user.phone,
+        payment_channel="snippe",
+        status="pending",
+    )
+
+    # Create Snippe checkout session (for iframe)
+    from .snippe import SnippeAPI
+
+    webhook_url = getattr(settings, "SNIPPE_WEBHOOK_URL", "") or ""
+
+    # Use tenant's own Snippe key if available, otherwise platform key
+    snippe_key = tenant.snippe_api_key or None
+    snippe = SnippeAPI(api_key=snippe_key)
+
+    metadata = {
+        "order_reference": payment.order_reference,
+        "payment_type": "vpn",
+        "remote_user_id": str(remote_user.id),
+        "tenant": tenant.slug,
+        "app_user_id": str(user.id),
+    }
+
+    customer = {
+        "phone": phone_number or remote_user.phone or "",
+        "name": user.get_full_name() or "App User",
+        "email": user.email,
+    }
+
+    # Try session-based payment (iframe) first
+    result = snippe.create_session(
+        amount=amount,
+        currency=plan.currency,
+        customer=customer,
+        webhook_url=webhook_url,
+        description=f"{plan.name} - {tenant.business_name}",
+        metadata=metadata,
+    )
+
+    if result.get("success"):
+        snippe_ref = result.get("reference", "")
+        checkout_url = result.get("checkout_url", "")
+
+        if snippe_ref:
+            payment.payment_reference = snippe_ref
+            payment.save(update_fields=["payment_reference"])
+
+        logger.info(
+            f"App payment session created: ref={payment.order_reference} "
+            f"snippe={snippe_ref} amount={amount} user={user.email}"
+        )
+
+        return Response({
+            "status": "pending",
+            "order_reference": payment.order_reference,
+            "checkout_url": checkout_url,
+            "snippe_reference": snippe_ref,
+            "amount": amount,
+            "plan_name": plan.name,
+            "currency": plan.currency,
+            "duration_days": plan.billing_days,
+        })
+
+    # Session creation failed — try direct mobile money push if phone provided
+    if phone_number or remote_user.phone:
+        phone_to_use = phone_number or remote_user.phone
+        name_parts = (user.get_full_name() or "App User").split(" ", 1)
+        firstname = name_parts[0]
+        lastname = name_parts[1] if len(name_parts) > 1 else ""
+
+        mobile_result = snippe.create_mobile_payment(
+            phone_number=phone_to_use,
+            amount=amount,
+            firstname=firstname,
+            lastname=lastname,
+            email=user.email,
+            webhook_url=webhook_url,
+            metadata=metadata,
+            idempotency_key=payment.order_reference,
+        )
+
+        if mobile_result.get("success"):
+            snippe_ref = mobile_result.get("reference", "")
+            if snippe_ref:
+                payment.payment_reference = snippe_ref
+                payment.save(update_fields=["payment_reference"])
+
+            return Response({
+                "status": "pending",
+                "order_reference": payment.order_reference,
+                "checkout_url": None,
+                "snippe_reference": snippe_ref,
+                "amount": amount,
+                "plan_name": plan.name,
+                "currency": plan.currency,
+                "duration_days": plan.billing_days,
+                "message": f"USSD push sent to {phone_to_use}",
+            })
+
+    # All payment methods failed
+    payment.mark_failed()
+    error_msg = result.get("message", result.get("error", "Payment initiation failed"))
+    return Response(
+        {"detail": f"Payment failed: {error_msg}"},
+        status=status.HTTP_502_BAD_GATEWAY,
+    )
+
+
+@api_view(["POST"])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def app_verify_payment(request):
+    """
+    Verify a Snippe payment and activate the user's VPN plan.
+
+    POST /api/app/verify-payment/
+    Body: {
+        "plan_id": "<uuid>",
+        "tenant_id": "<uuid>",
+        "transaction_id": "TXN-123",
+        "phone_number": "+255..."  (optional)
+    }
+    Returns: {
+        "status": "success" | "pending" | "failed",
+        "transaction_id": "TXN-123",
+        "message": "...",
+        "config_ready": true | false
+    }
+    """
+    user = request.user
+    transaction_id = (request.data.get("transaction_id") or "").strip()
+    tenant_id = request.data.get("tenant_id", "")
+
+    if not transaction_id:
+        return Response(
+            {"detail": "transaction_id is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Try to find the payment by snippe reference or order_reference
+    payment = None
+
+    # Strategy 1: find by Snippe payment_reference (transaction_id from Snippe)
+    payment = RemoteAccessPayment.objects.filter(
+        payment_reference=transaction_id
+    ).select_related("remote_user", "remote_user__vpn_config", "plan", "tenant").first()
+
+    # Strategy 2: find by our order_reference
+    if not payment:
+        payment = RemoteAccessPayment.objects.filter(
+            order_reference=transaction_id
+        ).select_related("remote_user", "remote_user__vpn_config", "plan", "tenant").first()
+
+    # Strategy 3: find latest pending payment for this user + tenant
+    if not payment and tenant_id:
+        remote_user = RemoteUser.objects.filter(
+            email=user.email, tenant_id=tenant_id
+        ).first()
+        if remote_user:
+            payment = RemoteAccessPayment.objects.filter(
+                remote_user=remote_user,
+                status="pending",
+            ).order_by("-created_at").first()
+
+    if not payment:
+        return Response(
+            {
+                "status": "failed",
+                "transaction_id": transaction_id,
+                "message": "Payment not found. It may still be processing.",
+                "config_ready": False,
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # If already completed, return success
+    if payment.status == "completed":
+        remote_user = payment.remote_user
+        config_ready = bool(remote_user.private_key and remote_user.is_active)
+        return Response({
+            "status": "success",
+            "transaction_id": transaction_id,
+            "message": "Payment confirmed.",
+            "config_ready": config_ready,
+        })
+
+    if payment.status == "failed":
+        return Response({
+            "status": "failed",
+            "transaction_id": transaction_id,
+            "message": "Payment failed. Please try again.",
+            "config_ready": False,
+        })
+
+    if payment.status == "expired":
+        return Response({
+            "status": "failed",
+            "transaction_id": transaction_id,
+            "message": "Payment expired. Please initiate a new payment.",
+            "config_ready": False,
+        })
+
+    # Status is still "pending" — check with Snippe API
+    from .snippe import SnippeAPI
+
+    snippe_key = payment.tenant.snippe_api_key or None
+    snippe = SnippeAPI(api_key=snippe_key)
+
+    ref_to_check = payment.payment_reference or payment.order_reference
+
+    try:
+        snippe_result = snippe.get_payment_status(ref_to_check)
+        snippe_status = ""
+        if snippe_result.get("success"):
+            data = snippe_result.get("data", {})
+            if isinstance(data, dict):
+                snippe_status = data.get("status", "")
+
+        if snippe_status == "completed":
+            # Payment completed — activate the plan
+            payment.mark_completed()
+
+            remote_user = payment.remote_user
+
+            # Sync peer to router
+            try:
+                from .mikrotik import add_wireguard_peer, enable_wireguard_peer, setup_wireguard_bandwidth_queue
+
+                if not remote_user.is_configured_on_router:
+                    add_result = add_wireguard_peer(remote_user)
+                    if add_result.get("success"):
+                        logger.info(f"App: VPN peer added to router for {remote_user.name}")
+                else:
+                    enable_result = enable_wireguard_peer(remote_user)
+                    if enable_result.get("success"):
+                        logger.info(f"App: VPN peer re-enabled for {remote_user.name}")
+
+                setup_wireguard_bandwidth_queue(remote_user)
+            except Exception as e:
+                logger.error(f"App: Router sync error: {e}")
+
+            # Log event
+            try:
+                RemoteAccessLog.objects.create(
+                    tenant=payment.tenant,
+                    remote_user=remote_user,
+                    event_type="payment",
+                    event_details=(
+                        f"App payment completed: TSh {payment.amount:,.0f} "
+                        f"for {payment.billing_days} days. Ref: {payment.order_reference}"
+                    ),
+                )
+            except Exception:
+                pass
+
+            config_ready = bool(remote_user.private_key and remote_user.is_active)
+            return Response({
+                "status": "success",
+                "transaction_id": transaction_id,
+                "message": "Payment confirmed.",
+                "config_ready": config_ready,
+            })
+
+        elif snippe_status == "failed":
+            payment.mark_failed()
+            return Response({
+                "status": "failed",
+                "transaction_id": transaction_id,
+                "message": "Payment failed. Please try again.",
+                "config_ready": False,
+            })
+
+    except Exception as e:
+        logger.error(f"App: Snippe status check error: {e}")
+
+    # Still pending
+    return Response({
+        "status": "pending",
+        "transaction_id": transaction_id,
+        "message": "Payment is still being processed. Please wait.",
+        "config_ready": False,
+    })
+
+
+# =========================================================================
+# §6  WireGuard Config Delivery
+# =========================================================================
+
+@api_view(["GET"])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def app_wireguard_config(request):
+    """
+    Get WireGuard config for the authenticated user.
+
+    GET /api/app/wireguard-config/?tenant_id=<uuid>
+    Returns: {
+        "download_url": "...",
+        "filename": "kitonga-client.conf",
+        "expires_at": "2026-03-25T23:59:59Z",
+        "config_content": "[Interface]\\n..."
+    }
+    """
+    user = request.user
+    tenant_id = request.query_params.get("tenant_id", "").strip()
+
+    # Find the user's active remote access profile
+    qs = RemoteUser.objects.filter(
+        email=user.email,
+        is_active=True,
+    ).select_related("vpn_config", "vpn_config__router", "plan", "tenant")
+
+    if tenant_id:
+        qs = qs.filter(tenant_id=tenant_id)
+
+    remote_user = qs.order_by("-created_at").first()
+
+    if not remote_user:
+        return Response(
+            {"detail": "No active VPN profile found. Please purchase a plan first."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Check expiry
+    if remote_user.is_expired:
+        return Response(
+            {"detail": "Your VPN access has expired. Please renew your plan."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # Generate config
+    config_content = remote_user.generate_client_config()
+
+    # Build a safe filename
+    tenant_slug = remote_user.tenant.slug or "kitonga"
+    filename = f"{tenant_slug}-vpn.conf"
+
+    # Build download URL (the app can call this same endpoint)
+    download_url = request.build_absolute_uri(request.path)
+    if tenant_id:
+        download_url += f"?tenant_id={tenant_id}"
+
+    # Mark as downloaded
+    if not remote_user.config_downloaded:
+        remote_user.config_downloaded = True
+        remote_user.save(update_fields=["config_downloaded", "updated_at"])
+
+        # Log the download
+        try:
+            RemoteAccessLog.objects.create(
+                tenant=remote_user.tenant,
+                remote_user=remote_user,
+                event_type="config_downloaded",
+                event_details=f"Config downloaded via app by {user.email}",
+            )
+        except Exception:
+            pass
+
+    return Response({
+        "download_url": download_url,
+        "filename": filename,
+        "expires_at": (
+            remote_user.expires_at.isoformat() if remote_user.expires_at else None
+        ),
+        "config_content": config_content,
+    })
+
+
+# =========================================================================
+# §7  User Status Lookup (Public — no auth required)
+# =========================================================================
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def app_user_status(request):
+    """
+    Look up VPN plan status by phone number.
+    No authentication required — intentional for users who lost login.
+
+    GET /api/app/user-status/?phone=+255712345678
+    Returns: {
+        "phone": "+255712345678",
+        "status": "active" | "expired" | "none",
+        "has_active_plan": true | false,
+        "message": "...",
+        "plan": { ... } | null
+    }
+    """
+    phone = (request.query_params.get("phone") or "").strip()
+
+    if not phone:
+        return Response(
+            {"detail": "phone query parameter is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Normalize phone number
+    from .utils import normalize_phone_number
+
+    try:
+        normalized = normalize_phone_number(phone)
+    except Exception:
+        normalized = phone
+
+    # Find remote user by phone
+    remote_user = (
+        RemoteUser.objects.filter(phone=normalized, is_active=True)
+        .select_related("plan", "tenant")
+        .order_by("-created_at")
+        .first()
+    )
+
+    # Also try with original phone if normalization changed it
+    if not remote_user and normalized != phone:
+        remote_user = (
+            RemoteUser.objects.filter(phone=phone, is_active=True)
+            .select_related("plan", "tenant")
+            .order_by("-created_at")
+            .first()
+        )
+
+    if not remote_user:
+        return Response({
+            "phone": phone,
+            "status": "none",
+            "has_active_plan": False,
+            "message": "No account found for this phone number.",
+            "plan": None,
+        })
+
+    # Check if expired
+    is_expired = remote_user.is_expired
+    has_active = not is_expired and remote_user.status == "active"
+
+    if has_active:
+        expires_str = (
+            remote_user.expires_at.strftime("%d %b %Y %H:%M")
+            if remote_user.expires_at
+            else "Unlimited"
+        )
+        message = f"Active until {expires_str}"
+        status_val = "active"
+    elif is_expired:
+        message = "Your plan has expired. Please renew."
+        status_val = "expired"
+    else:
+        message = "Account found but not active."
+        status_val = "expired"
+
+    plan_data = None
+    if remote_user.plan:
+        speed_mbps = None
+        if remote_user.plan.download_speed:
+            try:
+                speed_mbps = int(
+                    "".join(c for c in remote_user.plan.download_speed if c.isdigit())
+                )
+            except (ValueError, TypeError):
+                pass
+
+        plan_data = {
+            "name": remote_user.plan.name,
+            "tenant_name": remote_user.tenant.business_name,
+            "expires_at": (
+                remote_user.expires_at.isoformat()
+                if remote_user.expires_at
+                else None
+            ),
+            "speed_mbps": speed_mbps,
+            "duration_days": remote_user.plan.billing_days,
+        }
+
+    return Response({
+        "phone": phone,
+        "status": status_val,
+        "has_active_plan": has_active,
+        "message": message,
+        "plan": plan_data,
+    })
+
+
+# =========================================================================
+# Account — Get current user info
+# =========================================================================
+
+@api_view(["GET"])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def app_account(request):
+    """
+    Get current authenticated user's account info and active plans.
+
+    GET /api/app/account/
+    Returns: {
+        "user": { "id": ..., "name": "...", "email": "..." },
+        "active_plans": [ ... ]
+    }
+    """
+    user = request.user
+
+    # Find all active remote user profiles for this user
+    remote_users = RemoteUser.objects.filter(
+        email=user.email, is_active=True
+    ).select_related("plan", "tenant").order_by("-created_at")
+
+    active_plans = []
+    for ru in remote_users:
+        if ru.is_expired:
+            continue
+        plan_info = {
+            "tenant_id": str(ru.tenant.id),
+            "tenant_name": ru.tenant.business_name,
+            "plan_name": ru.plan.name if ru.plan else "Custom",
+            "assigned_ip": ru.assigned_ip,
+            "status": ru.status,
+            "expires_at": ru.expires_at.isoformat() if ru.expires_at else None,
+            "config_ready": bool(ru.private_key),
+        }
+        active_plans.append(plan_info)
+
+    return Response({
+        "user": {
+            "id": user.id,
+            "name": user.get_full_name() or user.email,
+            "email": user.email,
+        },
+        "active_plans": active_plans,
+    })
