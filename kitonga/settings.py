@@ -256,6 +256,11 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "billing.exception_handler.custom_exception_handler",
 }
 
+# Auth redirects
+LOGIN_REDIRECT_URL = "/admin/"
+LOGOUT_REDIRECT_URL = "/admin/login/"
+LOGIN_URL = "/admin/login/"
+
 # CORS settings - Environment Aware
 if DEBUG:
     # Development: Allow all origins for testing
