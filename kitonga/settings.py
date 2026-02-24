@@ -266,7 +266,7 @@ else:
     CORS_ALLOW_ALL_ORIGINS = False
     CORS_ALLOWED_ORIGINS = config(
         "CORS_ALLOWED_ORIGINS",
-        default="https://kitonga.klikcell.com,https://api.kitonga.klikcell.com,http://localhost:3000",
+        default="https://kitonga.klikcell.com,https://api.kitonga.klikcell.com,https://ktn.klikcell.com,http://localhost:3000",
         cast=Csv(),
     )
 
@@ -289,6 +289,7 @@ else:
     CSRF_TRUSTED_ORIGINS = [
         "https://kitonga.klikcell.com",
         "https://api.kitonga.klikcell.com",
+        "https://ktn.klikcell.com",
         "http://localhost:3000",
     ]
 
