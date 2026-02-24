@@ -880,12 +880,15 @@ class TenantVPNConfig(models.Model):
         """
         Get the next available IP address from the address pool.
         Skips the server address and any already-assigned addresses.
+        NOTE: We check ALL remote users (not just is_active=True) because
+        the DB has a unique constraint on (vpn_config_id, assigned_ip).
+        Inactive/disabled/expired users still hold their IP allocation.
         """
         import ipaddress
 
         network = ipaddress.ip_network(self.address_pool, strict=False)
         used_ips = set(
-            self.remote_users.filter(is_active=True).values_list(
+            self.remote_users.exclude(status="revoked").values_list(
                 "assigned_ip", flat=True
             )
         )

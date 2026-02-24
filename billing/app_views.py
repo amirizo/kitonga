@@ -19,6 +19,7 @@ import logging
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User as DjangoUser
+from django.db import IntegrityError
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.authtoken.models import Token
@@ -198,7 +199,10 @@ def app_signup(request):
 
     logger.info(
         "App signup: %s name=%s (id=%d) otp_sent=%s",
-        phone, name, user.id, sent,
+        phone,
+        name,
+        user.id,
+        sent,
     )
 
     return Response(
@@ -262,7 +266,9 @@ def app_verify_phone(request):
         )
 
     # Activate the user account
-    profile = AppUserProfile.objects.filter(phone_number=phone).select_related("user").first()
+    profile = (
+        AppUserProfile.objects.filter(phone_number=phone).select_related("user").first()
+    )
     if not profile:
         return Response(
             {"detail": "Account not found."},
@@ -317,10 +323,14 @@ def app_resend_otp(request):
     phone = _normalize_phone(phone_raw)
 
     # Check that an unverified account exists for this phone
-    profile = AppUserProfile.objects.filter(phone_number=phone).select_related("user").first()
+    profile = (
+        AppUserProfile.objects.filter(phone_number=phone).select_related("user").first()
+    )
     if not profile or profile.user.is_active:
         # Don't reveal account status
-        return Response({"message": "If this number has a pending account, a code will be sent."})
+        return Response(
+            {"message": "If this number has a pending account, a code will be sent."}
+        )
 
     # Rate limit: 1 OTP per 60 seconds
     from datetime import timedelta
@@ -343,7 +353,9 @@ def app_resend_otp(request):
 
     logger.info("App resend-otp: %s sent=%s", phone, sent)
 
-    return Response({"message": "If this number has a pending account, a code will be sent."})
+    return Response(
+        {"message": "If this number has a pending account, a code will be sent."}
+    )
 
 
 # =========================================================================
@@ -866,9 +878,14 @@ def app_initiate_payment(request):
         )
 
     # Find or create RemoteUser for this Django user under this tenant
+    # Match by email OR phone to handle phone-based auth users
+    from django.db.models import Q
+
     remote_user = RemoteUser.objects.filter(
-        email=user.email, tenant=tenant, vpn_config=vpn_config
-    ).first()
+        Q(email=user.email) | Q(phone=phone_number if phone_number else None),
+        tenant=tenant,
+        vpn_config=vpn_config,
+    ).exclude(status="revoked").first()
 
     if not remote_user:
         # Auto-provision a new remote user with WireGuard keys
@@ -882,20 +899,49 @@ def app_initiate_payment(request):
         keypair = generate_wireguard_keypair()
         psk = generate_preshared_key()
 
-        remote_user = RemoteUser.objects.create(
-            tenant=tenant,
-            vpn_config=vpn_config,
-            name=user.get_full_name() or user.email,
-            email=user.email,
-            phone=phone_number,
-            plan=plan,
-            public_key=keypair["public_key"],
-            private_key=keypair["private_key"],
-            preshared_key=psk,
-            assigned_ip=next_ip,
-            status="disabled",  # Will be activated after payment
-            is_active=False,
-        )
+        try:
+            remote_user = RemoteUser.objects.create(
+                tenant=tenant,
+                vpn_config=vpn_config,
+                name=user.get_full_name() or user.email,
+                email=user.email,
+                phone=phone_number,
+                plan=plan,
+                public_key=keypair["public_key"],
+                private_key=keypair["private_key"],
+                preshared_key=psk,
+                assigned_ip=next_ip,
+                status="disabled",  # Will be activated after payment
+                is_active=False,
+            )
+        except IntegrityError:
+            # Race condition or stale IP — retry once with a fresh IP
+            logger.warning(
+                "App: IP %s collision for vpn_config=%s, retrying...",
+                next_ip, vpn_config.id,
+            )
+            next_ip = vpn_config.get_next_available_ip()
+            if not next_ip:
+                return Response(
+                    {"detail": "No available VPN addresses. Contact support."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            keypair = generate_wireguard_keypair()
+            psk = generate_preshared_key()
+            remote_user = RemoteUser.objects.create(
+                tenant=tenant,
+                vpn_config=vpn_config,
+                name=user.get_full_name() or user.email,
+                email=user.email,
+                phone=phone_number,
+                plan=plan,
+                public_key=keypair["public_key"],
+                private_key=keypair["private_key"],
+                preshared_key=psk,
+                assigned_ip=next_ip,
+                status="disabled",
+                is_active=False,
+            )
 
         logger.info(
             f"App: auto-provisioned RemoteUser {remote_user.name} "
