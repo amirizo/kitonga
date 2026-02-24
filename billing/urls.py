@@ -879,8 +879,19 @@ urlpatterns = [
     # Authentication (public)
     path("app/signup/", app_views.app_signup, name="app_signup"),
     path("app/login/", app_views.app_login, name="app_login"),
+    path(
+        "app/forgot-password/",
+        app_views.app_forgot_password,
+        name="app_forgot_password",
+    ),
+    path(
+        "app/reset-password/", app_views.app_reset_password, name="app_reset_password"
+    ),
     # Account (requires Token auth)
     path("app/account/", app_views.app_account, name="app_account"),
+    path(
+        "app/delete-account/", app_views.app_delete_account, name="app_delete_account"
+    ),
     # Tenants / Locations (requires Token auth)
     path("app/tenants/", app_views.app_tenants, name="app_tenants"),
     # Plans per location (requires Token auth)

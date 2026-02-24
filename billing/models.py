@@ -269,6 +269,121 @@ class Tenant(models.Model):
         )
 
 
+# =========================================================================
+# APP USER PROFILE — links Django User to a phone number (for mobile app)
+# =========================================================================
+
+
+class AppUserProfile(models.Model):
+    """
+    Extended profile for mobile-app users (Kitonga WiFi Remote App).
+    Links a Django User to a phone number used for login & SMS OTP.
+    """
+
+    user = models.OneToOneField(
+        DjangoUser,
+        on_delete=models.CASCADE,
+        related_name="app_profile",
+    )
+    phone_number = models.CharField(
+        max_length=20,
+        unique=True,
+        db_index=True,
+        help_text="Normalized phone e.g. 255712345678",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "App User Profile"
+        verbose_name_plural = "App User Profiles"
+
+    def __str__(self):
+        return f"{self.phone_number} → {self.user.get_full_name() or self.user.email}"
+
+
+class PhoneOTP(models.Model):
+    """
+    SMS OTP for app-user password reset (sent via NextSMS).
+    """
+
+    PURPOSE_CHOICES = [
+        ("password_reset", "Password Reset"),
+    ]
+
+    phone_number = models.CharField(max_length=20, db_index=True)
+    otp_code = models.CharField(max_length=6)
+    purpose = models.CharField(
+        max_length=20, choices=PURPOSE_CHOICES, default="password_reset"
+    )
+    is_used = models.BooleanField(default=False)
+    attempts = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["phone_number", "otp_code", "is_used"]),
+        ]
+
+    def __str__(self):
+        return f"OTP for {self.phone_number} - {self.purpose}"
+
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            self.expires_at = timezone.now() + timedelta(minutes=10)
+        super().save(*args, **kwargs)
+
+    def is_valid(self):
+        if self.is_used:
+            return False
+        if self.attempts >= 5:
+            return False
+        if timezone.now() > self.expires_at:
+            return False
+        return True
+
+    def verify(self, code):
+        if not self.is_valid():
+            return False, "OTP has expired or been used."
+
+        self.attempts += 1
+        self.save(update_fields=["attempts"])
+
+        if self.otp_code != code:
+            if self.attempts >= 5:
+                return False, "Too many failed attempts. Request a new OTP."
+            return False, f"Invalid OTP. {5 - self.attempts} attempts remaining."
+
+        self.is_used = True
+        self.used_at = timezone.now()
+        self.save(update_fields=["is_used", "used_at"])
+        return True, "OTP verified successfully."
+
+    @staticmethod
+    def generate_otp():
+        import random
+
+        return "".join([str(random.randint(0, 9)) for _ in range(6)])
+
+    @classmethod
+    def create_for_phone(cls, phone_number, purpose="password_reset"):
+        # Invalidate existing unused OTPs
+        cls.objects.filter(
+            phone_number=phone_number, purpose=purpose, is_used=False
+        ).update(is_used=True)
+
+        otp = cls.objects.create(
+            phone_number=phone_number,
+            otp_code=cls.generate_otp(),
+            purpose=purpose,
+            expires_at=timezone.now() + timedelta(minutes=10),
+        )
+        return otp
+
+
 class EmailOTP(models.Model):
     """
     Email OTP for tenant email verification and password reset

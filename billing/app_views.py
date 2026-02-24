@@ -38,6 +38,8 @@ from .models import (
     RemoteAccessPlan,
     RemoteAccessPayment,
     RemoteAccessLog,
+    AppUserProfile,
+    PhoneOTP,
 )
 from .wireguard_utils import generate_wireguard_keypair, generate_preshared_key
 
@@ -45,8 +47,44 @@ logger = logging.getLogger(__name__)
 
 
 # =========================================================================
+# Helpers
+# =========================================================================
+
+
+def _normalize_phone(phone: str) -> str:
+    """Normalize a Tanzanian phone number to 255XXXXXXXXX format."""
+    phone = phone.strip().replace(" ", "").replace("-", "")
+    if phone.startswith("+"):
+        phone = phone[1:]
+    if phone.startswith("0") and len(phone) >= 10:
+        phone = "255" + phone[1:]
+    if not phone.startswith("255") and len(phone) <= 10:
+        phone = "255" + phone
+    return phone
+
+
+def _send_otp_sms(phone_number: str, otp_code: str) -> bool:
+    """Send OTP code via NextSMS. Returns True on success."""
+    try:
+        from .nextsms import NextSMSAPI
+
+        sms = NextSMSAPI()
+        result = sms.send_sms(
+            phone_number,
+            f"Your Kitonga WiFi verification code is: {otp_code}. "
+            f"Valid for 10 minutes. Do not share this code.",
+            reference=f"OTP-{phone_number}",
+        )
+        return result.get("success", False)
+    except Exception as e:
+        logger.error(f"Failed to send OTP SMS to {phone_number}: {e}")
+        return False
+
+
+# =========================================================================
 # Helper: resolve DjangoUser → RemoteUser (find their active VPN profile)
 # =========================================================================
+
 
 def _get_remote_user_for_django_user(user: DjangoUser):
     """
@@ -65,17 +103,25 @@ def _get_remote_user_for_django_user(user: DjangoUser):
 # §2  Authentication — Signup
 # =========================================================================
 
+
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def app_signup(request):
     """
-    Register a new app user.
+    Register a new app user using phone number.
 
     POST /api/app/signup/
-    Body: { "name": "...", "email": "...", "password": "...", "password_confirm": "..." }
-    Returns: { "token": "...", "user": { "id": ..., "name": "...", "email": "..." } }
+    Body: {
+        "name": "...",
+        "phone_number": "0712345678",
+        "password": "...",
+        "password_confirm": "...",
+        "email": "..."  (optional)
+    }
+    Returns: { "token": "...", "user": { "id", "name", "email", "phone_number" } }
     """
     name = (request.data.get("name") or "").strip()
+    phone_raw = (request.data.get("phone_number") or "").strip()
     email = (request.data.get("email") or "").strip().lower()
     password = request.data.get("password") or ""
     password_confirm = request.data.get("password_confirm") or ""
@@ -84,8 +130,8 @@ def app_signup(request):
     errors = {}
     if not name:
         errors["name"] = ["This field is required."]
-    if not email:
-        errors["email"] = ["This field is required."]
+    if not phone_raw:
+        errors["phone_number"] = ["This field is required."]
     if not password:
         errors["password"] = ["This field is required."]
     if password and len(password) < 6:
@@ -93,22 +139,49 @@ def app_signup(request):
     if password != password_confirm:
         errors["password_confirm"] = ["Passwords do not match."]
 
-    if DjangoUser.objects.filter(username=email).exists():
-        errors["email"] = ["An account with this email already exists."]
-
     if errors:
         return Response(
             {"detail": "Validation error.", "errors": errors},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Create Django user
+    phone = _normalize_phone(phone_raw)
+
+    # Check if phone already registered
+    if AppUserProfile.objects.filter(phone_number=phone).exists():
+        return Response(
+            {
+                "detail": "Validation error.",
+                "errors": {
+                    "phone_number": [
+                        "An account with this phone number already exists."
+                    ]
+                },
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Use phone as username (unique), email is optional
+    username = phone
+    if DjangoUser.objects.filter(username=username).exists():
+        return Response(
+            {
+                "detail": "Validation error.",
+                "errors": {
+                    "phone_number": [
+                        "An account with this phone number already exists."
+                    ]
+                },
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     first_name = name.split(" ", 1)[0]
     last_name = name.split(" ", 1)[1] if " " in name else ""
 
     user = DjangoUser.objects.create_user(
-        username=email,
-        email=email,
+        username=username,
+        email=email or f"{phone}@app.kitonga.klikcell.com",
         password=password,
         first_name=first_name,
         last_name=last_name,
@@ -116,9 +189,12 @@ def app_signup(request):
         is_staff=False,
     )
 
+    # Create app profile with phone
+    AppUserProfile.objects.create(user=user, phone_number=phone)
+
     token, _ = Token.objects.get_or_create(user=user)
 
-    logger.info(f"App signup: new user {email} (id={user.id})")
+    logger.info(f"App signup: {phone} name={name} (id={user.id})")
 
     return Response(
         {
@@ -127,6 +203,7 @@ def app_signup(request):
                 "id": user.id,
                 "name": user.get_full_name() or name,
                 "email": user.email,
+                "phone_number": phone,
             },
         },
         status=status.HTTP_201_CREATED,
@@ -137,30 +214,44 @@ def app_signup(request):
 # §2  Authentication — Login
 # =========================================================================
 
+
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def app_login(request):
     """
-    Log in an existing app user.
+    Log in an existing app user with phone number + password.
 
     POST /api/app/login/
-    Body: { "email": "...", "password": "..." }
-    Returns: { "token": "...", "user": { "id": ..., "name": "...", "email": "..." } }
+    Body: { "phone_number": "0712345678", "password": "..." }
+    Returns: { "token": "...", "user": { "id", "name", "email", "phone_number" } }
     """
-    email = (request.data.get("email") or "").strip().lower()
+    phone_raw = (request.data.get("phone_number") or "").strip()
     password = request.data.get("password") or ""
 
-    if not email or not password:
+    if not phone_raw or not password:
         return Response(
-            {"detail": "Email and password are required."},
+            {"detail": "Phone number and password are required."},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    user = authenticate(username=email, password=password)
+    phone = _normalize_phone(phone_raw)
+
+    # Find the Django user via AppUserProfile
+    profile = (
+        AppUserProfile.objects.filter(phone_number=phone).select_related("user").first()
+    )
+
+    if not profile:
+        return Response(
+            {"detail": "Invalid phone number or password."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    user = authenticate(username=profile.user.username, password=password)
 
     if not user:
         return Response(
-            {"detail": "Invalid credentials."},
+            {"detail": "Invalid phone number or password."},
             status=status.HTTP_401_UNAUTHORIZED,
         )
 
@@ -172,21 +263,272 @@ def app_login(request):
 
     token, _ = Token.objects.get_or_create(user=user)
 
-    logger.info(f"App login: {email} (id={user.id})")
+    logger.info(f"App login: {phone} (id={user.id})")
 
-    return Response({
-        "token": token.key,
-        "user": {
-            "id": user.id,
-            "name": user.get_full_name() or email,
-            "email": user.email,
-        },
-    })
+    return Response(
+        {
+            "token": token.key,
+            "user": {
+                "id": user.id,
+                "name": user.get_full_name() or phone,
+                "email": user.email,
+                "phone_number": phone,
+            },
+        }
+    )
+
+
+# =========================================================================
+# Forgot Password — Request OTP via SMS
+# =========================================================================
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def app_forgot_password(request):
+    """
+    Send a 6-digit OTP to the user's phone number for password reset.
+
+    POST /api/app/forgot-password/
+    Body: { "phone_number": "0712345678" }
+    Returns: { "message": "OTP sent to your phone number." }
+    """
+    phone_raw = (request.data.get("phone_number") or "").strip()
+
+    if not phone_raw:
+        return Response(
+            {"detail": "Phone number is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    phone = _normalize_phone(phone_raw)
+
+    # Check if the phone number exists
+    profile = AppUserProfile.objects.filter(phone_number=phone).first()
+    if not profile:
+        # Don't reveal whether the phone exists (security best practice)
+        # But still return success to prevent enumeration
+        return Response(
+            {
+                "message": "If this phone number is registered, you will receive an OTP.",
+            }
+        )
+
+    # Rate limit: don't send more than 1 OTP per 60 seconds
+    from django.utils import timezone as tz
+    from datetime import timedelta
+
+    recent_otp = PhoneOTP.objects.filter(
+        phone_number=phone,
+        purpose="password_reset",
+        is_used=False,
+        created_at__gte=tz.now() - timedelta(seconds=60),
+    ).first()
+
+    if recent_otp:
+        return Response(
+            {"detail": "An OTP was sent recently. Please wait 60 seconds."},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
+    # Create and send OTP
+    otp = PhoneOTP.create_for_phone(phone, purpose="password_reset")
+    sent = _send_otp_sms(phone, otp.otp_code)
+
+    if sent:
+        logger.info(f"App forgot-password: OTP sent to {phone}")
+    else:
+        logger.error(f"App forgot-password: Failed to send OTP to {phone}")
+
+    return Response(
+        {
+            "message": "If this phone number is registered, you will receive an OTP.",
+        }
+    )
+
+
+# =========================================================================
+# Reset Password — Verify OTP + Set New Password
+# =========================================================================
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def app_reset_password(request):
+    """
+    Verify the OTP and set a new password.
+
+    POST /api/app/reset-password/
+    Body: {
+        "phone_number": "0712345678",
+        "otp": "123456",
+        "new_password": "...",
+        "new_password_confirm": "..."
+    }
+    Returns: { "message": "Password reset successful. You can now log in." }
+    """
+    phone_raw = (request.data.get("phone_number") or "").strip()
+    otp_code = (request.data.get("otp") or "").strip()
+    new_password = request.data.get("new_password") or ""
+    new_password_confirm = request.data.get("new_password_confirm") or ""
+
+    errors = {}
+    if not phone_raw:
+        errors["phone_number"] = ["This field is required."]
+    if not otp_code:
+        errors["otp"] = ["This field is required."]
+    if not new_password:
+        errors["new_password"] = ["This field is required."]
+    if new_password and len(new_password) < 6:
+        errors["new_password"] = ["Password must be at least 6 characters."]
+    if new_password != new_password_confirm:
+        errors["new_password_confirm"] = ["Passwords do not match."]
+
+    if errors:
+        return Response(
+            {"detail": "Validation error.", "errors": errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    phone = _normalize_phone(phone_raw)
+
+    # Find the latest unused OTP for this phone
+    otp_record = (
+        PhoneOTP.objects.filter(
+            phone_number=phone,
+            purpose="password_reset",
+            is_used=False,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+    if not otp_record:
+        return Response(
+            {"detail": "No OTP found. Please request a new one."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Verify the OTP
+    is_valid, message = otp_record.verify(otp_code)
+    if not is_valid:
+        return Response(
+            {"detail": message},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Find the user and update password
+    profile = (
+        AppUserProfile.objects.filter(phone_number=phone).select_related("user").first()
+    )
+    if not profile:
+        return Response(
+            {"detail": "Account not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    user = profile.user
+    user.set_password(new_password)
+    user.save(update_fields=["password"])
+
+    # Invalidate all existing tokens (force re-login)
+    Token.objects.filter(user=user).delete()
+
+    logger.info(f"App reset-password: password changed for {phone} (user={user.id})")
+
+    return Response(
+        {
+            "message": "Password reset successful. You can now log in.",
+        }
+    )
+
+
+# =========================================================================
+# Delete Account
+# =========================================================================
+
+
+@api_view(["DELETE"])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def app_delete_account(request):
+    """
+    Permanently delete the authenticated user's account and all associated data.
+
+    DELETE /api/app/delete-account/
+    Body: { "password": "..." }  (confirmation)
+    Returns: { "message": "Account deleted successfully." }
+    """
+    user = request.user
+    password = request.data.get("password") or ""
+
+    if not password:
+        return Response(
+            {"detail": "Password is required to confirm account deletion."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Verify password
+    if not user.check_password(password):
+        return Response(
+            {"detail": "Incorrect password."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    phone = ""
+    try:
+        profile = user.app_profile
+        phone = profile.phone_number
+    except AppUserProfile.DoesNotExist:
+        pass
+
+    # Deactivate all remote users linked to this email
+    remote_users = RemoteUser.objects.filter(email=user.email, is_active=True)
+    deactivated_count = 0
+    for ru in remote_users:
+        ru.status = "revoked"
+        ru.is_active = False
+        ru.save(update_fields=["status", "is_active", "updated_at"])
+        deactivated_count += 1
+
+        # Log the revocation
+        try:
+            RemoteAccessLog.objects.create(
+                tenant=ru.tenant,
+                remote_user=ru,
+                event_type="revoked",
+                event_details=f"Account deleted by user. Phone: {phone}",
+            )
+        except Exception:
+            pass
+
+    # Delete tokens, profile, and user
+    Token.objects.filter(user=user).delete()
+
+    try:
+        user.app_profile.delete()
+    except AppUserProfile.DoesNotExist:
+        pass
+
+    username = user.username
+    user.delete()
+
+    logger.info(
+        f"App delete-account: {username} (phone={phone}) deleted. "
+        f"{deactivated_count} VPN profiles revoked."
+    )
+
+    return Response(
+        {
+            "message": "Account deleted successfully.",
+        }
+    )
 
 
 # =========================================================================
 # §3  Tenants — Location List
 # =========================================================================
+
 
 @api_view(["GET"])
 @authentication_classes([TokenAuthentication])
@@ -228,13 +570,15 @@ def app_tenants(request):
         if not location or location == "TZ":
             location = "Tanzania"
 
-        results.append({
-            "id": str(t.id),
-            "name": t.business_name,
-            "location": location,
-            "description": t.notes or None,
-            "logo": logo_url,
-        })
+        results.append(
+            {
+                "id": str(t.id),
+                "name": t.business_name,
+                "location": location,
+                "description": t.notes or None,
+                "logo": logo_url,
+            }
+        )
 
     return Response(results)
 
@@ -242,6 +586,7 @@ def app_tenants(request):
 # =========================================================================
 # §4  Plans — Per Location
 # =========================================================================
+
 
 @api_view(["GET"])
 @authentication_classes([TokenAuthentication])
@@ -297,16 +642,18 @@ def app_plans(request):
             if p.max_devices_per_user > 1:
                 features.append(f"{p.max_devices_per_user} devices")
 
-        results.append({
-            "id": str(p.id),
-            "name": p.name,
-            "price": float(p.effective_price),
-            "currency": p.currency,
-            "duration_days": p.billing_days,
-            "description": p.description or None,
-            "speed_mbps": speed_mbps,
-            "features": features if features else None,
-        })
+        results.append(
+            {
+                "id": str(p.id),
+                "name": p.name,
+                "price": float(p.effective_price),
+                "currency": p.currency,
+                "duration_days": p.billing_days,
+                "description": p.description or None,
+                "speed_mbps": speed_mbps,
+                "features": features if features else None,
+            }
+        )
 
     return Response(results)
 
@@ -314,6 +661,7 @@ def app_plans(request):
 # =========================================================================
 # §5  Payment — Initiate & Verify
 # =========================================================================
+
 
 @api_view(["POST"])
 @authentication_classes([TokenAuthentication])
@@ -361,9 +709,7 @@ def app_initiate_payment(request):
 
     # Resolve plan
     try:
-        plan = RemoteAccessPlan.objects.get(
-            id=plan_id, tenant=tenant, is_active=True
-        )
+        plan = RemoteAccessPlan.objects.get(id=plan_id, tenant=tenant, is_active=True)
     except (RemoteAccessPlan.DoesNotExist, ValueError):
         return Response(
             {"detail": "Plan not found."},
@@ -487,16 +833,18 @@ def app_initiate_payment(request):
             f"snippe={snippe_ref} amount={amount} user={user.email}"
         )
 
-        return Response({
-            "status": "pending",
-            "order_reference": payment.order_reference,
-            "checkout_url": checkout_url,
-            "snippe_reference": snippe_ref,
-            "amount": amount,
-            "plan_name": plan.name,
-            "currency": plan.currency,
-            "duration_days": plan.billing_days,
-        })
+        return Response(
+            {
+                "status": "pending",
+                "order_reference": payment.order_reference,
+                "checkout_url": checkout_url,
+                "snippe_reference": snippe_ref,
+                "amount": amount,
+                "plan_name": plan.name,
+                "currency": plan.currency,
+                "duration_days": plan.billing_days,
+            }
+        )
 
     # Session creation failed — try direct mobile money push if phone provided
     if phone_number or remote_user.phone:
@@ -522,17 +870,19 @@ def app_initiate_payment(request):
                 payment.payment_reference = snippe_ref
                 payment.save(update_fields=["payment_reference"])
 
-            return Response({
-                "status": "pending",
-                "order_reference": payment.order_reference,
-                "checkout_url": None,
-                "snippe_reference": snippe_ref,
-                "amount": amount,
-                "plan_name": plan.name,
-                "currency": plan.currency,
-                "duration_days": plan.billing_days,
-                "message": f"USSD push sent to {phone_to_use}",
-            })
+            return Response(
+                {
+                    "status": "pending",
+                    "order_reference": payment.order_reference,
+                    "checkout_url": None,
+                    "snippe_reference": snippe_ref,
+                    "amount": amount,
+                    "plan_name": plan.name,
+                    "currency": plan.currency,
+                    "duration_days": plan.billing_days,
+                    "message": f"USSD push sent to {phone_to_use}",
+                }
+            )
 
     # All payment methods failed
     payment.mark_failed()
@@ -578,15 +928,19 @@ def app_verify_payment(request):
     payment = None
 
     # Strategy 1: find by Snippe payment_reference (transaction_id from Snippe)
-    payment = RemoteAccessPayment.objects.filter(
-        payment_reference=transaction_id
-    ).select_related("remote_user", "remote_user__vpn_config", "plan", "tenant").first()
+    payment = (
+        RemoteAccessPayment.objects.filter(payment_reference=transaction_id)
+        .select_related("remote_user", "remote_user__vpn_config", "plan", "tenant")
+        .first()
+    )
 
     # Strategy 2: find by our order_reference
     if not payment:
-        payment = RemoteAccessPayment.objects.filter(
-            order_reference=transaction_id
-        ).select_related("remote_user", "remote_user__vpn_config", "plan", "tenant").first()
+        payment = (
+            RemoteAccessPayment.objects.filter(order_reference=transaction_id)
+            .select_related("remote_user", "remote_user__vpn_config", "plan", "tenant")
+            .first()
+        )
 
     # Strategy 3: find latest pending payment for this user + tenant
     if not payment and tenant_id:
@@ -594,10 +948,14 @@ def app_verify_payment(request):
             email=user.email, tenant_id=tenant_id
         ).first()
         if remote_user:
-            payment = RemoteAccessPayment.objects.filter(
-                remote_user=remote_user,
-                status="pending",
-            ).order_by("-created_at").first()
+            payment = (
+                RemoteAccessPayment.objects.filter(
+                    remote_user=remote_user,
+                    status="pending",
+                )
+                .order_by("-created_at")
+                .first()
+            )
 
     if not payment:
         return Response(
@@ -614,28 +972,34 @@ def app_verify_payment(request):
     if payment.status == "completed":
         remote_user = payment.remote_user
         config_ready = bool(remote_user.private_key and remote_user.is_active)
-        return Response({
-            "status": "success",
-            "transaction_id": transaction_id,
-            "message": "Payment confirmed.",
-            "config_ready": config_ready,
-        })
+        return Response(
+            {
+                "status": "success",
+                "transaction_id": transaction_id,
+                "message": "Payment confirmed.",
+                "config_ready": config_ready,
+            }
+        )
 
     if payment.status == "failed":
-        return Response({
-            "status": "failed",
-            "transaction_id": transaction_id,
-            "message": "Payment failed. Please try again.",
-            "config_ready": False,
-        })
+        return Response(
+            {
+                "status": "failed",
+                "transaction_id": transaction_id,
+                "message": "Payment failed. Please try again.",
+                "config_ready": False,
+            }
+        )
 
     if payment.status == "expired":
-        return Response({
-            "status": "failed",
-            "transaction_id": transaction_id,
-            "message": "Payment expired. Please initiate a new payment.",
-            "config_ready": False,
-        })
+        return Response(
+            {
+                "status": "failed",
+                "transaction_id": transaction_id,
+                "message": "Payment expired. Please initiate a new payment.",
+                "config_ready": False,
+            }
+        )
 
     # Status is still "pending" — check with Snippe API
     from .snippe import SnippeAPI
@@ -661,12 +1025,18 @@ def app_verify_payment(request):
 
             # Sync peer to router
             try:
-                from .mikrotik import add_wireguard_peer, enable_wireguard_peer, setup_wireguard_bandwidth_queue
+                from .mikrotik import (
+                    add_wireguard_peer,
+                    enable_wireguard_peer,
+                    setup_wireguard_bandwidth_queue,
+                )
 
                 if not remote_user.is_configured_on_router:
                     add_result = add_wireguard_peer(remote_user)
                     if add_result.get("success"):
-                        logger.info(f"App: VPN peer added to router for {remote_user.name}")
+                        logger.info(
+                            f"App: VPN peer added to router for {remote_user.name}"
+                        )
                 else:
                     enable_result = enable_wireguard_peer(remote_user)
                     if enable_result.get("success"):
@@ -691,37 +1061,44 @@ def app_verify_payment(request):
                 pass
 
             config_ready = bool(remote_user.private_key and remote_user.is_active)
-            return Response({
-                "status": "success",
-                "transaction_id": transaction_id,
-                "message": "Payment confirmed.",
-                "config_ready": config_ready,
-            })
+            return Response(
+                {
+                    "status": "success",
+                    "transaction_id": transaction_id,
+                    "message": "Payment confirmed.",
+                    "config_ready": config_ready,
+                }
+            )
 
         elif snippe_status == "failed":
             payment.mark_failed()
-            return Response({
-                "status": "failed",
-                "transaction_id": transaction_id,
-                "message": "Payment failed. Please try again.",
-                "config_ready": False,
-            })
+            return Response(
+                {
+                    "status": "failed",
+                    "transaction_id": transaction_id,
+                    "message": "Payment failed. Please try again.",
+                    "config_ready": False,
+                }
+            )
 
     except Exception as e:
         logger.error(f"App: Snippe status check error: {e}")
 
     # Still pending
-    return Response({
-        "status": "pending",
-        "transaction_id": transaction_id,
-        "message": "Payment is still being processed. Please wait.",
-        "config_ready": False,
-    })
+    return Response(
+        {
+            "status": "pending",
+            "transaction_id": transaction_id,
+            "message": "Payment is still being processed. Please wait.",
+            "config_ready": False,
+        }
+    )
 
 
 # =========================================================================
 # §6  WireGuard Config Delivery
 # =========================================================================
+
 
 @api_view(["GET"])
 @authentication_classes([TokenAuthentication])
@@ -793,19 +1170,22 @@ def app_wireguard_config(request):
         except Exception:
             pass
 
-    return Response({
-        "download_url": download_url,
-        "filename": filename,
-        "expires_at": (
-            remote_user.expires_at.isoformat() if remote_user.expires_at else None
-        ),
-        "config_content": config_content,
-    })
+    return Response(
+        {
+            "download_url": download_url,
+            "filename": filename,
+            "expires_at": (
+                remote_user.expires_at.isoformat() if remote_user.expires_at else None
+            ),
+            "config_content": config_content,
+        }
+    )
 
 
 # =========================================================================
 # §7  User Status Lookup (Public — no auth required)
 # =========================================================================
+
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
@@ -857,13 +1237,15 @@ def app_user_status(request):
         )
 
     if not remote_user:
-        return Response({
-            "phone": phone,
-            "status": "none",
-            "has_active_plan": False,
-            "message": "No account found for this phone number.",
-            "plan": None,
-        })
+        return Response(
+            {
+                "phone": phone,
+                "status": "none",
+                "has_active_plan": False,
+                "message": "No account found for this phone number.",
+                "plan": None,
+            }
+        )
 
     # Check if expired
     is_expired = remote_user.is_expired
@@ -899,26 +1281,27 @@ def app_user_status(request):
             "name": remote_user.plan.name,
             "tenant_name": remote_user.tenant.business_name,
             "expires_at": (
-                remote_user.expires_at.isoformat()
-                if remote_user.expires_at
-                else None
+                remote_user.expires_at.isoformat() if remote_user.expires_at else None
             ),
             "speed_mbps": speed_mbps,
             "duration_days": remote_user.plan.billing_days,
         }
 
-    return Response({
-        "phone": phone,
-        "status": status_val,
-        "has_active_plan": has_active,
-        "message": message,
-        "plan": plan_data,
-    })
+    return Response(
+        {
+            "phone": phone,
+            "status": status_val,
+            "has_active_plan": has_active,
+            "message": message,
+            "plan": plan_data,
+        }
+    )
 
 
 # =========================================================================
 # Account — Get current user info
 # =========================================================================
+
 
 @api_view(["GET"])
 @authentication_classes([TokenAuthentication])
@@ -936,9 +1319,11 @@ def app_account(request):
     user = request.user
 
     # Find all active remote user profiles for this user
-    remote_users = RemoteUser.objects.filter(
-        email=user.email, is_active=True
-    ).select_related("plan", "tenant").order_by("-created_at")
+    remote_users = (
+        RemoteUser.objects.filter(email=user.email, is_active=True)
+        .select_related("plan", "tenant")
+        .order_by("-created_at")
+    )
 
     active_plans = []
     for ru in remote_users:
@@ -955,11 +1340,21 @@ def app_account(request):
         }
         active_plans.append(plan_info)
 
-    return Response({
-        "user": {
-            "id": user.id,
-            "name": user.get_full_name() or user.email,
-            "email": user.email,
-        },
-        "active_plans": active_plans,
-    })
+    # Get phone from profile
+    phone = ""
+    try:
+        phone = user.app_profile.phone_number
+    except AppUserProfile.DoesNotExist:
+        pass
+
+    return Response(
+        {
+            "user": {
+                "id": user.id,
+                "name": user.get_full_name() or user.email,
+                "email": user.email,
+                "phone_number": phone,
+            },
+            "active_plans": active_plans,
+        }
+    )
