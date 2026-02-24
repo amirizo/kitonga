@@ -5592,9 +5592,10 @@ def snippe_webhook(request):
 
         # --- Signature verification ---
         signature = request.META.get("HTTP_X_WEBHOOK_SIGNATURE", "")
+        timestamp = request.META.get("HTTP_X_WEBHOOK_TIMESTAMP", "")
         if signature:
             snippe = SnippeAPI()
-            if not snippe.verify_signature(raw_body, signature):
+            if not snippe.verify_signature(raw_body, signature, timestamp):
                 logger.warning("Snippe webhook signature verification failed")
                 return Response(
                     {"success": False, "error": "Invalid signature"},

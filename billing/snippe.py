@@ -55,19 +55,61 @@ def _format_phone_number(phone_number: str) -> str:
     return phone
 
 
-def verify_webhook_signature(payload: str, signature: str, secret: str) -> bool:
+def verify_webhook_signature(
+    payload: str, signature: str, secret: str, timestamp: str = ""
+) -> bool:
     """
     Verify Snippe webhook HMAC-SHA256 signature.
+
+    Snippe signs ``{timestamp}.{payload}`` when the X-Webhook-Timestamp
+    header is present.  Falls back to signing raw payload only.
 
     Args:
         payload:   Raw request body (string / bytes)
         signature: Value of X-Webhook-Signature header
         secret:    Your webhook signing secret
+        timestamp: Value of X-Webhook-Timestamp header (optional)
     """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
     if isinstance(payload, str):
         payload = payload.encode()
-    expected = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(signature, expected)
+
+    # Strip common prefixes from signature (e.g. "v1=<hex>", "sha256=<hex>")
+    clean_sig = signature
+    for prefix in ("v1=", "sha256="):
+        if clean_sig.startswith(prefix):
+            clean_sig = clean_sig[len(prefix):]
+            break
+
+    # Try multiple signing strategies (Snippe may include timestamp)
+    candidates = []
+
+    # Strategy 1: timestamp.payload (like Stripe whsec_ pattern)
+    if timestamp:
+        candidates.append(f"{timestamp}.".encode() + payload)
+
+    # Strategy 2: raw payload only
+    candidates.append(payload)
+
+    secret_bytes = secret.encode()
+
+    for candidate in candidates:
+        expected = hmac.new(secret_bytes, candidate, hashlib.sha256).hexdigest()
+        if hmac.compare_digest(clean_sig, expected):
+            return True
+
+    # Debug logging for failed verification
+    logger.warning(
+        f"Snippe signature mismatch. "
+        f"Signature header (first 16 chars): {signature[:16]}..., "
+        f"Timestamp: {timestamp}, "
+        f"Payload length: {len(payload)}, "
+        f"Secret (first 10 chars): {secret[:10]}..."
+    )
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -619,11 +661,15 @@ class SnippeAPI:
     # WEBHOOK VERIFICATION
     # ======================================================================
 
-    def verify_signature(self, payload: str, signature: str) -> bool:
+    def verify_signature(
+        self, payload: str, signature: str, timestamp: str = ""
+    ) -> bool:
         """Verify webhook signature using the instance's webhook_secret."""
         if not self.webhook_secret:
             logger.warning(
                 "Snippe webhook secret not configured – skipping verification"
             )
             return True  # Allow in development
-        return verify_webhook_signature(payload, signature, self.webhook_secret)
+        return verify_webhook_signature(
+            payload, signature, self.webhook_secret, timestamp
+        )
