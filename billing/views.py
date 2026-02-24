@@ -5764,8 +5764,8 @@ def snippe_webhook(request):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-        # VPN (Remote Access) payment routing
-        if order_reference.startswith("VPN"):
+        # KTN (Remote Access) payment routing
+        if order_reference.startswith("VPN") or order_reference.startswith("KTN"):
             try:
                 from .models import RemoteAccessPayment
 
@@ -5776,7 +5776,7 @@ def snippe_webhook(request):
                 if event_type == "payment.completed":
                     vpn_payment.mark_completed()
                     logger.info(
-                        f"VPN payment completed: {order_reference} "
+                        f"KTN payment completed: {order_reference} "
                         f"user={vpn_payment.remote_user.name} "
                         f"tenant={vpn_payment.tenant.slug}"
                     )
@@ -5792,11 +5792,11 @@ def snippe_webhook(request):
                         enable_result = enable_wireguard_peer(remote_user)
                         if enable_result.get("success"):
                             logger.info(
-                                f"✅ VPN peer re-enabled on router for {remote_user.name}"
+                                f"✅ KTN peer re-enabled on router for {remote_user.name}"
                             )
                         else:
                             logger.warning(
-                                f"⚠️ VPN peer enable failed for {remote_user.name}: "
+                                f"⚠️ KTN peer enable failed for {remote_user.name}: "
                                 f"{enable_result.get('message')}"
                             )
 
@@ -5804,7 +5804,7 @@ def snippe_webhook(request):
                         setup_wireguard_bandwidth_queue(remote_user)
                     except Exception as router_err:
                         logger.error(
-                            f"VPN router enable after payment error: {router_err}"
+                            f"KTN router enable after payment error: {router_err}"
                         )
 
                     # Log the event
@@ -5839,12 +5839,12 @@ def snippe_webhook(request):
                             )
                             sms_api.send_sms(
                                 vpn_payment.phone_number,
-                                f"{business} VPN: Payment of TSh {vpn_payment.amount:,.0f} "
+                                f"{business} KTN: Payment of TSh {vpn_payment.amount:,.0f} "
                                 f"received. Your remote access is active until {expires_str}.",
-                                reference=f"VPN-CONF-{vpn_payment.id}",
+                                reference=f"KTN-CONF-{vpn_payment.id}",
                             )
                     except Exception as sms_err:
-                        logger.error(f"VPN payment confirmation SMS error: {sms_err}")
+                        logger.error(f"KTN payment confirmation SMS error: {sms_err}")
 
                     # Trigger webhook notification
                     try:
@@ -5854,7 +5854,7 @@ def snippe_webhook(request):
                             tenant=vpn_payment.tenant,
                             event_type="payment.completed",
                             data={
-                                "payment_type": "vpn",
+                                "payment_type": "ktn",
                                 "order_reference": order_reference,
                                 "amount": str(vpn_payment.amount),
                                 "remote_user_id": str(remote_user.id),
@@ -5873,7 +5873,7 @@ def snippe_webhook(request):
                 elif event_type == "payment.failed":
                     vpn_payment.mark_failed()
                     logger.warning(
-                        f"VPN payment failed: {order_reference} "
+                        f"KTN payment failed: {order_reference} "
                         f"user={vpn_payment.remote_user.name}"
                     )
 
@@ -5905,16 +5905,16 @@ def snippe_webhook(request):
                             business = tenant.business_name or "WiFi"
                             sms_api.send_sms(
                                 vpn_payment.phone_number,
-                                f"{business} VPN: Payment of TSh {vpn_payment.amount:,.0f} "
+                                f"{business} KTN: Payment of TSh {vpn_payment.amount:,.0f} "
                                 f"failed. Please try again.",
-                                reference=f"VPN-FAIL-{vpn_payment.id}",
+                                reference=f"KTN-FAIL-{vpn_payment.id}",
                             )
                     except Exception as sms_err:
-                        logger.error(f"VPN payment failed SMS error: {sms_err}")
+                        logger.error(f"KTN payment failed SMS error: {sms_err}")
 
                 webhook_log.mark_processed()
                 return Response(
-                    {"success": True, "message": "VPN payment webhook processed"}
+                    {"success": True, "message": "KTN payment webhook processed"}
                 )
 
             except RemoteAccessPayment.DoesNotExist:
@@ -5922,7 +5922,7 @@ def snippe_webhook(request):
                 logger.error(error_msg)
                 webhook_log.mark_failed(error_msg)
                 return Response(
-                    {"success": False, "error": "VPN Payment not found"},
+                    {"success": False, "error": "KTN Payment not found"},
                     status=status.HTTP_404_NOT_FOUND,
                 )
 

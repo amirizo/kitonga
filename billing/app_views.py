@@ -5,9 +5,9 @@ These endpoints serve the WebView-based mobile app (iOS/Android).
 They allow end-users to:
   1. Sign up / Log in
   2. Browse WiFi locations (tenants)
-  3. Choose a VPN data plan
+  3. Choose a KTN data plan
   4. Pay via Snippe Payment
-  5. Receive their WireGuard config
+  5. Receive their KTN config
   6. Check plan status by phone number
 
 All responses follow the data shapes defined in the
@@ -667,7 +667,7 @@ def app_delete_account(request):
 
     logger.info(
         f"App delete-account: {username} (phone={phone}) deleted. "
-        f"{deactivated_count} VPN profiles revoked."
+        f"{deactivated_count} KTN profiles revoked."
     )
 
     return Response(
@@ -687,7 +687,7 @@ def app_delete_account(request):
 @permission_classes([IsAuthenticated])
 def app_tenants(request):
     """
-    List active Kitonga WiFi locations (tenants) that have VPN configured.
+    List active Kitonga WiFi locations (tenants) that have KTN configured.
 
     GET /api/app/tenants/
     Returns: [ { "id": 1, "name": "...", "location": "...", ... } ]
@@ -745,7 +745,7 @@ def app_tenants(request):
 @permission_classes([IsAuthenticated])
 def app_plans(request):
     """
-    List VPN plans for a given tenant (location).
+    List KTN plans for a given tenant (location).
 
     GET /api/app/plans/?tenant_id=<uuid>
     Returns: [ { "id": 101, "name": "...", "price": 1000, ... } ]
@@ -820,7 +820,7 @@ def app_plans(request):
 @permission_classes([IsAuthenticated])
 def app_initiate_payment(request):
     """
-    Initiate a Snippe payment session for a VPN plan.
+    Initiate a Snippe payment session for a KTN plan.
     This creates a checkout session URL for the app's iframe.
 
     POST /api/app/initiate-payment/
@@ -831,7 +831,7 @@ def app_initiate_payment(request):
     }
     Returns: {
         "status": "pending",
-        "order_reference": "VPN-XXXXXXXX",
+        "order_reference": "KTN-XXXXXXXX",
         "checkout_url": "https://...",      // for iframe
         "snippe_reference": "...",
         "amount": 10000,
@@ -873,7 +873,7 @@ def app_initiate_payment(request):
         vpn_config = TenantVPNConfig.objects.get(tenant=tenant, is_active=True)
     except TenantVPNConfig.DoesNotExist:
         return Response(
-            {"detail": "This location does not have VPN configured yet."},
+            {"detail": "This location does not have KTN configured yet."},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -881,18 +881,22 @@ def app_initiate_payment(request):
     # Match by email OR phone to handle phone-based auth users
     from django.db.models import Q
 
-    remote_user = RemoteUser.objects.filter(
-        Q(email=user.email) | Q(phone=phone_number if phone_number else None),
-        tenant=tenant,
-        vpn_config=vpn_config,
-    ).exclude(status="revoked").first()
+    remote_user = (
+        RemoteUser.objects.filter(
+            Q(email=user.email) | Q(phone=phone_number if phone_number else None),
+            tenant=tenant,
+            vpn_config=vpn_config,
+        )
+        .exclude(status="revoked")
+        .first()
+    )
 
     if not remote_user:
         # Auto-provision a new remote user with WireGuard keys
         next_ip = vpn_config.get_next_available_ip()
         if not next_ip:
             return Response(
-                {"detail": "No available VPN addresses. Contact support."},
+                {"detail": "No available KTN addresses. Contact support."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
@@ -918,12 +922,13 @@ def app_initiate_payment(request):
             # Race condition or stale IP — retry once with a fresh IP
             logger.warning(
                 "App: IP %s collision for vpn_config=%s, retrying...",
-                next_ip, vpn_config.id,
+                next_ip,
+                vpn_config.id,
             )
             next_ip = vpn_config.get_next_available_ip()
             if not next_ip:
                 return Response(
-                    {"detail": "No available VPN addresses. Contact support."},
+                    {"detail": "No available KTN addresses. Contact support."},
                     status=status.HTTP_503_SERVICE_UNAVAILABLE,
                 )
             keypair = generate_wireguard_keypair()
@@ -984,7 +989,7 @@ def app_initiate_payment(request):
 
     metadata = {
         "order_reference": payment.order_reference,
-        "payment_type": "vpn",
+        "payment_type": "ktn",
         "remote_user_id": str(remote_user.id),
         "tenant": tenant.slug,
         "app_user_id": str(user.id),
@@ -1084,7 +1089,7 @@ def app_initiate_payment(request):
 @permission_classes([IsAuthenticated])
 def app_verify_payment(request):
     """
-    Verify a Snippe payment and activate the user's VPN plan.
+    Verify a Snippe payment and activate the user's KTN plan.
 
     POST /api/app/verify-payment/
     Body: {
@@ -1221,12 +1226,12 @@ def app_verify_payment(request):
                     add_result = add_wireguard_peer(remote_user)
                     if add_result.get("success"):
                         logger.info(
-                            f"App: VPN peer added to router for {remote_user.name}"
+                            f"App: KTN peer added to router for {remote_user.name}"
                         )
                 else:
                     enable_result = enable_wireguard_peer(remote_user)
                     if enable_result.get("success"):
-                        logger.info(f"App: VPN peer re-enabled for {remote_user.name}")
+                        logger.info(f"App: KTN peer re-enabled for {remote_user.name}")
 
                 setup_wireguard_bandwidth_queue(remote_user)
             except Exception as e:
@@ -1282,7 +1287,7 @@ def app_verify_payment(request):
 
 
 # =========================================================================
-# §6  WireGuard Config Delivery
+# §6  KTN Config Delivery
 # =========================================================================
 
 
@@ -1291,7 +1296,7 @@ def app_verify_payment(request):
 @permission_classes([IsAuthenticated])
 def app_wireguard_config(request):
     """
-    Get WireGuard config for the authenticated user.
+    Get KTN config for the authenticated user.
 
     GET /api/app/wireguard-config/?tenant_id=<uuid>
     Returns: {
@@ -1317,14 +1322,14 @@ def app_wireguard_config(request):
 
     if not remote_user:
         return Response(
-            {"detail": "No active VPN profile found. Please purchase a plan first."},
+            {"detail": "No active KTN profile found. Please purchase a plan first."},
             status=status.HTTP_404_NOT_FOUND,
         )
 
     # Check expiry
     if remote_user.is_expired:
         return Response(
-            {"detail": "Your VPN access has expired. Please renew your plan."},
+            {"detail": "Your KTN access has expired. Please renew your plan."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
@@ -1333,7 +1338,7 @@ def app_wireguard_config(request):
 
     # Build a safe filename
     tenant_slug = remote_user.tenant.slug or "kitonga"
-    filename = f"{tenant_slug}-vpn.conf"
+    filename = f"{tenant_slug}-ktn.conf"
 
     # Build download URL (the app can call this same endpoint)
     download_url = request.build_absolute_uri(request.path)
@@ -1377,7 +1382,7 @@ def app_wireguard_config(request):
 @permission_classes([AllowAny])
 def app_user_status(request):
     """
-    Look up VPN plan status by phone number.
+    Look up KTN plan status by phone number.
     No authentication required — intentional for users who lost login.
 
     GET /api/app/user-status/?phone=+255712345678
