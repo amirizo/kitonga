@@ -878,6 +878,8 @@ urlpatterns = [
     # =========================================================================
     # Authentication (public)
     path("app/signup/", app_views.app_signup, name="app_signup"),
+    path("app/verify-phone/", app_views.app_verify_phone, name="app_verify_phone"),
+    path("app/resend-otp/", app_views.app_resend_otp, name="app_resend_otp"),
     path("app/login/", app_views.app_login, name="app_login"),
     path(
         "app/forgot-password/",

@@ -185,29 +185,165 @@ def app_signup(request):
         password=password,
         first_name=first_name,
         last_name=last_name,
-        is_active=True,
+        is_active=False,  # Inactive until phone verified via OTP
         is_staff=False,
     )
 
     # Create app profile with phone
     AppUserProfile.objects.create(user=user, phone_number=phone)
 
+    # Send verification OTP via SMS
+    otp = PhoneOTP.create_for_phone(phone, purpose="phone_verify")
+    sent = _send_otp_sms(phone, otp.otp_code)
+
+    logger.info(
+        "App signup: %s name=%s (id=%d) otp_sent=%s",
+        phone, name, user.id, sent,
+    )
+
+    return Response(
+        {
+            "message": "Account created. A verification code has been sent to your phone.",
+            "phone_number": phone,
+            "requires_verification": True,
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+# =========================================================================
+# §2b  Phone Verification — Verify OTP after signup
+# =========================================================================
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def app_verify_phone(request):
+    """
+    Verify phone number with OTP sent during signup.
+
+    POST /api/app/verify-phone/
+    Body: { "phone_number": "0712345678", "otp": "482916" }
+    Returns: { "token": "...", "user": { "id", "name", "email", "phone_number" } }
+    """
+    phone_raw = (request.data.get("phone_number") or "").strip()
+    otp_code = (request.data.get("otp") or "").strip()
+
+    if not phone_raw or not otp_code:
+        return Response(
+            {"detail": "Phone number and OTP are required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    phone = _normalize_phone(phone_raw)
+
+    # Find the latest unused phone_verify OTP for this phone
+    otp_obj = (
+        PhoneOTP.objects.filter(
+            phone_number=phone,
+            purpose="phone_verify",
+            is_used=False,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+    if not otp_obj:
+        return Response(
+            {"detail": "No pending verification found. Please sign up again."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    verified, message = otp_obj.verify(otp_code)
+    if not verified:
+        return Response(
+            {"detail": message},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Activate the user account
+    profile = AppUserProfile.objects.filter(phone_number=phone).select_related("user").first()
+    if not profile:
+        return Response(
+            {"detail": "Account not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    user = profile.user
+    user.is_active = True
+    user.save(update_fields=["is_active"])
+
+    # Generate auth token
     token, _ = Token.objects.get_or_create(user=user)
 
-    logger.info(f"App signup: {phone} name={name} (id={user.id})")
+    logger.info("App verify-phone: %s activated (user=%d)", phone, user.id)
 
     return Response(
         {
             "token": token.key,
             "user": {
                 "id": user.id,
-                "name": user.get_full_name() or name,
+                "name": user.get_full_name() or user.username,
                 "email": user.email,
                 "phone_number": phone,
             },
-        },
-        status=status.HTTP_201_CREATED,
+        }
     )
+
+
+# =========================================================================
+# §2c  Resend OTP — For phone verification
+# =========================================================================
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def app_resend_otp(request):
+    """
+    Resend phone verification OTP (rate limited to 1 per 60 seconds).
+
+    POST /api/app/resend-otp/
+    Body: { "phone_number": "0712345678" }
+    Returns: { "message": "Verification code sent." }
+    """
+    phone_raw = (request.data.get("phone_number") or "").strip()
+
+    if not phone_raw:
+        return Response(
+            {"detail": "Phone number is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    phone = _normalize_phone(phone_raw)
+
+    # Check that an unverified account exists for this phone
+    profile = AppUserProfile.objects.filter(phone_number=phone).select_related("user").first()
+    if not profile or profile.user.is_active:
+        # Don't reveal account status
+        return Response({"message": "If this number has a pending account, a code will be sent."})
+
+    # Rate limit: 1 OTP per 60 seconds
+    from datetime import timedelta
+
+    recent = PhoneOTP.objects.filter(
+        phone_number=phone,
+        purpose="phone_verify",
+        is_used=False,
+        created_at__gte=timezone.now() - timedelta(seconds=60),
+    ).first()
+
+    if recent:
+        return Response(
+            {"detail": "OTP was sent recently. Please wait 60 seconds."},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
+    otp = PhoneOTP.create_for_phone(phone, purpose="phone_verify")
+    sent = _send_otp_sms(phone, otp.otp_code)
+
+    logger.info("App resend-otp: %s sent=%s", phone, sent)
+
+    return Response({"message": "If this number has a pending account, a code will be sent."})
 
 
 # =========================================================================
@@ -257,7 +393,11 @@ def app_login(request):
 
     if not user.is_active:
         return Response(
-            {"detail": "Account is inactive. Contact support."},
+            {
+                "detail": "Phone number not verified. Please verify your phone first.",
+                "requires_verification": True,
+                "phone_number": phone,
+            },
             status=status.HTTP_403_FORBIDDEN,
         )
 

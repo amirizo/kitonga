@@ -309,6 +309,7 @@ class PhoneOTP(models.Model):
 
     PURPOSE_CHOICES = [
         ("password_reset", "Password Reset"),
+        ("phone_verify", "Phone Verification"),
     ]
 
     phone_number = models.CharField(max_length=20, db_index=True)
