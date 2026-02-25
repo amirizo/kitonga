@@ -1688,8 +1688,8 @@ def vpn_session(request):
     # Build endpoint — server public IP/hostname + listen port
     endpoint = ""
     if vpn_config:
-        server_host = vpn_config.server_endpoint or ""
-        if not server_host and vpn_config.router:
+        server_host = ""
+        if vpn_config.router:
             server_host = vpn_config.router.host or ""
         listen_port = vpn_config.listen_port or 51820
         if server_host:
@@ -1932,9 +1932,7 @@ def vpn_status_check(request):
         )
         if profile:
             remote_user = (
-                RemoteUser.objects.filter(
-                    email=profile.user.email, is_active=True
-                )
+                RemoteUser.objects.filter(email=profile.user.email, is_active=True)
                 .select_related("plan", "tenant")
                 .order_by("-created_at")
                 .first()
@@ -1972,9 +1970,7 @@ def vpn_status_check(request):
             "active": is_active,
             "plan_name": remote_user.plan.name if remote_user.plan else "Custom",
             "expires_at": (
-                remote_user.expires_at.isoformat()
-                if remote_user.expires_at
-                else None
+                remote_user.expires_at.isoformat() if remote_user.expires_at else None
             ),
             "message": message,
         }
