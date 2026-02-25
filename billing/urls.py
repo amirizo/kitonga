@@ -924,4 +924,6 @@ urlpatterns = [
     path("vpn/session/", app_views.vpn_session, name="vpn_session"),
     # VPN plan status check (requires Token auth)
     path("vpn/status/", app_views.vpn_status, name="vpn_status"),
+    # VPN plan status check by phone (public — no auth)
+    path("vpn/status/check/", app_views.vpn_status_check, name="vpn_status_check"),
 ]

@@ -1859,3 +1859,123 @@ def vpn_status(request):
             "has_session": bool(remote_user.private_key),
         }
     )
+
+
+# =========================================================================
+# §8b  VPN Status Check by Phone — Public (no auth)
+# =========================================================================
+# Called by KTNBridge.checkPlanByPhone(phone) from the native layer.
+# No authentication required — mirrors app_user_status but lives at
+# /api/vpn/status/check/ to match the Android Retrofit route.
+# =========================================================================
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def vpn_status_check(request):
+    """
+    Check VPN plan status by phone number (no auth required).
+
+    Called by the native KTNBridge.checkPlanByPhone(phone) method.
+    This lets the native layer verify plan validity even before login.
+
+    GET /api/vpn/status/check/?phone=0712345678
+    Query: phone (required) — Tanzanian phone number in any format
+
+    Returns 200:
+    {
+        "success": true,
+        "active": true | false,
+        "plan_name": "Monthly 30GB",
+        "expires_at": "2026-03-26T13:03:06+00:00",
+        "message": "Plan is active"
+    }
+    """
+    phone_raw = (request.query_params.get("phone") or "").strip()
+
+    if not phone_raw:
+        return Response(
+            {
+                "success": False,
+                "active": False,
+                "plan_name": None,
+                "expires_at": None,
+                "message": "Phone number is required.",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    phone = _normalize_phone(phone_raw)
+
+    # Find remote user by phone (try normalized first, then raw)
+    remote_user = (
+        RemoteUser.objects.filter(phone=phone, is_active=True)
+        .select_related("plan", "tenant")
+        .order_by("-created_at")
+        .first()
+    )
+
+    if not remote_user and phone != phone_raw:
+        remote_user = (
+            RemoteUser.objects.filter(phone=phone_raw, is_active=True)
+            .select_related("plan", "tenant")
+            .order_by("-created_at")
+            .first()
+        )
+
+    # Also try matching via AppUserProfile → DjangoUser → email → RemoteUser
+    if not remote_user:
+        profile = (
+            AppUserProfile.objects.filter(phone_number=phone)
+            .select_related("user")
+            .first()
+        )
+        if profile:
+            remote_user = (
+                RemoteUser.objects.filter(
+                    email=profile.user.email, is_active=True
+                )
+                .select_related("plan", "tenant")
+                .order_by("-created_at")
+                .first()
+            )
+
+    if not remote_user:
+        return Response(
+            {
+                "success": True,
+                "active": False,
+                "plan_name": None,
+                "expires_at": None,
+                "message": "No account found for this phone number.",
+            }
+        )
+
+    is_expired = remote_user.is_expired
+    is_active = not is_expired and remote_user.status == "active"
+
+    if is_active:
+        expires_str = (
+            remote_user.expires_at.strftime("%d %b %Y %H:%M")
+            if remote_user.expires_at
+            else "Unlimited"
+        )
+        message = f"Plan is active until {expires_str}"
+    elif is_expired:
+        message = "Plan expired or inactive"
+    else:
+        message = "Plan found but not active."
+
+    return Response(
+        {
+            "success": True,
+            "active": is_active,
+            "plan_name": remote_user.plan.name if remote_user.plan else "Custom",
+            "expires_at": (
+                remote_user.expires_at.isoformat()
+                if remote_user.expires_at
+                else None
+            ),
+            "message": message,
+        }
+    )
