@@ -1549,3 +1549,313 @@ def app_account(request):
             "active_plans": active_plans,
         }
     )
+
+
+# =========================================================================
+# §8  Native Bridge Endpoints — Called by Android/iOS native VPN layer
+# =========================================================================
+# These endpoints are called by the native KTNBridge, NOT by the React
+# WebView directly. The native app uses these to obtain WireGuard tunnel
+# credentials and check plan validity before connecting.
+# =========================================================================
+
+
+@api_view(["GET"])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def vpn_session(request):
+    """
+    Get VPN session credentials for the native WireGuard tunnel.
+
+    Called by the native KTNBridge.connectVPN() and KTNBridge.requestSession().
+    Returns parsed WireGuard keys + endpoint — NOT the raw .conf file.
+    The native layer uses these to programmatically create a VPN tunnel
+    named "KTN" via Android VpnService / iOS NetworkExtension.
+
+    GET /api/vpn/session/
+    Headers: Authorization: Token <token>
+    Query:   ?tenant_id=<uuid>  (optional)
+
+    Returns 200:
+    {
+        "success": true,
+        "tunnel_name": "KTN",
+        "interface": {
+            "private_key": "...",
+            "address": "10.200.0.4/32",
+            "dns": "1.1.1.1,8.8.8.8",
+            "mtu": 1420
+        },
+        "peer": {
+            "public_key": "...",
+            "preshared_key": "...",
+            "endpoint": "10.100.0.40:51820",
+            "allowed_ips": "0.0.0.0/0",
+            "persistent_keepalive": 25
+        },
+        "plan": {
+            "name": "Monthly 30GB",
+            "expires_at": "2026-03-26T13:03:06+00:00"
+        },
+        "tenant": {
+            "id": "...",
+            "name": "Kitonga WiFi"
+        }
+    }
+    """
+    user = request.user
+    tenant_id = request.query_params.get("tenant_id", "").strip()
+
+    # Also check native-stored tenant_id in header (set by KTNBridge)
+    if not tenant_id:
+        tenant_id = request.META.get("HTTP_X_TENANT_ID", "").strip()
+
+    # Find the user's active remote access profile
+    qs = RemoteUser.objects.filter(
+        email=user.email,
+        is_active=True,
+    ).select_related("vpn_config", "vpn_config__router", "plan", "tenant")
+
+    if tenant_id:
+        qs = qs.filter(tenant_id=tenant_id)
+
+    remote_user = qs.order_by("-created_at").first()
+
+    # Also try matching by phone number if no match by email
+    if not remote_user:
+        phone = ""
+        try:
+            phone = user.app_profile.phone_number
+        except AppUserProfile.DoesNotExist:
+            pass
+
+        if phone:
+            qs2 = RemoteUser.objects.filter(
+                phone=phone,
+                is_active=True,
+            ).select_related("vpn_config", "vpn_config__router", "plan", "tenant")
+
+            if tenant_id:
+                qs2 = qs2.filter(tenant_id=tenant_id)
+
+            remote_user = qs2.order_by("-created_at").first()
+
+    if not remote_user:
+        return Response(
+            {
+                "success": False,
+                "error": "no_plan",
+                "message": "No active KTN plan found. Please purchase a plan first.",
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Check expiry
+    if remote_user.is_expired:
+        return Response(
+            {
+                "success": False,
+                "error": "expired",
+                "message": "Your KTN plan has expired. Please renew your plan.",
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # Ensure we have the private key
+    if not remote_user.private_key:
+        return Response(
+            {
+                "success": False,
+                "error": "no_config",
+                "message": "VPN configuration not ready. Please contact support.",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    # Build parsed tunnel credentials for the native layer
+    vpn_config = remote_user.vpn_config
+
+    # Parse DNS — default to Cloudflare + Google
+    dns = "1.1.1.1,8.8.8.8"
+    if vpn_config and vpn_config.dns_servers:
+        dns = vpn_config.dns_servers
+
+    # Parse MTU
+    mtu = 1420
+    if vpn_config and hasattr(vpn_config, "mtu") and vpn_config.mtu:
+        mtu = vpn_config.mtu
+
+    # Build endpoint — server public IP/hostname + listen port
+    endpoint = ""
+    if vpn_config:
+        server_host = vpn_config.server_endpoint or ""
+        if not server_host and vpn_config.router:
+            server_host = vpn_config.router.host or ""
+        listen_port = vpn_config.listen_port or 51820
+        if server_host:
+            endpoint = f"{server_host}:{listen_port}"
+
+    # Log session request
+    try:
+        RemoteAccessLog.objects.create(
+            tenant=remote_user.tenant,
+            remote_user=remote_user,
+            event_type="session_requested",
+            event_details=f"VPN session requested via native bridge by {user.email}",
+        )
+    except Exception:
+        pass
+
+    logger.info(
+        "VPN session issued: user=%s remote_user=%s tenant=%s ip=%s",
+        user.email,
+        remote_user.name,
+        remote_user.tenant.slug,
+        remote_user.assigned_ip,
+    )
+
+    return Response(
+        {
+            "success": True,
+            "tunnel_name": "KTN",
+            "interface": {
+                "private_key": remote_user.private_key,
+                "address": f"{remote_user.assigned_ip}/32",
+                "dns": dns,
+                "mtu": mtu,
+            },
+            "peer": {
+                "public_key": vpn_config.server_public_key if vpn_config else "",
+                "preshared_key": remote_user.preshared_key or "",
+                "endpoint": endpoint,
+                "allowed_ips": "0.0.0.0/0",
+                "persistent_keepalive": 25,
+            },
+            "plan": {
+                "name": remote_user.plan.name if remote_user.plan else "Custom",
+                "expires_at": (
+                    remote_user.expires_at.isoformat()
+                    if remote_user.expires_at
+                    else None
+                ),
+                "duration_days": (
+                    remote_user.plan.billing_days if remote_user.plan else None
+                ),
+            },
+            "tenant": {
+                "id": str(remote_user.tenant.id),
+                "name": remote_user.tenant.business_name,
+            },
+        }
+    )
+
+
+@api_view(["GET"])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def vpn_status(request):
+    """
+    Check authenticated user's VPN plan status.
+
+    Called by the native KTNBridge.checkPlanStatus() method.
+    Also used by the native app to decide whether to auto-disconnect
+    when a plan expires.
+
+    GET /api/vpn/status/
+    Headers: Authorization: Token <token>
+    Query:   ?tenant_id=<uuid>  (optional)
+
+    Returns 200:
+    {
+        "success": true,
+        "active": true | false,
+        "plan_name": "Monthly 30GB",
+        "expires_at": "2026-03-26T13:03:06+00:00",
+        "message": "Plan is active",
+        "tenant_id": "...",
+        "tenant_name": "Kitonga WiFi",
+        "assigned_ip": "10.200.0.4",
+        "has_session": true
+    }
+    """
+    user = request.user
+    tenant_id = request.query_params.get("tenant_id", "").strip()
+
+    if not tenant_id:
+        tenant_id = request.META.get("HTTP_X_TENANT_ID", "").strip()
+
+    # Find the user's remote access profile
+    qs = RemoteUser.objects.filter(
+        email=user.email,
+        is_active=True,
+    ).select_related("plan", "tenant")
+
+    if tenant_id:
+        qs = qs.filter(tenant_id=tenant_id)
+
+    remote_user = qs.order_by("-created_at").first()
+
+    # Fallback: try phone number
+    if not remote_user:
+        phone = ""
+        try:
+            phone = user.app_profile.phone_number
+        except AppUserProfile.DoesNotExist:
+            pass
+
+        if phone:
+            qs2 = RemoteUser.objects.filter(
+                phone=phone,
+                is_active=True,
+            ).select_related("plan", "tenant")
+
+            if tenant_id:
+                qs2 = qs2.filter(tenant_id=tenant_id)
+
+            remote_user = qs2.order_by("-created_at").first()
+
+    if not remote_user:
+        return Response(
+            {
+                "success": True,
+                "active": False,
+                "plan_name": None,
+                "expires_at": None,
+                "message": "No active plan found. Please purchase a plan.",
+                "tenant_id": tenant_id or None,
+                "tenant_name": None,
+                "assigned_ip": None,
+                "has_session": False,
+            }
+        )
+
+    is_expired = remote_user.is_expired
+    is_active = not is_expired and remote_user.status == "active"
+
+    if is_active:
+        expires_str = (
+            remote_user.expires_at.strftime("%d %b %Y %H:%M")
+            if remote_user.expires_at
+            else "Unlimited"
+        )
+        message = f"Plan is active until {expires_str}"
+    elif is_expired:
+        message = "Your plan has expired. Please renew to reconnect."
+    else:
+        message = "Plan found but not active."
+
+    return Response(
+        {
+            "success": True,
+            "active": is_active,
+            "plan_name": remote_user.plan.name if remote_user.plan else "Custom",
+            "expires_at": (
+                remote_user.expires_at.isoformat() if remote_user.expires_at else None
+            ),
+            "message": message,
+            "tenant_id": str(remote_user.tenant.id),
+            "tenant_name": remote_user.tenant.business_name,
+            "assigned_ip": remote_user.assigned_ip,
+            "has_session": bool(remote_user.private_key),
+        }
+    )

@@ -917,4 +917,11 @@ urlpatterns = [
     ),
     # User status lookup (public — no auth)
     path("app/user-status/", app_views.app_user_status, name="app_user_status"),
+    # =========================================================================
+    # Native Bridge Endpoints — Called by Android/iOS VPN layer
+    # =========================================================================
+    # VPN session credentials (requires Token auth)
+    path("vpn/session/", app_views.vpn_session, name="vpn_session"),
+    # VPN plan status check (requires Token auth)
+    path("vpn/status/", app_views.vpn_status, name="vpn_status"),
 ]
