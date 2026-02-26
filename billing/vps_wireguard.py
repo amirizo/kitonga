@@ -1,12 +1,20 @@
 """
-VPS WireGuard Peer Management
-==============================
-Manages WireGuard peers on the local VPS ``wg0`` interface via subprocess.
+VPS WireGuard Hub – Peer Management
+=====================================
+Manages WireGuard peers on the VPS ``wg0`` interface via subprocess.
 
-Architecture:
-    Client → VPS wg0 (66.29.143.116:51820) → internet
-                      ↕ management tunnel
-                 MikroTik (10.100.0.40, behind NAT)
+KTN Architecture:
+    User Phone ──encrypted tunnel──► VPS wg0 (WireGuard Hub, 66.29.143.116:51820)
+                                        │
+                                  site-to-site tunnel
+                                        │
+                                  MikroTik (Infrastructure Controller, 10.100.0.40)
+                                        │
+                                     Internet
+
+    VPS  = WireGuard Hub (public IP, accepts client tunnels)
+    MikroTik = Infrastructure Controller (traffic control, bandwidth, QoS)
+    User pays → gets encrypted tunnel → direct routed internet
 """
 
 import logging
@@ -164,7 +172,10 @@ def _read_conf() -> str:
     try:
         proc = subprocess.run(
             ["sudo", "cat", str(WG_CONF_PATH)],
-            capture_output=True, text=True, check=False, timeout=5,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
         )
         if proc.returncode == 0:
             return proc.stdout
@@ -178,7 +189,11 @@ def _write_conf(content: str) -> bool:
     try:
         proc = subprocess.run(
             ["sudo", "tee", str(WG_CONF_PATH)],
-            input=content, capture_output=True, text=True, check=False, timeout=5,
+            input=content,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
         )
         return proc.returncode == 0
     except Exception as e:
