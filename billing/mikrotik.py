@@ -3890,6 +3890,21 @@ def add_wireguard_peer(remote_user) -> dict:
     finally:
         safe_close(api)
 
+    # Also add peer to VPS wg0 relay (clients connect to VPS, not MikroTik)
+    try:
+        from .vps_wireguard import sync_remote_user_to_vps
+
+        vps_result = sync_remote_user_to_vps(remote_user)
+        if vps_result.get("success"):
+            logger.info(f"VPS wg0 peer synced for {remote_user.name}")
+        else:
+            logger.warning(
+                f"VPS wg0 peer sync warning for {remote_user.name}: "
+                f"{vps_result.get('errors', [])}"
+            )
+    except Exception as e:
+        logger.warning(f"VPS wg0 peer sync skipped for {remote_user.name}: {e}")
+
     return result
 
 
@@ -3935,6 +3950,16 @@ def remove_wireguard_peer(remote_user) -> dict:
         result["message"] = f"Remove failed: {e}"
     finally:
         safe_close(api)
+
+    # Also remove peer from VPS wg0 relay
+    try:
+        from .vps_wireguard import vps_remove_peer
+
+        vps_result = vps_remove_peer(remote_user.public_key)
+        if vps_result.get("success"):
+            logger.info(f"VPS wg0 peer removed for {remote_user.name}")
+    except Exception as e:
+        logger.warning(f"VPS wg0 peer remove skipped for {remote_user.name}: {e}")
 
     return result
 
@@ -3985,6 +4010,14 @@ def disable_wireguard_peer(remote_user) -> dict:
         result["message"] = f"Disable failed: {e}"
     finally:
         safe_close(api)
+
+    # Also remove peer from VPS wg0 relay (disabled = no access)
+    try:
+        from .vps_wireguard import vps_remove_peer
+
+        vps_remove_peer(remote_user.public_key)
+    except Exception as e:
+        logger.warning(f"VPS wg0 peer disable skipped for {remote_user.name}: {e}")
 
     return result
 
@@ -4039,6 +4072,17 @@ def enable_wireguard_peer(remote_user) -> dict:
         result["message"] = f"Enable failed: {e}"
     finally:
         safe_close(api)
+
+    # Also add peer back to VPS wg0 relay (re-enabled = access restored)
+    if result["success"]:
+        try:
+            from .vps_wireguard import sync_remote_user_to_vps
+
+            vps_result = sync_remote_user_to_vps(remote_user)
+            if vps_result.get("success"):
+                logger.info(f"VPS wg0 peer re-enabled for {remote_user.name}")
+        except Exception as e:
+            logger.warning(f"VPS wg0 peer enable skipped for {remote_user.name}: {e}")
 
     return result
 
