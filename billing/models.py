@@ -1033,8 +1033,20 @@ class RemoteUser(models.Model):
     def generate_client_config(self):
         """
         Generate a WireGuard client configuration string for this user.
+        Uses the VPS relay endpoint if configured (clients connect to the
+        VPS, not directly to the MikroTik behind NAT).
         """
+        from django.conf import settings as _settings
+
         vpn = self.vpn_config
+
+        # Use VPS relay keys/endpoint if configured, otherwise fall back
+        # to the vpn_config/router values.
+        server_public_key = getattr(_settings, "WG_VPS_PUBLIC_KEY", "") or vpn.server_public_key
+        vps_endpoint = getattr(_settings, "WG_VPS_ENDPOINT", "")
+        if not vps_endpoint:
+            vps_endpoint = f"{vpn.router.host}:{vpn.listen_port}"
+
         config_lines = [
             "[Interface]",
             (
@@ -1047,7 +1059,7 @@ class RemoteUser(models.Model):
             f"MTU = {vpn.mtu}",
             "",
             "[Peer]",
-            f"PublicKey = {vpn.server_public_key}",
+            f"PublicKey = {server_public_key}",
         ]
         if self.preshared_key:
             config_lines.append(f"PresharedKey = {self.preshared_key}")
@@ -1056,8 +1068,8 @@ class RemoteUser(models.Model):
         allowed = self.allowed_ips or vpn.allowed_ips
         config_lines.append(f"AllowedIPs = {allowed}")
 
-        # Endpoint = router's public IP:port
-        config_lines.append(f"Endpoint = {vpn.router.host}:{vpn.listen_port}")
+        # Endpoint = VPS public relay or router direct
+        config_lines.append(f"Endpoint = {vps_endpoint}")
 
         if vpn.persistent_keepalive > 0:
             config_lines.append(f"PersistentKeepalive = {vpn.persistent_keepalive}")

@@ -1685,15 +1685,27 @@ def vpn_session(request):
     if vpn_config and hasattr(vpn_config, "mtu") and vpn_config.mtu:
         mtu = vpn_config.mtu
 
-    # Build endpoint — server public IP/hostname + listen port
-    endpoint = ""
-    if vpn_config:
+    # Build endpoint and server public key.
+    # Clients connect to the VPS relay (public IP), NOT directly to the
+    # MikroTik router (which sits behind NAT). The VPS wg0 interface
+    # has the client peers and forwards decrypted traffic.
+    vps_public_key = getattr(
+        settings, "WG_VPS_PUBLIC_KEY", ""
+    )
+    vps_endpoint = getattr(
+        settings, "WG_VPS_ENDPOINT", ""
+    )
+
+    # Fallback: use the vpn_config/router values if VPS relay not configured
+    if not vps_public_key and vpn_config:
+        vps_public_key = vpn_config.server_public_key or ""
+    if not vps_endpoint and vpn_config:
         server_host = ""
         if vpn_config.router:
             server_host = vpn_config.router.host or ""
         listen_port = vpn_config.listen_port or 51820
         if server_host:
-            endpoint = f"{server_host}:{listen_port}"
+            vps_endpoint = f"{server_host}:{listen_port}"
 
     # Log session request
     try:
@@ -1725,9 +1737,9 @@ def vpn_session(request):
                 "mtu": mtu,
             },
             "peer": {
-                "public_key": vpn_config.server_public_key if vpn_config else "",
+                "public_key": vps_public_key,
                 "preshared_key": remote_user.preshared_key or "",
-                "endpoint": endpoint,
+                "endpoint": vps_endpoint,
                 "allowed_ips": "0.0.0.0/0",
                 "persistent_keepalive": 25,
             },
