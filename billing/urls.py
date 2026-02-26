@@ -819,6 +819,11 @@ urlpatterns = [
         portal_views.portal_vpn_status,
         name="portal_vpn_status",
     ),
+    path(
+        "portal/vpn/vps-status/",
+        portal_views.portal_vps_peer_status,
+        name="portal_vps_peer_status",
+    ),
     # Remote Access Plans
     path(
         "portal/vpn/plans/",

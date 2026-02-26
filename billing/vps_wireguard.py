@@ -20,6 +20,7 @@ KTN Architecture:
 import logging
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -56,6 +57,96 @@ def _wg_show_peers() -> dict:
         if len(parts) >= 8:
             peers[parts[0]] = {"allowed_ips": parts[3]}
     return peers
+
+
+def vps_get_peer_status() -> dict:
+    """
+    Fetch live WireGuard peer status from VPS wg0 (handshake, endpoint, rx/tx).
+
+    ``wg show <iface> dump`` columns (tab-separated, line 0 = interface):
+        0: public-key
+        1: preshared-key  (or "(none)")
+        2: endpoint       (ip:port or "(none)")
+        3: allowed-ips
+        4: latest-handshake  (unix epoch seconds, 0 = never)
+        5: transfer-rx  (bytes)
+        6: transfer-tx  (bytes)
+        7: persistent-keepalive  (seconds or "off")
+
+    Returns:
+        dict  {"success": bool, "peers": [...], "errors": [...]}
+    """
+    result = {"success": False, "peers": [], "errors": []}
+
+    try:
+        proc = _run(WG_BIN + ["show", WG_INTERFACE, "dump"], check=False)
+    except FileNotFoundError:
+        result["errors"].append("wg binary not found on this host")
+        return result
+    except subprocess.TimeoutExpired:
+        result["errors"].append("wg show timed out")
+        return result
+
+    if proc.returncode != 0:
+        result["errors"].append(f"wg show failed: {proc.stderr.strip()}")
+        return result
+
+    now = time.time()
+    for line in proc.stdout.strip().splitlines()[1:]:
+        parts = line.split("\t")
+        if len(parts) < 8:
+            continue
+
+        pub_key = parts[0]
+        endpoint_raw = parts[2]  # "ip:port" or "(none)"
+        allowed_ips = parts[3]
+
+        try:
+            handshake_epoch = int(parts[4])
+        except (ValueError, TypeError):
+            handshake_epoch = 0
+
+        rx_bytes = int(parts[5]) if parts[5].isdigit() else 0
+        tx_bytes = int(parts[6]) if parts[6].isdigit() else 0
+
+        # Parse endpoint
+        endpoint_addr = ""
+        endpoint_port = ""
+        if endpoint_raw and endpoint_raw != "(none)":
+            # IPv4 = "1.2.3.4:51820", IPv6 = "[::1]:51820"
+            if "]:" in endpoint_raw:
+                endpoint_addr, endpoint_port = endpoint_raw.rsplit(":", 1)
+            elif ":" in endpoint_raw:
+                endpoint_addr, endpoint_port = endpoint_raw.rsplit(":", 1)
+
+        # Handshake as human-readable relative string
+        if handshake_epoch > 0:
+            delta = max(0, int(now - handshake_epoch))
+            if delta < 60:
+                handshake_str = f"{delta}s"
+            elif delta < 3600:
+                handshake_str = f"{delta // 60}m{delta % 60}s"
+            else:
+                handshake_str = f"{delta // 3600}h{(delta % 3600) // 60}m"
+        else:
+            handshake_str = ""
+
+        result["peers"].append(
+            {
+                "public_key": pub_key,
+                "allowed_ips": allowed_ips,
+                "endpoint": endpoint_addr,
+                "endpoint_port": endpoint_port,
+                "last_handshake": handshake_str,
+                "last_handshake_epoch": handshake_epoch,
+                "rx": rx_bytes,
+                "tx": tx_bytes,
+            }
+        )
+
+    result["success"] = True
+    logger.debug("VPS WG: fetched status for %d peers", len(result["peers"]))
+    return result
 
 
 def vps_peer_exists(public_key: str) -> bool:

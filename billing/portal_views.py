@@ -8703,6 +8703,77 @@ def portal_vpn_status(request):
     )
 
 
+@api_view(["GET"])
+@permission_classes([TenantAPIKeyPermission])
+def portal_vps_peer_status(request):
+    """
+    Get live WireGuard peer status from the VPS wg0 hub (handshake, traffic, endpoint).
+
+    Endpoint: GET /api/portal/vpn/vps-status/
+    """
+    tenant = request.tenant
+
+    allowed, error = check_remote_access_permission(tenant)
+    if not allowed:
+        return Response(
+            {"success": False, "error": error},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        vpn_config = TenantVPNConfig.objects.get(tenant=tenant)
+    except TenantVPNConfig.DoesNotExist:
+        return Response(
+            {"success": False, "error": "No VPN configuration found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    from .vps_wireguard import vps_get_peer_status
+
+    result = vps_get_peer_status()
+
+    # Enrich with local DB data
+    peer_map = {}
+    for peer in result.get("peers", []):
+        peer_map[peer["public_key"]] = peer
+
+    remote_users = RemoteUser.objects.filter(vpn_config=vpn_config)
+    enriched = []
+    for ru in remote_users:
+        live_data = peer_map.get(ru.public_key, {})
+        enriched.append(
+            {
+                "id": str(ru.id),
+                "name": ru.name,
+                "assigned_ip": ru.assigned_ip,
+                "status": ru.status,
+                "is_active": ru.is_active,
+                "expires_at": ru.expires_at.isoformat() if ru.expires_at else None,
+                "is_expired": ru.is_expired,
+                "last_handshake_db": (
+                    ru.last_handshake.isoformat() if ru.last_handshake else None
+                ),
+                "last_handshake_live": live_data.get("last_handshake", ""),
+                "endpoint": live_data.get("endpoint", ""),
+                "endpoint_port": live_data.get("endpoint_port", ""),
+                "rx": live_data.get("rx", 0),
+                "tx": live_data.get("tx", 0),
+                "is_configured_on_router": ru.is_configured_on_router,
+            }
+        )
+
+    return Response(
+        {
+            "success": result["success"],
+            "source": "vps_wg0",
+            "vpn_interface": vpn_config.interface_name,
+            "total_peers": len(enriched),
+            "peers": enriched,
+            "errors": result.get("errors", []),
+        }
+    )
+
+
 # ---- Remote Access Plans ----
 
 
