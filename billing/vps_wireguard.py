@@ -22,15 +22,22 @@ logger = logging.getLogger(__name__)
 WG_INTERFACE = getattr(settings, "WG_VPS_INTERFACE", "wg0")
 WG_CONF_PATH = Path(f"/etc/wireguard/{WG_INTERFACE}.conf")
 
+# The Django process runs as www-data; wg requires root.
+# A sudoers rule grants www-data NOPASSWD access to /usr/bin/wg:
+#   www-data ALL=(root) NOPASSWD: /usr/bin/wg
+WG_BIN = ["sudo", "/usr/bin/wg"]
+
 
 def _run(cmd: list, check: bool = True, timeout: int = 10):
     logger.debug("VPS WG cmd: %s", " ".join(cmd))
-    return subprocess.run(cmd, capture_output=True, text=True, check=check, timeout=timeout)
+    return subprocess.run(
+        cmd, capture_output=True, text=True, check=check, timeout=timeout
+    )
 
 
 def _wg_show_peers() -> dict:
     try:
-        proc = _run(["wg", "show", WG_INTERFACE, "dump"], check=False)
+        proc = _run(WG_BIN + ["show", WG_INTERFACE, "dump"], check=False)
     except FileNotFoundError:
         return {}
     if proc.returncode != 0:
@@ -60,7 +67,7 @@ def vps_add_peer(
         result["errors"].append("public_key is required")
         return result
 
-    cmd = ["wg", "set", WG_INTERFACE, "peer", public_key, "allowed-ips", allowed_ips]
+    cmd = WG_BIN + ["set", WG_INTERFACE, "peer", public_key, "allowed-ips", allowed_ips]
 
     psk_path = None
     if preshared_key:
@@ -95,7 +102,12 @@ def vps_add_peer(
     _persist_peer(public_key, allowed_ips, preshared_key, persistent_keepalive, comment)
     result["success"] = True
     result["message"] = f"VPS peer {public_key[:12]}… added to {WG_INTERFACE}"
-    logger.info("VPS WG: added peer %s allowed=%s comment=%s", public_key[:16], allowed_ips, comment)
+    logger.info(
+        "VPS WG: added peer %s allowed=%s comment=%s",
+        public_key[:16],
+        allowed_ips,
+        comment,
+    )
     return result
 
 
@@ -107,7 +119,9 @@ def vps_remove_peer(public_key: str) -> dict:
         return result
 
     try:
-        proc = _run(["wg", "set", WG_INTERFACE, "peer", public_key, "remove"], check=False)
+        proc = _run(
+            WG_BIN + ["set", WG_INTERFACE, "peer", public_key, "remove"], check=False
+        )
         if proc.returncode != 0:
             err = proc.stderr.strip()
             if "not found" not in err.lower():
@@ -145,14 +159,39 @@ def sync_remote_user_to_vps(remote_user) -> dict:
 # ── Conf-file helpers ────────────────────────────────────────────────
 
 
-def _persist_peer(public_key, allowed_ips, preshared_key, persistent_keepalive, comment=""):
-    if not WG_CONF_PATH.exists():
-        logger.warning("VPS WG conf %s not found — skip persist", WG_CONF_PATH)
-        return
+def _read_conf() -> str:
+    """Read wg0.conf using sudo cat (file is root-only)."""
     try:
-        conf = WG_CONF_PATH.read_text()
-    except PermissionError:
-        logger.error("Cannot read %s", WG_CONF_PATH)
+        proc = subprocess.run(
+            ["sudo", "cat", str(WG_CONF_PATH)],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+        if proc.returncode == 0:
+            return proc.stdout
+    except Exception as e:
+        logger.warning("Cannot read %s: %s", WG_CONF_PATH, e)
+    return ""
+
+
+def _write_conf(content: str) -> bool:
+    """Write wg0.conf using sudo tee (file is root-only)."""
+    try:
+        proc = subprocess.run(
+            ["sudo", "tee", str(WG_CONF_PATH)],
+            input=content, capture_output=True, text=True, check=False, timeout=5,
+        )
+        return proc.returncode == 0
+    except Exception as e:
+        logger.error("Cannot write %s: %s", WG_CONF_PATH, e)
+        return False
+
+
+def _persist_peer(
+    public_key, allowed_ips, preshared_key, persistent_keepalive, comment=""
+):
+    conf = _read_conf()
+    if not conf:
+        logger.warning("VPS WG conf empty or unreadable — skip persist")
         return
 
     lines = []
@@ -170,25 +209,16 @@ def _persist_peer(public_key, allowed_ips, preshared_key, persistent_keepalive, 
     cleaned = _strip_peer_block(conf, public_key)
     updated = cleaned.rstrip("\n") + "\n\n" + new_block + "\n"
 
-    try:
-        WG_CONF_PATH.write_text(updated)
-    except PermissionError:
-        logger.error("Cannot write %s", WG_CONF_PATH)
+    _write_conf(updated)
 
 
 def _remove_peer_from_conf(public_key):
-    if not WG_CONF_PATH.exists():
-        return
-    try:
-        conf = WG_CONF_PATH.read_text()
-    except PermissionError:
+    conf = _read_conf()
+    if not conf:
         return
     updated = _strip_peer_block(conf, public_key)
     if updated != conf:
-        try:
-            WG_CONF_PATH.write_text(updated)
-        except PermissionError:
-            pass
+        _write_conf(updated)
 
 
 def _strip_peer_block(conf_text: str, public_key: str) -> str:
