@@ -1261,6 +1261,8 @@ class AnalyticsTrendSerializer(serializers.Serializer):
 class PPPProfileSerializer(serializers.ModelSerializer):
     """Serializer for PPP Profile (read)"""
 
+    router_name = serializers.CharField(source="router.name", read_only=True)
+    router_host = serializers.CharField(source="router.host", read_only=True)
     customer_count = serializers.SerializerMethodField()
 
     class Meta:
@@ -1268,6 +1270,8 @@ class PPPProfileSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "router",
+            "router_name",
+            "router_host",
             "name",
             "rate_limit",
             "local_address",

@@ -1689,12 +1689,8 @@ def vpn_session(request):
     # Clients connect to the VPS relay (public IP), NOT directly to the
     # MikroTik router (which sits behind NAT). The VPS wg0 interface
     # has the client peers and forwards decrypted traffic.
-    vps_public_key = getattr(
-        settings, "WG_VPS_PUBLIC_KEY", ""
-    )
-    vps_endpoint = getattr(
-        settings, "WG_VPS_ENDPOINT", ""
-    )
+    vps_public_key = getattr(settings, "WG_VPS_PUBLIC_KEY", "")
+    vps_endpoint = getattr(settings, "WG_VPS_ENDPOINT", "")
 
     # Fallback: use the vpn_config/router values if VPS relay not configured
     if not vps_public_key and vpn_config:

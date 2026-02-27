@@ -2727,7 +2727,7 @@ def portal_users(request):
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    users = User.objects.filter(tenant=tenant).order_by("-created_at")
+    users = User.objects.filter(tenant=tenant).select_related("primary_router").order_by("-created_at")
 
     # Search filter
     search = request.query_params.get("search")
@@ -2788,6 +2788,11 @@ def portal_users(request):
                 "total_payments": u.total_payments,
                 "total_amount_paid": float(u.total_amount_paid),
                 "max_devices": u.max_devices,
+                "primary_router": {
+                    "id": u.primary_router.id,
+                    "name": u.primary_router.name,
+                    "host": u.primary_router.host,
+                } if u.primary_router else None,
                 "created_at": u.created_at.isoformat(),
             }
         )

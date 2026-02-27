@@ -1042,7 +1042,9 @@ class RemoteUser(models.Model):
 
         # Use VPS relay keys/endpoint if configured, otherwise fall back
         # to the vpn_config/router values.
-        server_public_key = getattr(_settings, "WG_VPS_PUBLIC_KEY", "") or vpn.server_public_key
+        server_public_key = (
+            getattr(_settings, "WG_VPS_PUBLIC_KEY", "") or vpn.server_public_key
+        )
         vps_endpoint = getattr(_settings, "WG_VPS_ENDPOINT", "")
         if not vps_endpoint:
             vps_endpoint = f"{vpn.router.host}:{vpn.listen_port}"

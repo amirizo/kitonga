@@ -3868,6 +3868,14 @@ def verify_access(request):
         access_method = "unknown"
         device_switch_info = None  # Track if device was switched (Last Device Wins)
 
+        # Pin user to the router they connected from (if not already pinned)
+        if router and not user.primary_router:
+            user.primary_router = router
+            user.save(update_fields=["primary_router"])
+            logger.info(
+                f"Pinned user {phone_number} to router {router.name} (ID={router.id}) from verify_access"
+            )
+
         # Determine how user got access (for better logging and debugging)
         if user.paid_until:
             # Check if user has payment history
@@ -4430,6 +4438,13 @@ def initiate_payment(request):
                 logger.info(
                     f"Associated user {phone_number} with tenant {router.tenant.slug} from router"
                 )
+            # Pin user to this router if not already pinned
+            if not user.primary_router:
+                user.primary_router = router
+                user.save(update_fields=["primary_router"])
+                logger.info(
+                    f"Pinned user {phone_number} to router {router.name} (ID={router.id})"
+                )
         except Router.DoesNotExist:
             logger.warning(
                 f"Router {router_id} not found, payment will proceed without router context"
@@ -4908,6 +4923,15 @@ def clickpesa_webhook(request):
                     # IMPORTANT: Get the router where payment was initiated
                     # This ensures we grant access on the CORRECT router
                     payment_router = payment.router
+
+                    # Set user's primary_router if not already set
+                    # This pins the user to the router they first paid from
+                    if payment_router and not user.primary_router:
+                        user.primary_router = payment_router
+                        user.save(update_fields=["primary_router"])
+                        logger.info(
+                            f"Set primary_router for {phone_number} to {payment_router.name} (ID={payment_router.id})"
+                        )
 
                     logger.info(
                         f"Processing access grant for {phone_number}: "
@@ -5942,6 +5966,14 @@ def snippe_webhook(request):
                     phone_number = payment.phone_number
                     devices = user.devices.filter(is_active=True)
                     payment_router = payment.router
+
+                    # Set user's primary_router if not already set
+                    if payment_router and not user.primary_router:
+                        user.primary_router = payment_router
+                        user.save(update_fields=["primary_router"])
+                        logger.info(
+                            f"Set primary_router for {phone_number} to {payment_router.name} (ID={payment_router.id})"
+                        )
 
                     if devices.exists():
                         for device in devices:

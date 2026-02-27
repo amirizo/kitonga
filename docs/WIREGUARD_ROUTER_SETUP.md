@@ -120,14 +120,12 @@ On the MikroTik:
 
 ## IP Address Allocation
 
-| Tenant       | Router Name    | WireGuard IP |
-| ------------ | -------------- | ------------ |
-| VPS Server   | -              | 10.100.0.1   |
-| Kitonga WiFi | Kitonga WiFi   | 10.100.0.10  |
-| Kitonga WiFi | Kitonga Remote | 10.100.0.40  |
-| Tenant 2     | -              | 10.100.0.20  |
-| DULA-WIFI    | DULLA WIFI     | 10.100.0.30  |
-| ...          | ...            | ...          |
+| Tenant       | Router Name       | WireGuard IP | Status                 |
+| ------------ | ----------------- | ------------ | ---------------------- |
+| VPS Server   | -                 | 10.100.0.1   | ✅ Hub                 |
+| Kitonga WiFi | Hotspot Router    | 10.100.0.10  | ✅ Online (ID=12)      |
+| Kitonga WiFi | KTN Remote Router | 10.100.0.20  | ⏳ Configuring (ID=13) |
+| ...          | ...               | ...          | ...                    |
 
 ## MikroTik API User Setup
 
@@ -143,7 +141,7 @@ On each MikroTik router, create an API user:
 # Enable API service (if not enabled)
 /ip service enable api
 
-# Optional: Restrict API to VPN only
+# Restrict API to VPN only (secure)
 /ip service set api address=10.100.0.0/24
 ```
 

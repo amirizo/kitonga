@@ -1,6 +1,7 @@
 """
 URL configuration for Kitonga project
 """
+
 from django.contrib import admin
 from django.contrib.auth import logout as auth_logout
 from django.urls import path, include
@@ -27,12 +28,12 @@ def admin_logout_view(request):
 
 urlpatterns = [
     # Override admin logout BEFORE admin/ to intercept GET requests
-    path('admin/logout/', admin_logout_view, name='admin_logout_override'),
-    path('admin/', admin.site.urls),
-    path('api/', include('billing.urls')),
-    path('dashboard/', include('billing.urls')),
+    path("admin/logout/", admin_logout_view, name="admin_logout_override"),
+    path("admin/", admin.site.urls),
+    path("api/", include("billing.urls")),
+    path("dashboard/", include("billing.urls")),
     # Handle browser requests to /favicon.ico to prevent 404 logs
-    path('favicon.ico', empty_favicon),
+    path("favicon.ico", empty_favicon),
 ]
 
 # Serve media files in development

@@ -338,7 +338,9 @@ SNIPPE_BASE_URL = config("SNIPPE_BASE_URL", default="https://api.snippe.sh/v1")
 SNIPPE_WEBHOOK_URL = config("SNIPPE_WEBHOOK_URL", default="")
 
 # WireGuard VPS Relay — clients connect to the VPS, not the MikroTik directly
-WG_VPS_PUBLIC_KEY = config("WG_VPS_PUBLIC_KEY", default="0ItNRIAXdf090Z3RpIVsmrA1JjRJrZveYweNZXXo3mQ=")
+WG_VPS_PUBLIC_KEY = config(
+    "WG_VPS_PUBLIC_KEY", default="0ItNRIAXdf090Z3RpIVsmrA1JjRJrZveYweNZXXo3mQ="
+)
 WG_VPS_ENDPOINT = config("WG_VPS_ENDPOINT", default="66.29.143.116:51820")
 WG_VPS_INTERFACE = config("WG_VPS_INTERFACE", default="wg0")
 

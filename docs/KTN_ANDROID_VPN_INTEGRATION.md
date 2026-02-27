@@ -22,11 +22,11 @@
 
 ### System Components
 
-| Component | Role | Description |
-|-----------|------|-------------|
-| **VPS (Ubuntu)** | **WireGuard Hub** | Public-facing server with public IP. Accepts encrypted tunnels from user phones. Routes traffic onward. |
-| **MikroTik Router** | **Infrastructure Controller** | Controls bandwidth, traffic shaping, user management. Connected to VPS via secure site-to-site tunnel. |
-| **Android App** | **KTN Client** | Creates encrypted tunnel to VPS. User gets internet through this tunnel. |
+| Component           | Role                          | Description                                                                                             |
+| ------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **VPS (Ubuntu)**    | **WireGuard Hub**             | Public-facing server with public IP. Accepts encrypted tunnels from user phones. Routes traffic onward. |
+| **MikroTik Router** | **Infrastructure Controller** | Controls bandwidth, traffic shaping, user management. Connected to VPS via secure site-to-site tunnel.  |
+| **Android App**     | **KTN Client**                | Creates encrypted tunnel to VPS. User gets internet through this tunnel.                                |
 
 ### Full Traffic Flow
 
@@ -57,10 +57,10 @@
 
 ### Network Addressing
 
-| Network | Range | Purpose |
-|---------|-------|---------|
-| `10.100.0.0/24` | Infrastructure | VPS ↔ MikroTik site-to-site tunnel |
-| `10.200.0.0/24` | Clients | User phones (each user gets a unique /32 IP) |
+| Network         | Range          | Purpose                                      |
+| --------------- | -------------- | -------------------------------------------- |
+| `10.100.0.0/24` | Infrastructure | VPS ↔ MikroTik site-to-site tunnel           |
+| `10.200.0.0/24` | Clients        | User phones (each user gets a unique /32 IP) |
 
 ### Security
 
