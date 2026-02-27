@@ -2727,7 +2727,11 @@ def portal_users(request):
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    users = User.objects.filter(tenant=tenant).select_related("primary_router").order_by("-created_at")
+    users = (
+        User.objects.filter(tenant=tenant)
+        .select_related("primary_router")
+        .order_by("-created_at")
+    )
 
     # Search filter
     search = request.query_params.get("search")
@@ -2788,11 +2792,15 @@ def portal_users(request):
                 "total_payments": u.total_payments,
                 "total_amount_paid": float(u.total_amount_paid),
                 "max_devices": u.max_devices,
-                "primary_router": {
-                    "id": u.primary_router.id,
-                    "name": u.primary_router.name,
-                    "host": u.primary_router.host,
-                } if u.primary_router else None,
+                "primary_router": (
+                    {
+                        "id": u.primary_router.id,
+                        "name": u.primary_router.name,
+                        "host": u.primary_router.host,
+                    }
+                    if u.primary_router
+                    else None
+                ),
                 "created_at": u.created_at.isoformat(),
             }
         )
@@ -6967,11 +6975,33 @@ def portal_ppp_profiles(request):
 
         serializer = PPPProfileSerializer(profiles, many=True)
 
+        # Build router summary so frontend knows which routers exist and profile counts
+        tenant_routers = Router.objects.filter(tenant=tenant, is_active=True)
+        all_profiles = PPPProfile.objects.filter(tenant=tenant)
+        router_summary = []
+        for r in tenant_routers:
+            router_summary.append(
+                {
+                    "router_id": r.id,
+                    "router_name": r.name,
+                    "router_host": r.host,
+                    "is_active": r.is_active,
+                    "profile_count": all_profiles.filter(router=r).count(),
+                    "active_profile_count": all_profiles.filter(
+                        router=r, is_active=True
+                    ).count(),
+                }
+            )
+
         return Response(
             {
                 "success": True,
                 "profiles": serializer.data,
                 "total_count": profiles.count(),
+                "router_summary": router_summary,
+                "available_routers": [
+                    {"id": r.id, "name": r.name, "host": r.host} for r in tenant_routers
+                ],
             }
         )
 
@@ -7231,7 +7261,33 @@ def portal_ppp_plans(request):
             plans = plans.filter(billing_cycle=billing_cycle)
 
         serializer = PPPPlanSerializer(plans, many=True)
-        return Response({"success": True, "plans": serializer.data})
+
+        # Build router summary for plans — show per-router plan breakdown
+        tenant_routers = Router.objects.filter(tenant=tenant, is_active=True)
+        all_plans = PPPPlan.objects.filter(tenant=tenant)
+        router_summary = []
+        for r in tenant_routers:
+            router_plans = all_plans.filter(profile__router=r)
+            router_summary.append(
+                {
+                    "router_id": r.id,
+                    "router_name": r.name,
+                    "plan_count": router_plans.count(),
+                    "active_plan_count": router_plans.filter(is_active=True).count(),
+                }
+            )
+
+        return Response(
+            {
+                "success": True,
+                "plans": serializer.data,
+                "total": plans.count(),
+                "router_summary": router_summary,
+                "available_routers": [
+                    {"id": r.id, "name": r.name, "host": r.host} for r in tenant_routers
+                ],
+            }
+        )
 
     # POST — Create
     serializer = PPPPlanCreateSerializer(data=request.data)
@@ -7441,6 +7497,24 @@ def portal_ppp_customers(request):
 
         serializer = PPPCustomerSerializer(customers_page, many=True)
 
+        # Build per-router breakdown for customers
+        tenant_routers = Router.objects.filter(tenant=tenant, is_active=True)
+        all_customers = PPPCustomer.objects.filter(tenant=tenant)
+        router_summary = []
+        for r in tenant_routers:
+            rc = all_customers.filter(router=r)
+            router_summary.append(
+                {
+                    "router_id": r.id,
+                    "router_name": r.name,
+                    "router_host": r.host,
+                    "total": rc.count(),
+                    "active": rc.filter(status="active").count(),
+                    "suspended": rc.filter(status="suspended").count(),
+                    "expired": rc.filter(status="expired").count(),
+                }
+            )
+
         return Response(
             {
                 "success": True,
@@ -7453,16 +7527,14 @@ def portal_ppp_customers(request):
                 },
                 "summary": {
                     "total": total_count,
-                    "active": PPPCustomer.objects.filter(
-                        tenant=tenant, status="active"
-                    ).count(),
-                    "suspended": PPPCustomer.objects.filter(
-                        tenant=tenant, status="suspended"
-                    ).count(),
-                    "expired": PPPCustomer.objects.filter(
-                        tenant=tenant, status="expired"
-                    ).count(),
+                    "active": all_customers.filter(status="active").count(),
+                    "suspended": all_customers.filter(status="suspended").count(),
+                    "expired": all_customers.filter(status="expired").count(),
                 },
+                "router_summary": router_summary,
+                "available_routers": [
+                    {"id": r.id, "name": r.name, "host": r.host} for r in tenant_routers
+                ],
             }
         )
 
@@ -8808,8 +8880,29 @@ def portal_remote_plans(request):
         if active_only:
             plans = plans.filter(is_active=True)
         serializer = RemoteAccessPlanSerializer(plans, many=True)
+
+        # Include VPN config/router context
+        vpn_config_info = None
+        try:
+            vpn_config = TenantVPNConfig.objects.select_related("router").get(
+                tenant=tenant
+            )
+            vpn_config_info = {
+                "vpn_config_id": str(vpn_config.id),
+                "router_id": vpn_config.router.id,
+                "router_name": vpn_config.router.name,
+                "router_host": vpn_config.router.host,
+            }
+        except TenantVPNConfig.DoesNotExist:
+            vpn_config_info = None
+
         return Response(
-            {"success": True, "total": plans.count(), "plans": serializer.data}
+            {
+                "success": True,
+                "total": plans.count(),
+                "plans": serializer.data,
+                "vpn_config": vpn_config_info,
+            }
         )
 
     # POST
@@ -8919,11 +9012,42 @@ def portal_remote_users(request):
             )
 
         serializer = RemoteUserSerializer(users, many=True)
+
+        # Include VPN config/router context so frontend knows which router is being managed
+        vpn_config_info = None
+        try:
+            vpn_config = TenantVPNConfig.objects.select_related("router").get(
+                tenant=tenant
+            )
+            vpn_config_info = {
+                "vpn_config_id": str(vpn_config.id),
+                "router_id": vpn_config.router.id,
+                "router_name": vpn_config.router.name,
+                "router_host": vpn_config.router.host,
+                "interface_name": vpn_config.interface_name,
+                "address_pool": vpn_config.address_pool,
+                "server_address": str(vpn_config.server_address),
+            }
+        except TenantVPNConfig.DoesNotExist:
+            vpn_config_info = None
+
+        # Summary by status
+        all_remote = RemoteUser.objects.filter(tenant=tenant)
+        summary = {
+            "total": all_remote.count(),
+            "active": all_remote.filter(status="active").count(),
+            "suspended": all_remote.filter(status="suspended").count(),
+            "expired": all_remote.filter(status="expired").count(),
+            "revoked": all_remote.filter(status="revoked").count(),
+        }
+
         return Response(
             {
                 "success": True,
                 "total": users.count(),
                 "users": serializer.data,
+                "vpn_config": vpn_config_info,
+                "summary": summary,
             }
         )
 

@@ -6186,20 +6186,32 @@ def snippe_payment_status(request, reference):
                         .order_by("-last_seen")
                         .first()
                     )
-                    if device and user.tenant:
-                        force_immediate_internet_access_on_tenant_routers(
-                            user=user,
-                            mac_address=device.mac_address,
-                            ip_address=device.ip_address or "0.0.0.0",
-                            access_type="payment",
-                        )
-                    elif device:
-                        force_immediate_internet_access(
-                            username=user.phone_number,
-                            mac_address=device.mac_address,
-                            ip_address=device.ip_address or "0.0.0.0",
-                            access_type="payment",
-                        )
+                    if device:
+                        payment_router = getattr(payment, "router", None)
+                        if payment_router:
+                            from .mikrotik import authorize_user_on_specific_router
+
+                            authorize_user_on_specific_router(
+                                user=user,
+                                router_id=payment_router.id,
+                                mac_address=device.mac_address,
+                                ip_address=device.ip_address or "0.0.0.0",
+                                access_type="payment",
+                            )
+                        elif user.tenant:
+                            force_immediate_internet_access_on_tenant_routers(
+                                user=user,
+                                mac_address=device.mac_address,
+                                ip_address=device.ip_address or "0.0.0.0",
+                                access_type="payment",
+                            )
+                        else:
+                            force_immediate_internet_access(
+                                username=user.phone_number,
+                                mac_address=device.mac_address,
+                                ip_address=device.ip_address or "0.0.0.0",
+                                access_type="payment",
+                            )
                 except Exception as e:
                     logger.error(f"Auto-login after Snippe status query failed: {e}")
 
@@ -6347,7 +6359,18 @@ def query_payment_status(request, order_reference):
                             .first()
                         )
                         if device:
-                            if user.tenant:
+                            payment_router = getattr(payment, "router", None)
+                            if payment_router:
+                                from .mikrotik import authorize_user_on_specific_router
+
+                                auto_access_result = authorize_user_on_specific_router(
+                                    user=user,
+                                    router_id=payment_router.id,
+                                    mac_address=device.mac_address,
+                                    ip_address=device.ip_address or "0.0.0.0",
+                                    access_type="payment",
+                                )
+                            elif user.tenant:
                                 auto_access_result = (
                                     force_immediate_internet_access_on_tenant_routers(
                                         user=user,
@@ -6460,8 +6483,20 @@ def query_payment_status(request, order_reference):
                             f"Attempting MikroTik auto-login for payment user {user.phone_number} with device {device.mac_address}"
                         )
 
-                        # Use tenant-aware function for multi-tenant SaaS
-                        if user.tenant:
+                        # Use specific router if known from payment
+                        payment_router = getattr(payment, "router", None)
+                        if payment_router:
+                            from .mikrotik import authorize_user_on_specific_router
+
+                            auto_access_result = authorize_user_on_specific_router(
+                                user=user,
+                                router_id=payment_router.id,
+                                mac_address=device.mac_address,
+                                ip_address=device.ip_address or "0.0.0.0",
+                                access_type="payment",
+                            )
+                        elif user.tenant:
+                            # No specific router — fallback to all tenant routers
                             auto_access_result = (
                                 force_immediate_internet_access_on_tenant_routers(
                                     user=user,
@@ -6701,14 +6736,16 @@ def redeem_voucher(request):
     # Priority: 1. Middleware, 2. router_id, 3. tenant param
     # =========================================================================
     tenant = getattr(request, "tenant", None)
+    redemption_router = None  # The specific router the user is connecting from
 
-    # If router_id provided, get tenant from router (captive portal flow)
-    if router_id and not tenant:
+    # If router_id provided, resolve the router object
+    if router_id:
         try:
-            router = Router.objects.get(id=router_id, is_active=True)
-            tenant = router.tenant
+            redemption_router = Router.objects.get(id=router_id, is_active=True)
+            if not tenant:
+                tenant = redemption_router.tenant
             logger.info(
-                f"Voucher redemption: Tenant resolved from router_id {router_id}: {tenant.slug}"
+                f"Voucher redemption: Router resolved from router_id {router_id}: {redemption_router.name} (tenant: {tenant.slug if tenant else 'N/A'})"
             )
         except Router.DoesNotExist:
             logger.warning(f"Voucher redemption: Router {router_id} not found")
@@ -6808,6 +6845,22 @@ def redeem_voucher(request):
             logger.info(
                 f"Voucher {voucher_code} redeemed by {phone_number} - access granted for {voucher.duration_hours} hours"
             )
+
+            # Track which router this voucher was redeemed on
+            if redemption_router:
+                voucher.used_on_router = redemption_router
+                voucher.save(update_fields=["used_on_router"])
+                logger.info(
+                    f"Voucher {voucher_code} marked as used on router {redemption_router.name} (ID={redemption_router.id})"
+                )
+
+                # Set user's primary_router if not already set
+                if not user.primary_router:
+                    user.primary_router = redemption_router
+                    user.save(update_fields=["primary_router"])
+                    logger.info(
+                        f"Set primary_router for {phone_number} to {redemption_router.name} (ID={redemption_router.id})"
+                    )
 
             # Initialize variables that will be used throughout the response
             immediate_login_success = False
@@ -6943,8 +6996,23 @@ def redeem_voucher(request):
                         and device_info.get("device_registered")
                     ):
                         try:
-                            # Use tenant-aware function for multi-tenant SaaS
-                            if user.tenant:
+                            if redemption_router:
+                                # SPECIFIC ROUTER: User connected from a known router
+                                # Only create hotspot user on THAT router, not all tenant routers
+                                from .mikrotik import authorize_user_on_specific_router
+
+                                auto_access_result = authorize_user_on_specific_router(
+                                    user=user,
+                                    router_id=redemption_router.id,
+                                    mac_address=mac_address,
+                                    ip_address=ip_address,
+                                    access_type="voucher",
+                                )
+                                logger.info(
+                                    f"Voucher auto-login: Authorized {phone_number} on specific router {redemption_router.name} (ID={redemption_router.id})"
+                                )
+                            elif user.tenant:
+                                # NO specific router known — fallback to all tenant routers
                                 auto_access_result = (
                                     force_immediate_internet_access_on_tenant_routers(
                                         user=user,
