@@ -517,7 +517,7 @@ def portal_list_vouchers(request):
                 "duration_hours": v.duration_hours,
                 "batch_id": v.batch_id,
                 "is_used": v.is_used,
-                "used_by": v.used_by.phone_number if v.used_by else None,
+                "used_by": v.used_by.phone_number if v.used_by else (v.used_by_phone or None),
                 "used_at": v.used_at.isoformat() if v.used_at else None,
                 "notes": v.notes,
                 "created_at": v.created_at.isoformat(),

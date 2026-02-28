@@ -1948,6 +1948,8 @@ class Voucher(models.Model):
         blank=True,
         related_name="vouchers_used",
     )
+    # Persist phone number so it survives user deletion (SET_NULL)
+    used_by_phone = models.CharField(max_length=20, blank=True, default="")
     batch_id = models.CharField(max_length=50, blank=True, db_index=True)
     notes = models.TextField(blank=True)
 
@@ -1980,6 +1982,7 @@ class Voucher(models.Model):
         self.is_used = True
         self.used_at = timezone.now()
         self.used_by = user
+        self.used_by_phone = user.phone_number  # Persist phone even if user deleted
         self.save()
 
         # Extend user access, specify source as voucher
