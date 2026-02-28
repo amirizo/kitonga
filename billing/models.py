@@ -997,6 +997,12 @@ class RemoteUser(models.Model):
         null=True, blank=True, help_text="Last WireGuard handshake time from router"
     )
 
+    # Expiry notification tracking
+    expiry_notification_sent = models.BooleanField(
+        default=False,
+        help_text="Whether the 5-min-before-expiry SMS has been sent for current period",
+    )
+
     # Audit
     created_by = models.ForeignKey(
         DjangoUser,
@@ -1147,6 +1153,7 @@ class RemoteAccessPlan(models.Model):
     """
 
     BILLING_CYCLE_CHOICES = [
+        ("minutes", "Minutes"),
         ("hourly", "Hourly"),
         ("daily", "Daily"),
         ("weekly", "Weekly"),
@@ -1154,7 +1161,7 @@ class RemoteAccessPlan(models.Model):
         ("quarterly", "Quarterly (3 months)"),
         ("biannual", "Bi-Annual (6 months)"),
         ("annual", "Annual (12 months)"),
-        ("custom", "Custom Days/Hours"),
+        ("custom", "Custom Duration"),
         ("unlimited", "Unlimited (No Expiry)"),
     ]
 
@@ -1169,6 +1176,10 @@ class RemoteAccessPlan(models.Model):
 
     CYCLE_HOURS_MAP = {
         "hourly": 1,
+    }
+
+    CYCLE_MINUTES_MAP = {
+        "minutes": 15,
     }
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -1221,6 +1232,10 @@ class RemoteAccessPlan(models.Model):
     billing_hours = models.IntegerField(
         default=0,
         help_text="Duration in hours (for hourly plans). 0 means use billing_days instead.",
+    )
+    billing_minutes = models.IntegerField(
+        default=0,
+        help_text="Duration in minutes (for minute-based plans, e.g. 15, 30, 45). 0 means use hours/days.",
     )
 
     # Bandwidth limits (kbps, 0 = unlimited)
@@ -1302,22 +1317,31 @@ class RemoteAccessPlan(models.Model):
         return f"{self.tenant.business_name} — {self.name} (TSh {self.price:,.0f}/{self.billing_cycle})"
 
     def save(self, *args, **kwargs):
-        # Auto-set billing_days/billing_hours from cycle
-        if self.billing_cycle == "hourly":
+        # Auto-set billing_days/billing_hours/billing_minutes from cycle
+        if self.billing_cycle == "minutes":
+            # Minutes plan: use billing_minutes (default 15 if not set)
+            if not self.billing_minutes or self.billing_minutes < 1:
+                self.billing_minutes = self.CYCLE_MINUTES_MAP.get("minutes", 15)
+            self.billing_days = 0
+            self.billing_hours = 0
+        elif self.billing_cycle == "hourly":
             # Hourly plan: use billing_hours (default 1 if not set)
             if not self.billing_hours or self.billing_hours < 1:
                 self.billing_hours = self.CYCLE_HOURS_MAP.get("hourly", 1)
-            self.billing_days = 0  # hours-based, not days
+            self.billing_days = 0
+            self.billing_minutes = 0
         elif self.billing_cycle == "unlimited":
             self.billing_days = 0
             self.billing_hours = 0
+            self.billing_minutes = 0
         elif (
             self.billing_cycle not in ("custom",)
             and self.billing_cycle in self.CYCLE_DAYS_MAP
         ):
             self.billing_days = self.CYCLE_DAYS_MAP[self.billing_cycle]
-            self.billing_hours = 0  # days-based plan
-        # For "custom" cycle: keep whatever billing_days/billing_hours the user set
+            self.billing_hours = 0
+            self.billing_minutes = 0
+        # For "custom" cycle: keep whatever billing_days/billing_hours/billing_minutes the user set
         super().save(*args, **kwargs)
 
     @property
@@ -1330,11 +1354,31 @@ class RemoteAccessPlan(models.Model):
     @property
     def is_hourly_plan(self):
         """True if this plan uses hours instead of days."""
-        return self.billing_hours and self.billing_hours > 0
+        return (self.billing_hours and self.billing_hours > 0) and not (
+            self.billing_minutes and self.billing_minutes > 0
+        )
+
+    @property
+    def is_minutes_plan(self):
+        """True if this plan uses minutes."""
+        return self.billing_minutes and self.billing_minutes > 0
+
+    @property
+    def total_duration_minutes(self):
+        """Total duration in minutes for any plan type."""
+        if self.billing_minutes and self.billing_minutes > 0:
+            return self.billing_minutes
+        if self.billing_hours and self.billing_hours > 0:
+            return self.billing_hours * 60
+        if self.billing_days and self.billing_days > 0:
+            return self.billing_days * 24 * 60
+        return 0  # unlimited
 
     @property
     def total_duration_hours(self):
         """Total duration in hours for any plan type."""
+        if self.billing_minutes and self.billing_minutes > 0:
+            return self.billing_minutes / 60
         if self.billing_hours and self.billing_hours > 0:
             return self.billing_hours
         if self.billing_days and self.billing_days > 0:
@@ -1344,6 +1388,8 @@ class RemoteAccessPlan(models.Model):
     @property
     def price_per_day(self):
         """Calculate the per-day cost for comparison."""
+        if self.billing_minutes and self.billing_minutes > 0:
+            return (self.effective_price / self.billing_minutes) * 24 * 60
         if self.billing_hours and self.billing_hours > 0:
             return (self.effective_price / self.billing_hours) * 24
         if self.billing_days and self.billing_days > 0:
@@ -1353,10 +1399,20 @@ class RemoteAccessPlan(models.Model):
     @property
     def price_per_hour(self):
         """Calculate the per-hour cost."""
+        if self.billing_minutes and self.billing_minutes > 0:
+            return (self.effective_price / self.billing_minutes) * 60
         if self.billing_hours and self.billing_hours > 0:
             return self.effective_price / self.billing_hours
         if self.billing_days and self.billing_days > 0:
             return self.effective_price / (self.billing_days * 24)
+        return self.effective_price
+
+    @property
+    def price_per_minute(self):
+        """Calculate the per-minute cost."""
+        total_mins = self.total_duration_minutes
+        if total_mins > 0:
+            return self.effective_price / total_mins
         return self.effective_price
 
     @property
@@ -1380,6 +1436,17 @@ class RemoteAccessPlan(models.Model):
         """Human-readable duration string."""
         if self.billing_cycle == "unlimited":
             return "Unlimited"
+        # Minute-based plans
+        if self.billing_minutes and self.billing_minutes > 0:
+            if self.billing_minutes < 60:
+                return f"{self.billing_minutes} min"
+            hours = self.billing_minutes // 60
+            remaining_mins = self.billing_minutes % 60
+            if remaining_mins == 0:
+                if hours == 1:
+                    return "1 hour"
+                return f"{hours} hours"
+            return f"{hours}h {remaining_mins}min"
         # Hourly plans
         if self.billing_hours and self.billing_hours > 0:
             if self.billing_hours == 1:
@@ -1459,6 +1526,10 @@ class RemoteAccessPayment(models.Model):
         default=0,
         help_text="Number of hours this payment grants (for hourly plans, 0 = use billing_days)",
     )
+    billing_minutes = models.IntegerField(
+        default=0,
+        help_text="Number of minutes this payment grants (for minute plans, 0 = use hours/days)",
+    )
 
     # References
     order_reference = models.CharField(
@@ -1524,7 +1595,7 @@ class RemoteAccessPayment(models.Model):
     def mark_completed(self):
         """
         Mark payment as completed and extend the remote user's access.
-        Supports both day-based and hour-based plans.
+        Supports day-based, hour-based, and minute-based plans.
         """
         if self.status == "completed":
             return  # Already processed
@@ -1537,7 +1608,14 @@ class RemoteAccessPayment(models.Model):
         remote_user = self.remote_user
         now = timezone.now()
 
-        if self.billing_hours and self.billing_hours > 0:
+        if self.billing_minutes and self.billing_minutes > 0:
+            # Minute-based plan
+            duration = timedelta(minutes=self.billing_minutes)
+            if remote_user.expires_at and remote_user.expires_at > now:
+                remote_user.expires_at = remote_user.expires_at + duration
+            else:
+                remote_user.expires_at = now + duration
+        elif self.billing_hours and self.billing_hours > 0:
             # Hour-based plan
             duration = timedelta(hours=self.billing_hours)
             if remote_user.expires_at and remote_user.expires_at > now:
@@ -1562,11 +1640,13 @@ class RemoteAccessPayment(models.Model):
 
         remote_user.status = "active"
         remote_user.is_active = True
+        remote_user.expiry_notification_sent = False  # Reset so new period gets notified
         remote_user.save(
             update_fields=[
                 "expires_at",
                 "status",
                 "is_active",
+                "expiry_notification_sent",
                 "bandwidth_limit_down",
                 "bandwidth_limit_up",
                 "updated_at",

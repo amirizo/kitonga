@@ -743,11 +743,12 @@ def disconnect_expired_remote_users():
 def send_remote_user_expiry_notifications():
     """
     Send notifications to remote users whose VPN access is about to expire.
-    Runs hourly via cron.
+    Should run every 2-3 minutes via cron (for short-duration plans).
 
     Notifications sent at:
-    - 24 hours before expiry
-    - 3 hours before expiry
+    - 24 hours before expiry  (for day/week/month plans)
+    - 3 hours before expiry   (for day/week/month plans)
+    - 5 minutes before expiry (for ALL plans, especially hourly/minute plans)
     """
     try:
         from datetime import timedelta
@@ -757,7 +758,35 @@ def send_remote_user_expiry_notifications():
         notified_count = 0
         failed_count = 0
 
-        # 24-hour warning window (±30 min to avoid duplicates)
+        # ── 5-minute warning (for ALL KTN users) ───────────────────
+        # Uses expiry_notification_sent flag to avoid duplicates
+        window_5m_start = now + timedelta(seconds=30)
+        window_5m_end = now + timedelta(minutes=5, seconds=30)
+
+        users_5m = RemoteUser.objects.filter(
+            status="active",
+            is_active=True,
+            expiry_notification_sent=False,
+            expires_at__gte=window_5m_start,
+            expires_at__lte=window_5m_end,
+        ).select_related("tenant", "plan")
+
+        logger.info(
+            f"📢 KTN: Found {users_5m.count()} remote users expiring in ~5 minutes"
+        )
+
+        for user in users_5m:
+            try:
+                _send_vpn_expiry_notification(user, minutes_remaining=5)
+                # Mark as notified so we don't send again this period
+                user.expiry_notification_sent = True
+                user.save(update_fields=["expiry_notification_sent", "updated_at"])
+                notified_count += 1
+            except Exception as e:
+                failed_count += 1
+                logger.error(f"KTN 5-min expiry notification error for {user.name}: {e}")
+
+        # ── 24-hour warning window (±30 min to avoid duplicates) ────
         window_24h_start = now + timedelta(hours=23, minutes=30)
         window_24h_end = now + timedelta(hours=24, minutes=30)
 
@@ -778,7 +807,7 @@ def send_remote_user_expiry_notifications():
                 failed_count += 1
                 logger.error(f"VPN expiry notification error for {user.name}: {e}")
 
-        # 3-hour warning window
+        # ── 3-hour warning window ──────────────────────────────────
         window_3h_start = now + timedelta(hours=2, minutes=30)
         window_3h_end = now + timedelta(hours=3, minutes=30)
 
@@ -814,10 +843,15 @@ def send_remote_user_expiry_notifications():
         return {"success": False, "error": str(e)}
 
 
-def _send_vpn_expiry_notification(remote_user, hours_remaining=24):
+def _send_vpn_expiry_notification(remote_user, hours_remaining=None, minutes_remaining=None):
     """
-    Send an SMS or email notification to a remote user about upcoming expiry.
+    Send an SMS notification to a remote user about upcoming VPN expiry.
     Uses the tenant's NextSMS configuration.
+
+    Args:
+        remote_user: RemoteUser instance
+        hours_remaining: hours until expiry (for 24h / 3h warnings)
+        minutes_remaining: minutes until expiry (for 5-min warning)
     """
     from .models import RemoteAccessLog
 
@@ -829,22 +863,40 @@ def _send_vpn_expiry_notification(remote_user, hours_remaining=24):
             from .nextsms import NextSMSAPI
 
             sms_api = NextSMSAPI(tenant=tenant)
-            message = (
-                f"{tenant.business_name} VPN: Your remote access expires in "
-                f"{hours_remaining} hours. Contact your provider to renew."
-            )
+
+            # Build the time-remaining text
+            if minutes_remaining:
+                time_text = f"{minutes_remaining} minutes"
+                plan_name = remote_user.plan.name if remote_user.plan else "VPN"
+                message = (
+                    f"{tenant.business_name}: Your {plan_name} access expires in "
+                    f"{time_text}. Renew now to stay connected!"
+                )
+            else:
+                time_text = f"{hours_remaining} hours"
+                message = (
+                    f"{tenant.business_name} VPN: Your remote access expires in "
+                    f"{time_text}. Contact your provider to renew."
+                )
+
             result = sms_api.send_sms(remote_user.phone, message)
             if result.get("success"):
-                logger.info(f"📱 VPN expiry SMS sent to {remote_user.phone}")
+                logger.info(
+                    f"📱 KTN expiry SMS sent to {remote_user.phone} "
+                    f"({time_text} warning)"
+                )
         except Exception as e:
             logger.debug(f"VPN expiry SMS failed for {remote_user.name}: {e}")
 
     # Log the notification
+    warning_text = (
+        f"{minutes_remaining}min" if minutes_remaining else f"{hours_remaining}h"
+    )
     RemoteAccessLog.objects.create(
         tenant=tenant,
         remote_user=remote_user,
         event_type="expired",
-        event_details=f"Expiry notification sent ({hours_remaining}h warning)",
+        event_details=f"Expiry notification sent ({warning_text} warning)",
     )
 
 

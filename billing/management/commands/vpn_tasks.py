@@ -3,9 +3,13 @@ Django management command for VPN (Remote Access) tasks.
 
 Usage:
     python manage.py vpn_tasks --expire       # Disable expired remote users
-    python manage.py vpn_tasks --notify       # Send expiry notifications
+    python manage.py vpn_tasks --notify       # Send expiry notifications (5min, 3h, 24h)
     python manage.py vpn_tasks --health       # Health check VPN interfaces
     python manage.py vpn_tasks --all          # Run all tasks
+
+Cron schedule (recommended):
+    */2 * * * *  ... vpn_tasks --expire --notify   # Every 2 min for short plans
+    */15 * * * * ... vpn_tasks --health             # Every 15 min
 """
 
 from django.core.management.base import BaseCommand
@@ -23,7 +27,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--notify",
             action="store_true",
-            help="Send SMS/email expiry warnings (24h and 3h before)",
+            help="Send SMS/email expiry warnings (5min, 3h, and 24h before)",
         )
         parser.add_argument(
             "--health",

@@ -1625,6 +1625,7 @@ class RemoteAccessPlanSerializer(serializers.Serializer):
     billing_cycle = serializers.CharField(read_only=True)
     billing_days = serializers.IntegerField(read_only=True)
     billing_hours = serializers.IntegerField(read_only=True)
+    billing_minutes = serializers.IntegerField(read_only=True)
     bandwidth_limit_down = serializers.IntegerField(read_only=True)
     bandwidth_limit_up = serializers.IntegerField(read_only=True)
     download_speed = serializers.CharField(read_only=True)
@@ -1645,11 +1646,16 @@ class RemoteAccessPlanSerializer(serializers.Serializer):
         max_digits=12, decimal_places=2, read_only=True
     )
     is_hourly_plan = serializers.BooleanField(read_only=True)
+    is_minutes_plan = serializers.BooleanField(read_only=True)
+    total_duration_minutes = serializers.IntegerField(read_only=True)
     total_duration_hours = serializers.IntegerField(read_only=True)
     price_per_day = serializers.DecimalField(
         max_digits=12, decimal_places=2, read_only=True
     )
     price_per_hour = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+    price_per_minute = serializers.DecimalField(
         max_digits=12, decimal_places=2, read_only=True
     )
     speed_display = serializers.CharField(read_only=True)
@@ -1674,6 +1680,7 @@ class RemoteAccessPlanCreateSerializer(serializers.Serializer):
     promo_label = serializers.CharField(max_length=50, required=False, default="")
     billing_cycle = serializers.ChoiceField(
         choices=[
+            "minutes",
             "hourly",
             "daily",
             "weekly",
@@ -1688,8 +1695,14 @@ class RemoteAccessPlanCreateSerializer(serializers.Serializer):
     )
     billing_days = serializers.IntegerField(required=False, default=30)
     billing_hours = serializers.IntegerField(
-        required=False, default=0,
+        required=False,
+        default=0,
         help_text="Duration in hours (for hourly/custom plans). E.g. 1, 3, 6, 12, 48.",
+    )
+    billing_minutes = serializers.IntegerField(
+        required=False,
+        default=0,
+        help_text="Duration in minutes (for minute plans). E.g. 15, 30, 45.",
     )
     bandwidth_limit_down = serializers.IntegerField(required=False, default=0)
     bandwidth_limit_up = serializers.IntegerField(required=False, default=0)
@@ -1709,12 +1722,21 @@ class RemoteAccessPlanCreateSerializer(serializers.Serializer):
     is_active = serializers.BooleanField(required=False, default=True)
 
     def validate(self, data):
-        """Validate hourly plans have billing_hours set."""
+        """Validate hourly/minute plans have correct fields set."""
         billing_cycle = data.get("billing_cycle", "monthly")
         billing_hours = data.get("billing_hours", 0)
+        billing_minutes = data.get("billing_minutes", 0)
         if billing_cycle == "hourly" and (not billing_hours or billing_hours < 1):
             raise serializers.ValidationError(
-                {"billing_hours": "billing_hours is required and must be >= 1 for hourly plans."}
+                {
+                    "billing_hours": "billing_hours is required and must be >= 1 for hourly plans."
+                }
+            )
+        if billing_cycle == "minutes" and (not billing_minutes or billing_minutes < 1):
+            raise serializers.ValidationError(
+                {
+                    "billing_minutes": "billing_minutes is required and must be >= 1 for minute plans."
+                }
             )
         return data
 
@@ -1834,6 +1856,11 @@ class RemoteUserPaymentInitiateSerializer(serializers.Serializer):
         required=False,
         default=0,
         help_text="Override billing hours (for hourly plans). 0 = use plan default.",
+    )
+    billing_minutes = serializers.IntegerField(
+        required=False,
+        default=0,
+        help_text="Override billing minutes (for minute plans). 0 = use plan default.",
     )
     phone_number = serializers.CharField(
         max_length=15,

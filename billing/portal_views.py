@@ -9018,12 +9018,13 @@ def portal_remote_plans(request):
     )
 
 
-@api_view(["GET", "PUT", "DELETE"])
+@api_view(["GET", "PUT", "PATCH", "DELETE"])
 @permission_classes([TenantAPIKeyPermission])
 def portal_remote_plan_detail(request, plan_id):
     """
     GET    — Get plan details.
-    PUT    — Update a plan.
+    PUT    — Full update of a plan (all fields).
+    PATCH  — Partial update of a plan (only provided fields).
     DELETE — Deactivate (soft-delete) a plan.
 
     Endpoint: /api/portal/vpn/plans/<plan_id>/
@@ -9054,7 +9055,7 @@ def portal_remote_plan_detail(request, plan_id):
         plan.save(update_fields=["is_active", "updated_at"])
         return Response({"success": True, "message": f"Plan '{plan.name}' deactivated"})
 
-    # PUT
+    # PUT or PATCH — both use partial=True so you can send only the fields you want
     serializer = RemoteAccessPlanCreateSerializer(data=request.data, partial=True)
     if not serializer.is_valid():
         return Response(
@@ -9569,14 +9570,28 @@ def portal_remote_user_pay(request, user_id):
     import math
 
     # Determine billing duration and amount
+    billing_minutes = data.get("billing_minutes", 0) or 0
     billing_hours = data.get("billing_hours", 0) or 0
     billing_days = data.get("billing_days", 0) or 0
 
-    if plan.is_hourly_plan:
+    if plan.is_minutes_plan:
+        # Minute-based plan
+        if billing_minutes < 1:
+            billing_minutes = plan.billing_minutes or 15
+        billing_hours = 0
+        billing_days = 0
+
+        if billing_minutes == plan.billing_minutes:
+            amount = int(plan.effective_price)
+        else:
+            minute_rate = plan.effective_price / max(plan.billing_minutes, 1)
+            amount = math.ceil(minute_rate * billing_minutes)
+    elif plan.is_hourly_plan:
         # Hour-based plan
         if billing_hours < 1:
             billing_hours = plan.billing_hours or 1
-        billing_days = 0  # not used for hourly plans
+        billing_minutes = 0
+        billing_days = 0
 
         if billing_hours == plan.billing_hours:
             amount = int(plan.effective_price)
@@ -9585,7 +9600,8 @@ def portal_remote_user_pay(request, user_id):
             amount = math.ceil(hourly_rate * billing_hours)
     else:
         # Day-based plan
-        billing_hours = 0  # not used for day plans
+        billing_minutes = 0
+        billing_hours = 0
         if billing_days < 1:
             billing_days = plan.billing_days or 30
 
@@ -9596,7 +9612,9 @@ def portal_remote_user_pay(request, user_id):
             amount = math.ceil(daily_rate * billing_days)
 
     # Duration description for logs/messages
-    if billing_hours > 0:
+    if billing_minutes > 0:
+        duration_desc = f"{billing_minutes} min"
+    elif billing_hours > 0:
         duration_desc = f"{billing_hours} hour{'s' if billing_hours != 1 else ''}"
     else:
         duration_desc = f"{billing_days} day{'s' if billing_days != 1 else ''}"
@@ -9621,6 +9639,7 @@ def portal_remote_user_pay(request, user_id):
         amount=amount,
         billing_days=billing_days,
         billing_hours=billing_hours,
+        billing_minutes=billing_minutes,
         phone_number=phone,
         payment_channel="snippe",
         status="pending",
@@ -9678,6 +9697,7 @@ def portal_remote_user_pay(request, user_id):
                     "amount": str(amount),
                     "billing_days": billing_days,
                     "billing_hours": billing_hours,
+                    "billing_minutes": billing_minutes,
                     "duration": duration_desc,
                     "plan_name": plan.name,
                     "status": "pending",
