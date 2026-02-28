@@ -2781,7 +2781,7 @@ def portal_users(request):
             {
                 "id": u.id,
                 "phone_number": u.phone_number,
-                "name": u.name or "",
+                "name": u.name or tenant.business_name,
                 "email": u.email or "",
                 "is_active": u.is_active,
                 "has_access": u.has_active_access(),
