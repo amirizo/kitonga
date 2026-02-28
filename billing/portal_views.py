@@ -517,7 +517,9 @@ def portal_list_vouchers(request):
                 "duration_hours": v.duration_hours,
                 "batch_id": v.batch_id,
                 "is_used": v.is_used,
-                "used_by": v.used_by.phone_number if v.used_by else (v.used_by_phone or None),
+                "used_by": (
+                    v.used_by.phone_number if v.used_by else (v.used_by_phone or None)
+                ),
                 "used_at": v.used_at.isoformat() if v.used_at else None,
                 "notes": v.notes,
                 "created_at": v.created_at.isoformat(),
@@ -9564,17 +9566,40 @@ def portal_remote_user_pay(request, user_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    billing_days = data.get("billing_days") or plan.billing_days
-    if billing_days < 1:
-        billing_days = plan.billing_days or 30
-
     import math
 
-    if billing_days == plan.billing_days:
-        amount = int(plan.effective_price)
+    # Determine billing duration and amount
+    billing_hours = data.get("billing_hours", 0) or 0
+    billing_days = data.get("billing_days", 0) or 0
+
+    if plan.is_hourly_plan:
+        # Hour-based plan
+        if billing_hours < 1:
+            billing_hours = plan.billing_hours or 1
+        billing_days = 0  # not used for hourly plans
+
+        if billing_hours == plan.billing_hours:
+            amount = int(plan.effective_price)
+        else:
+            hourly_rate = plan.effective_price / max(plan.billing_hours, 1)
+            amount = math.ceil(hourly_rate * billing_hours)
     else:
-        daily_rate = plan.effective_price / max(plan.billing_days, 1)
-        amount = math.ceil(daily_rate * billing_days)
+        # Day-based plan
+        billing_hours = 0  # not used for day plans
+        if billing_days < 1:
+            billing_days = plan.billing_days or 30
+
+        if billing_days == plan.billing_days:
+            amount = int(plan.effective_price)
+        else:
+            daily_rate = plan.effective_price / max(plan.billing_days, 1)
+            amount = math.ceil(daily_rate * billing_days)
+
+    # Duration description for logs/messages
+    if billing_hours > 0:
+        duration_desc = f"{billing_hours} hour{'s' if billing_hours != 1 else ''}"
+    else:
+        duration_desc = f"{billing_days} day{'s' if billing_days != 1 else ''}"
 
     phone = data.get("phone_number") or remote_user.phone
     if not phone:
@@ -9595,6 +9620,7 @@ def portal_remote_user_pay(request, user_id):
         plan=plan,
         amount=amount,
         billing_days=billing_days,
+        billing_hours=billing_hours,
         phone_number=phone,
         payment_channel="snippe",
         status="pending",
@@ -9602,7 +9628,7 @@ def portal_remote_user_pay(request, user_id):
 
     logger.info(
         f"VPN payment initiated: ref={payment.order_reference} user={remote_user.name} "
-        f"amount={amount} days={billing_days} tenant={tenant.slug}"
+        f"amount={amount} duration={duration_desc} tenant={tenant.slug}"
     )
 
     # Initiate Snippe payment
@@ -9644,13 +9670,15 @@ def portal_remote_user_pay(request, user_id):
         return Response(
             {
                 "success": True,
-                "message": f"Payment request of TSh {amount:,} sent to {phone}",
+                "message": f"Payment request of TSh {amount:,} sent to {phone} for {duration_desc}",
                 "payment": {
                     "id": str(payment.id),
                     "order_reference": payment.order_reference,
                     "snippe_reference": snippe_ref,
                     "amount": str(amount),
                     "billing_days": billing_days,
+                    "billing_hours": billing_hours,
+                    "duration": duration_desc,
                     "plan_name": plan.name,
                     "status": "pending",
                     "phone_number": phone,

@@ -254,7 +254,9 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
                             result["binding_removed"] = True
                             logger.info(f"Removed IP binding for {mac_address}")
                     except Exception as rem_err:
-                        logger.warning(f"Failed to remove binding for {mac_address}: {rem_err}")
+                        logger.warning(
+                            f"Failed to remove binding for {mac_address}: {rem_err}"
+                        )
 
             all_bindings = bindings.get()
             for binding in all_bindings:
@@ -267,7 +269,9 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
                             result["binding_removed"] = True
                             logger.info(f"Removed IP binding by comment for {username}")
                     except Exception as rem_err:
-                        logger.warning(f"Failed to remove binding by comment for {username}: {rem_err}")
+                        logger.warning(
+                            f"Failed to remove binding by comment for {username}: {rem_err}"
+                        )
 
         except Exception as e:
             result["errors"].append(f"ip_bindings: {e}")

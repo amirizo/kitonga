@@ -1147,13 +1147,14 @@ class RemoteAccessPlan(models.Model):
     """
 
     BILLING_CYCLE_CHOICES = [
+        ("hourly", "Hourly"),
         ("daily", "Daily"),
         ("weekly", "Weekly"),
         ("monthly", "Monthly"),
         ("quarterly", "Quarterly (3 months)"),
         ("biannual", "Bi-Annual (6 months)"),
         ("annual", "Annual (12 months)"),
-        ("custom", "Custom Days"),
+        ("custom", "Custom Days/Hours"),
         ("unlimited", "Unlimited (No Expiry)"),
     ]
 
@@ -1164,6 +1165,10 @@ class RemoteAccessPlan(models.Model):
         "quarterly": 90,
         "biannual": 180,
         "annual": 365,
+    }
+
+    CYCLE_HOURS_MAP = {
+        "hourly": 1,
     }
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -1211,7 +1216,11 @@ class RemoteAccessPlan(models.Model):
     )
     billing_days = models.IntegerField(
         default=30,
-        help_text="Duration in days this plan grants. Auto-set from billing_cycle unless custom.",
+        help_text="Duration in days this plan grants. Auto-set from billing_cycle unless custom/hourly.",
+    )
+    billing_hours = models.IntegerField(
+        default=0,
+        help_text="Duration in hours (for hourly plans). 0 means use billing_days instead.",
     )
 
     # Bandwidth limits (kbps, 0 = unlimited)
@@ -1293,14 +1302,22 @@ class RemoteAccessPlan(models.Model):
         return f"{self.tenant.business_name} — {self.name} (TSh {self.price:,.0f}/{self.billing_cycle})"
 
     def save(self, *args, **kwargs):
-        # Auto-set billing_days from cycle if not custom/unlimited
-        if (
-            self.billing_cycle not in ("custom", "unlimited")
+        # Auto-set billing_days/billing_hours from cycle
+        if self.billing_cycle == "hourly":
+            # Hourly plan: use billing_hours (default 1 if not set)
+            if not self.billing_hours or self.billing_hours < 1:
+                self.billing_hours = self.CYCLE_HOURS_MAP.get("hourly", 1)
+            self.billing_days = 0  # hours-based, not days
+        elif self.billing_cycle == "unlimited":
+            self.billing_days = 0
+            self.billing_hours = 0
+        elif (
+            self.billing_cycle not in ("custom",)
             and self.billing_cycle in self.CYCLE_DAYS_MAP
         ):
             self.billing_days = self.CYCLE_DAYS_MAP[self.billing_cycle]
-        elif self.billing_cycle == "unlimited":
-            self.billing_days = 0  # 0 means no expiry
+            self.billing_hours = 0  # days-based plan
+        # For "custom" cycle: keep whatever billing_days/billing_hours the user set
         super().save(*args, **kwargs)
 
     @property
@@ -1311,10 +1328,35 @@ class RemoteAccessPlan(models.Model):
         return self.price
 
     @property
+    def is_hourly_plan(self):
+        """True if this plan uses hours instead of days."""
+        return self.billing_hours and self.billing_hours > 0
+
+    @property
+    def total_duration_hours(self):
+        """Total duration in hours for any plan type."""
+        if self.billing_hours and self.billing_hours > 0:
+            return self.billing_hours
+        if self.billing_days and self.billing_days > 0:
+            return self.billing_days * 24
+        return 0  # unlimited
+
+    @property
     def price_per_day(self):
         """Calculate the per-day cost for comparison."""
+        if self.billing_hours and self.billing_hours > 0:
+            return (self.effective_price / self.billing_hours) * 24
         if self.billing_days and self.billing_days > 0:
             return self.effective_price / self.billing_days
+        return self.effective_price
+
+    @property
+    def price_per_hour(self):
+        """Calculate the per-hour cost."""
+        if self.billing_hours and self.billing_hours > 0:
+            return self.effective_price / self.billing_hours
+        if self.billing_days and self.billing_days > 0:
+            return self.effective_price / (self.billing_days * 24)
         return self.effective_price
 
     @property
@@ -1338,6 +1380,19 @@ class RemoteAccessPlan(models.Model):
         """Human-readable duration string."""
         if self.billing_cycle == "unlimited":
             return "Unlimited"
+        # Hourly plans
+        if self.billing_hours and self.billing_hours > 0:
+            if self.billing_hours == 1:
+                return "1 hour"
+            if self.billing_hours < 24:
+                return f"{self.billing_hours} hours"
+            # 24+ hours: show as days + hours
+            days = self.billing_hours // 24
+            remaining_hours = self.billing_hours % 24
+            if remaining_hours == 0:
+                return f"{days} day{'s' if days > 1 else ''}"
+            return f"{days}d {remaining_hours}h"
+        # Days-based plans
         if self.billing_days >= 365:
             years = self.billing_days // 365
             return f"{years} year{'s' if years > 1 else ''}"
@@ -1398,7 +1453,11 @@ class RemoteAccessPayment(models.Model):
     currency = models.CharField(max_length=3, default="TZS")
     billing_days = models.IntegerField(
         default=30,
-        help_text="Number of days this payment grants",
+        help_text="Number of days this payment grants (0 if hourly plan)",
+    )
+    billing_hours = models.IntegerField(
+        default=0,
+        help_text="Number of hours this payment grants (for hourly plans, 0 = use billing_days)",
     )
 
     # References
@@ -1465,6 +1524,7 @@ class RemoteAccessPayment(models.Model):
     def mark_completed(self):
         """
         Mark payment as completed and extend the remote user's access.
+        Supports both day-based and hour-based plans.
         """
         if self.status == "completed":
             return  # Already processed
@@ -1477,15 +1537,20 @@ class RemoteAccessPayment(models.Model):
         remote_user = self.remote_user
         now = timezone.now()
 
-        if self.billing_days > 0:
+        if self.billing_hours and self.billing_hours > 0:
+            # Hour-based plan
+            duration = timedelta(hours=self.billing_hours)
             if remote_user.expires_at and remote_user.expires_at > now:
-                # Still has time — extend from current expiry
-                remote_user.expires_at = remote_user.expires_at + timedelta(
-                    days=self.billing_days
-                )
+                remote_user.expires_at = remote_user.expires_at + duration
             else:
-                # Expired or new — start from now
-                remote_user.expires_at = now + timedelta(days=self.billing_days)
+                remote_user.expires_at = now + duration
+        elif self.billing_days > 0:
+            # Day-based plan
+            duration = timedelta(days=self.billing_days)
+            if remote_user.expires_at and remote_user.expires_at > now:
+                remote_user.expires_at = remote_user.expires_at + duration
+            else:
+                remote_user.expires_at = now + duration
         else:
             # Unlimited plan — set no expiry
             remote_user.expires_at = None

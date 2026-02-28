@@ -6837,7 +6837,9 @@ def redeem_voucher(request):
                             voucher.used_at.isoformat() if voucher.used_at else None
                         ),
                         "used_by": (
-                            voucher.used_by.phone_number if voucher.used_by else (voucher.used_by_phone or None)
+                            voucher.used_by.phone_number
+                            if voucher.used_by
+                            else (voucher.used_by_phone or None)
                         ),
                     },
                 },
@@ -7366,7 +7368,11 @@ def list_vouchers(request):
             "duration_hours": voucher.duration_hours,
             "bundle": voucher.bundle.name if voucher.bundle else None,
             "is_used": voucher.is_used,
-            "used_by": voucher.used_by.phone_number if voucher.used_by else (voucher.used_by_phone or None),
+            "used_by": (
+                voucher.used_by.phone_number
+                if voucher.used_by
+                else (voucher.used_by_phone or None)
+            ),
             "used_at": voucher.used_at.isoformat() if voucher.used_at else None,
             "batch_id": voucher.batch_id,
             "created_at": (
