@@ -5475,6 +5475,13 @@ def snippe_initiate_payment(request):
             if router.tenant and not user.tenant:
                 user.tenant = router.tenant
                 user.save(update_fields=["tenant"])
+            # Pin user to this router if not already pinned
+            if not user.primary_router:
+                user.primary_router = router
+                user.save(update_fields=["primary_router"])
+                logger.info(
+                    f"Snippe: Pinned user {phone_number} to router {router.name} (ID={router.id})"
+                )
         except Router.DoesNotExist:
             pass
 
@@ -6353,13 +6360,22 @@ def query_payment_status(request, order_reference):
                     # Auto-connect logic (same as ClickPesa path)
                     try:
                         user = payment.user
+                        payment_router = getattr(payment, "router", None)
+
+                        # Set user's primary_router if not already set
+                        if payment_router and not user.primary_router:
+                            user.primary_router = payment_router
+                            user.save(update_fields=["primary_router"])
+                            logger.info(
+                                f"Set primary_router for {user.phone_number} to {payment_router.name} (ID={payment_router.id}) via Snippe status poll"
+                            )
+
                         device = (
                             user.devices.filter(is_active=True)
                             .order_by("-last_seen")
                             .first()
                         )
                         if device:
-                            payment_router = getattr(payment, "router", None)
                             if payment_router:
                                 from .mikrotik import authorize_user_on_specific_router
 
@@ -6472,6 +6488,16 @@ def query_payment_status(request, order_reference):
                 # Get user's most recent active device for auto-login
                 try:
                     user = payment.user
+                    payment_router = getattr(payment, "router", None)
+
+                    # Set user's primary_router if not already set
+                    if payment_router and not user.primary_router:
+                        user.primary_router = payment_router
+                        user.save(update_fields=["primary_router"])
+                        logger.info(
+                            f"Set primary_router for {user.phone_number} to {payment_router.name} (ID={payment_router.id}) via ClickPesa status poll"
+                        )
+
                     device = (
                         user.devices.filter(is_active=True)
                         .order_by("-last_seen")
@@ -6484,7 +6510,6 @@ def query_payment_status(request, order_reference):
                         )
 
                         # Use specific router if known from payment
-                        payment_router = getattr(payment, "router", None)
                         if payment_router:
                             from .mikrotik import authorize_user_on_specific_router
 

@@ -888,9 +888,7 @@ class TenantVPNConfig(models.Model):
 
         network = ipaddress.ip_network(self.address_pool, strict=False)
         # Include ALL statuses — the unique constraint doesn't care about status
-        used_ips = set(
-            self.remote_users.values_list("assigned_ip", flat=True)
-        )
+        used_ips = set(self.remote_users.values_list("assigned_ip", flat=True))
         used_ips.add(str(self.server_address))
 
         # Skip network address and broadcast

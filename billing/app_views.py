@@ -894,15 +894,12 @@ def app_initiate_payment(request):
 
     if not remote_user:
         # Check if there's a revoked user with the same email/phone — recycle it
-        revoked_user = (
-            RemoteUser.objects.filter(
-                Q(email=user.email) | Q(phone=phone_number if phone_number else None),
-                tenant=tenant,
-                vpn_config=vpn_config,
-                status="revoked",
-            )
-            .first()
-        )
+        revoked_user = RemoteUser.objects.filter(
+            Q(email=user.email) | Q(phone=phone_number if phone_number else None),
+            tenant=tenant,
+            vpn_config=vpn_config,
+            status="revoked",
+        ).first()
 
         if revoked_user:
             # Recycle the revoked user — reuse their IP slot, generate new keys
@@ -966,7 +963,9 @@ def app_initiate_payment(request):
                     )
                     if attempt == MAX_RETRIES - 1:
                         return Response(
-                            {"detail": "Failed to allocate KTN address. Please try again."},
+                            {
+                                "detail": "Failed to allocate KTN address. Please try again."
+                            },
                             status=status.HTTP_503_SERVICE_UNAVAILABLE,
                         )
                     # Get a fresh IP (exclude the one that just collided)

@@ -339,7 +339,9 @@ def provision_remote_user_keys(
         except IntegrityError:
             logger.warning(
                 "IP %s collision for vpn_config=%s (attempt %d/3), retrying...",
-                assigned_ip, vpn_config.id, attempt + 1
+                assigned_ip,
+                vpn_config.id,
+                attempt + 1,
             )
             if attempt == 2:
                 result["error"] = f"Failed to allocate VPN address after retries"
