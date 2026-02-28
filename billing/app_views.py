@@ -881,6 +881,7 @@ def app_initiate_payment(request):
     # Match by email OR phone to handle phone-based auth users
     from django.db.models import Q
 
+    # First check for an active/disabled/expired user we can reuse
     remote_user = (
         RemoteUser.objects.filter(
             Q(email=user.email) | Q(phone=phone_number if phone_number else None),
@@ -892,66 +893,97 @@ def app_initiate_payment(request):
     )
 
     if not remote_user:
-        # Auto-provision a new remote user with WireGuard keys
-        next_ip = vpn_config.get_next_available_ip()
-        if not next_ip:
-            return Response(
-                {"detail": "No available KTN addresses. Contact support."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-
-        keypair = generate_wireguard_keypair()
-        psk = generate_preshared_key()
-
-        try:
-            remote_user = RemoteUser.objects.create(
+        # Check if there's a revoked user with the same email/phone — recycle it
+        revoked_user = (
+            RemoteUser.objects.filter(
+                Q(email=user.email) | Q(phone=phone_number if phone_number else None),
                 tenant=tenant,
                 vpn_config=vpn_config,
-                name=user.get_full_name() or user.email,
-                email=user.email,
-                phone=phone_number,
-                plan=plan,
-                public_key=keypair["public_key"],
-                private_key=keypair["private_key"],
-                preshared_key=psk,
-                assigned_ip=next_ip,
-                status="disabled",  # Will be activated after payment
-                is_active=False,
+                status="revoked",
             )
-        except IntegrityError:
-            # Race condition or stale IP — retry once with a fresh IP
-            logger.warning(
-                "App: IP %s collision for vpn_config=%s, retrying...",
-                next_ip,
-                vpn_config.id,
+            .first()
+        )
+
+        if revoked_user:
+            # Recycle the revoked user — reuse their IP slot, generate new keys
+            keypair = generate_wireguard_keypair()
+            psk = generate_preshared_key()
+            revoked_user.name = user.get_full_name() or user.email
+            revoked_user.email = user.email
+            revoked_user.phone = phone_number or revoked_user.phone
+            revoked_user.plan = plan
+            revoked_user.public_key = keypair["public_key"]
+            revoked_user.private_key = keypair["private_key"]
+            revoked_user.preshared_key = psk
+            revoked_user.status = "disabled"  # Will be activated after payment
+            revoked_user.is_active = False
+            revoked_user.is_configured_on_router = False
+            revoked_user.config_downloaded = False
+            revoked_user.expires_at = None
+            revoked_user.save()
+            remote_user = revoked_user
+            logger.info(
+                f"App: recycled revoked RemoteUser {remote_user.name} "
+                f"(ip={remote_user.assigned_ip}) for tenant={tenant.slug}"
             )
+        else:
+            # Auto-provision a brand new remote user with WireGuard keys
             next_ip = vpn_config.get_next_available_ip()
             if not next_ip:
                 return Response(
                     {"detail": "No available KTN addresses. Contact support."},
                     status=status.HTTP_503_SERVICE_UNAVAILABLE,
                 )
+
             keypair = generate_wireguard_keypair()
             psk = generate_preshared_key()
-            remote_user = RemoteUser.objects.create(
-                tenant=tenant,
-                vpn_config=vpn_config,
-                name=user.get_full_name() or user.email,
-                email=user.email,
-                phone=phone_number,
-                plan=plan,
-                public_key=keypair["public_key"],
-                private_key=keypair["private_key"],
-                preshared_key=psk,
-                assigned_ip=next_ip,
-                status="disabled",
-                is_active=False,
-            )
 
-        logger.info(
-            f"App: auto-provisioned RemoteUser {remote_user.name} "
-            f"(ip={next_ip}) for tenant={tenant.slug}"
-        )
+            MAX_RETRIES = 3
+            for attempt in range(MAX_RETRIES):
+                try:
+                    remote_user = RemoteUser.objects.create(
+                        tenant=tenant,
+                        vpn_config=vpn_config,
+                        name=user.get_full_name() or user.email,
+                        email=user.email,
+                        phone=phone_number,
+                        plan=plan,
+                        public_key=keypair["public_key"],
+                        private_key=keypair["private_key"],
+                        preshared_key=psk,
+                        assigned_ip=next_ip,
+                        status="disabled",  # Will be activated after payment
+                        is_active=False,
+                    )
+                    break  # Success
+                except IntegrityError:
+                    logger.warning(
+                        "App: IP %s collision for vpn_config=%s (attempt %d/%d), retrying...",
+                        next_ip,
+                        vpn_config.id,
+                        attempt + 1,
+                        MAX_RETRIES,
+                    )
+                    if attempt == MAX_RETRIES - 1:
+                        return Response(
+                            {"detail": "Failed to allocate KTN address. Please try again."},
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        )
+                    # Get a fresh IP (exclude the one that just collided)
+                    next_ip = vpn_config.get_next_available_ip()
+                    if not next_ip:
+                        return Response(
+                            {"detail": "No available KTN addresses. Contact support."},
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        )
+                    # Generate fresh keys to avoid public_key collision too
+                    keypair = generate_wireguard_keypair()
+                    psk = generate_preshared_key()
+
+            logger.info(
+                f"App: auto-provisioned RemoteUser {remote_user.name} "
+                f"(ip={next_ip}) for tenant={tenant.slug}"
+            )
 
     # Update phone if provided
     if phone_number and not remote_user.phone:

@@ -14,6 +14,7 @@ import logging
 import re
 import ipaddress
 
+from django.db import IntegrityError
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
@@ -311,31 +312,48 @@ def provision_remote_user_keys(
         bandwidth_up = plan.bandwidth_limit_up
         bandwidth_down = plan.bandwidth_limit_down
 
-    # 5. Create the RemoteUser instance
-    try:
-        remote_user = RemoteUser.objects.create(
-            tenant=tenant,
-            vpn_config=vpn_config,
-            name=name,
-            email=email,
-            phone=phone,
-            notes=notes,
-            plan=plan,
-            public_key=keypair["public_key"],
-            private_key=keypair["private_key"],  # stored temporarily
-            preshared_key=psk,
-            assigned_ip=assigned_ip,
-            status="active",
-            is_active=True,
-            bandwidth_limit_up=bandwidth_up,
-            bandwidth_limit_down=bandwidth_down,
-            expires_at=expires_at,
-            created_by=created_by,
-        )
-    except Exception as e:
-        logger.error(f"Failed to create RemoteUser for {name}: {e}")
-        result["error"] = f"Database error: {e}"
-        return result
+    # 5. Create the RemoteUser instance (with retry on IP collision)
+    remote_user = None
+    for attempt in range(3):
+        try:
+            remote_user = RemoteUser.objects.create(
+                tenant=tenant,
+                vpn_config=vpn_config,
+                name=name,
+                email=email,
+                phone=phone,
+                notes=notes,
+                plan=plan,
+                public_key=keypair["public_key"],
+                private_key=keypair["private_key"],  # stored temporarily
+                preshared_key=psk,
+                assigned_ip=assigned_ip,
+                status="active",
+                is_active=True,
+                bandwidth_limit_up=bandwidth_up,
+                bandwidth_limit_down=bandwidth_down,
+                expires_at=expires_at,
+                created_by=created_by,
+            )
+            break  # Success
+        except IntegrityError:
+            logger.warning(
+                "IP %s collision for vpn_config=%s (attempt %d/3), retrying...",
+                assigned_ip, vpn_config.id, attempt + 1
+            )
+            if attempt == 2:
+                result["error"] = f"Failed to allocate VPN address after retries"
+                return result
+            assigned_ip = vpn_config.get_next_available_ip()
+            if not assigned_ip:
+                result["error"] = "VPN address pool exhausted — no IPs available"
+                return result
+            keypair = generate_wireguard_keypair()
+            psk = generate_preshared_key() if use_preshared_key else ""
+        except Exception as e:
+            logger.error(f"Failed to create RemoteUser for {name}: {e}")
+            result["error"] = f"Database error: {e}"
+            return result
 
     # 6. Generate client config
     config_text = generate_client_config_text(
