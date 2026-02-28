@@ -3047,7 +3047,11 @@ def admin_router_disconnect_user(request, router_id):
     Disconnect a user from a specific router (Platform Admin only)
     """
     try:
-        from .mikrotik import get_tenant_mikrotik_api, disconnect_user_with_api, safe_close
+        from .mikrotik import (
+            get_tenant_mikrotik_api,
+            disconnect_user_with_api,
+            safe_close,
+        )
 
         router = Router.objects.select_related("tenant").get(id=router_id)
 

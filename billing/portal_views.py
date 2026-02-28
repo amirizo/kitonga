@@ -1173,7 +1173,9 @@ def portal_router_disconnect_user(request, router_id):
                     pass
 
         # Mark all devices as inactive
-        devices_deactivated = user.devices.filter(is_active=True).update(is_active=False)
+        devices_deactivated = user.devices.filter(is_active=True).update(
+            is_active=False
+        )
 
         # Deactivate user access in database
         user.deactivate_access()
@@ -3148,14 +3150,16 @@ def portal_user_disconnect(request, user_id):
                 ):
                     disconnected_from.append(router.name)
 
-                all_details.append({
-                    "router": router.name,
-                    "router_id": router.id,
-                    "session_removed": result.get("session_removed", False),
-                    "binding_removed": result.get("binding_removed", False),
-                    "user_disabled": result.get("user_disabled", False),
-                    "errors": result.get("errors", []),
-                })
+                all_details.append(
+                    {
+                        "router": router.name,
+                        "router_id": router.id,
+                        "session_removed": result.get("session_removed", False),
+                        "binding_removed": result.get("binding_removed", False),
+                        "user_disabled": result.get("user_disabled", False),
+                        "errors": result.get("errors", []),
+                    }
+                )
 
             except Exception as e:
                 errors.append(f"{router.name}: {str(e)}")

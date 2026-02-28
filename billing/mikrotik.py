@@ -248,21 +248,26 @@ def disconnect_user_with_api(api, username: str, mac_address: str = None) -> dic
                 binding_list = bindings.get(mac_address=mac_address)
                 for binding in binding_list:
                     try:
-                        bindings.remove(id=binding[".id"])
-                        result["binding_removed"] = True
-                        logger.info(f"Removed IP binding for {mac_address}")
-                    except Exception:
-                        pass
+                        binding_id = binding.get(".id") or binding.get("id")
+                        if binding_id:
+                            bindings.remove(id=binding_id)
+                            result["binding_removed"] = True
+                            logger.info(f"Removed IP binding for {mac_address}")
+                    except Exception as rem_err:
+                        logger.warning(f"Failed to remove binding for {mac_address}: {rem_err}")
 
             all_bindings = bindings.get()
             for binding in all_bindings:
                 comment = binding.get("comment", "") or ""
-                if username in comment:
+                if username and username in comment:
                     try:
-                        bindings.remove(id=binding[".id"])
-                        result["binding_removed"] = True
-                    except Exception:
-                        pass
+                        binding_id = binding.get(".id") or binding.get("id")
+                        if binding_id:
+                            bindings.remove(id=binding_id)
+                            result["binding_removed"] = True
+                            logger.info(f"Removed IP binding by comment for {username}")
+                    except Exception as rem_err:
+                        logger.warning(f"Failed to remove binding by comment for {username}: {rem_err}")
 
         except Exception as e:
             result["errors"].append(f"ip_bindings: {e}")
@@ -1798,8 +1803,10 @@ def disconnect_all_hotspot_users():
         count = 0
         for u in active:
             try:
-                resource.remove(id=u[".id"])
-                count += 1
+                uid = u.get(".id") or u.get("id")
+                if uid:
+                    resource.remove(id=uid)
+                    count += 1
             except Exception as rem_err:
                 logger.warning(f'Failed to remove user {u.get("user")}: {rem_err}')
         return {
@@ -1949,8 +1956,10 @@ def cleanup_disabled_users() -> dict:
         for u in existing:
             if u.get("disabled") == "true" or u.get("disabled") == "yes":
                 try:
-                    users.remove(id=u[".id"])
-                    removed += 1
+                    uid = u.get(".id") or u.get("id")
+                    if uid:
+                        users.remove(id=uid)
+                        removed += 1
                 except Exception as inner:
                     logger.warning(
                         f'Failed removing disabled user {u.get("name")}: {inner}'
@@ -2766,12 +2775,14 @@ def disconnect_user_from_mikrotik(username: str, mac_address: str = None) -> dic
                 binding_list = bindings.get(mac_address=mac_address)
                 for binding in binding_list:
                     try:
-                        bindings.remove(id=binding[".id"])
-                        result["binding_removed"] = True
-                        logger.info(f"Removed IP binding for {mac_address}")
+                        binding_id = binding.get(".id") or binding.get("id")
+                        if binding_id:
+                            bindings.remove(id=binding_id)
+                            result["binding_removed"] = True
+                            logger.info(f"Removed IP binding for {mac_address}")
                     except Exception as rem_err:
                         logger.warning(
-                            f'Failed to remove binding {binding.get(".id")}: {rem_err}'
+                            f"Failed to remove binding for {mac_address}: {rem_err}"
                         )
                         result["errors"].append(f"binding_remove: {rem_err}")
 
@@ -2779,11 +2790,13 @@ def disconnect_user_from_mikrotik(username: str, mac_address: str = None) -> dic
             all_bindings = bindings.get()
             for binding in all_bindings:
                 comment = binding.get("comment", "") or ""
-                if username in comment:
+                if username and username in comment:
                     try:
-                        bindings.remove(id=binding[".id"])
-                        result["binding_removed"] = True
-                        logger.info(f"Removed IP binding by comment for {username}")
+                        binding_id = binding.get(".id") or binding.get("id")
+                        if binding_id:
+                            bindings.remove(id=binding_id)
+                            result["binding_removed"] = True
+                            logger.info(f"Removed IP binding by comment for {username}")
                     except Exception as rem_err:
                         # May already be removed
                         pass
