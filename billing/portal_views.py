@@ -1090,6 +1090,13 @@ def portal_router_disconnect_user(request, router_id):
     """
     Disconnect a specific user from a specific router (Tenant Portal)
 
+    This performs a FULL disconnect on the specified router:
+    1. Removes active hotspot sessions
+    2. Removes IP binding (MAC bypass) entries
+    3. Disables the hotspot user account
+    4. Also disconnects all known device MACs
+    5. Deactivates user access in database
+
     Request Body:
     {
         "username": "+255712345678",  # Required: phone number
@@ -1097,7 +1104,7 @@ def portal_router_disconnect_user(request, router_id):
     }
     """
     from .models import Router, User
-    from .mikrotik import get_tenant_mikrotik_api, disconnect_user_with_api
+    from .mikrotik import get_tenant_mikrotik_api, disconnect_user_with_api, safe_close
 
     tenant = request.tenant
 
@@ -1144,12 +1151,39 @@ def portal_router_disconnect_user(request, router_id):
         )
 
     try:
-        # Disconnect user from this specific router
+        # Disconnect user from this specific router (all 3 steps: session, binding, user)
         result = disconnect_user_with_api(
             api=api, username=username, mac_address=mac_address
         )
 
-        if result.get("success") or result.get("session_removed"):
+        # Also disconnect each known device MAC specifically to clean up all bindings
+        for device in user.devices.filter(is_active=True):
+            if device.mac_address:
+                try:
+                    device_result = disconnect_user_with_api(
+                        api=api,
+                        username=username,
+                        mac_address=device.mac_address,
+                    )
+                    if device_result.get("binding_removed"):
+                        result["binding_removed"] = True
+                    if device_result.get("session_removed"):
+                        result["session_removed"] = True
+                except Exception:
+                    pass
+
+        # Mark all devices as inactive
+        devices_deactivated = user.devices.filter(is_active=True).update(is_active=False)
+
+        # Deactivate user access in database
+        user.deactivate_access()
+
+        if (
+            result.get("success")
+            or result.get("session_removed")
+            or result.get("binding_removed")
+            or result.get("user_disabled")
+        ):
             logger.info(
                 f"Tenant {tenant.slug} disconnected user {username} from router {router.name} (ID: {router_id})"
             )
@@ -1157,7 +1191,7 @@ def portal_router_disconnect_user(request, router_id):
             return Response(
                 {
                     "success": True,
-                    "message": f"User {username} disconnected from {router.name}",
+                    "message": f"User {username} fully disconnected from {router.name}",
                     "router": {
                         "id": router.id,
                         "name": router.name,
@@ -1166,17 +1200,30 @@ def portal_router_disconnect_user(request, router_id):
                         "session_removed": result.get("session_removed", False),
                         "binding_removed": result.get("binding_removed", False),
                         "user_disabled": result.get("user_disabled", False),
+                        "devices_deactivated": devices_deactivated,
+                        "user_deactivated": True,
                     },
                 }
             )
         else:
+            # Even if MikroTik operations didn't find anything, DB was updated
             return Response(
                 {
-                    "success": False,
-                    "error": f"Failed to disconnect user from {router.name}",
-                    "details": result.get("errors", []),
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    "success": True,
+                    "message": f"User {username} deactivated (no active MikroTik resources found on {router.name})",
+                    "router": {
+                        "id": router.id,
+                        "name": router.name,
+                    },
+                    "details": {
+                        "session_removed": False,
+                        "binding_removed": False,
+                        "user_disabled": False,
+                        "devices_deactivated": devices_deactivated,
+                        "user_deactivated": True,
+                        "mikrotik_errors": result.get("errors", []),
+                    },
+                }
             )
 
     except Exception as e:
@@ -1190,6 +1237,8 @@ def portal_router_disconnect_user(request, router_id):
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+    finally:
+        safe_close(api)
 
 
 @api_view(["POST"])
@@ -3005,7 +3054,14 @@ def portal_user_detail(request, user_id):
 @permission_classes([TenantAPIKeyPermission])
 def portal_user_disconnect(request, user_id):
     """
-    Disconnect user from MikroTik router (force logout)
+    Disconnect user from MikroTik router and deactivate access (force logout).
+
+    This performs a FULL disconnect:
+    1. Removes active hotspot sessions from MikroTik
+    2. Removes IP binding (MAC bypass) entries from MikroTik
+    3. Disables the hotspot user account on MikroTik
+    4. Marks all user devices as inactive in the database
+    5. Deactivates the user's access in the database
     """
     tenant = getattr(request, "tenant", None)
     if not tenant:
@@ -3022,13 +3078,17 @@ def portal_user_disconnect(request, user_id):
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    # Get tenant's routers and disconnect user from all
-    from .mikrotik import disconnect_user_from_mikrotik, get_mikrotik_api, safe_close
-    import routeros_api
+    from .mikrotik import (
+        disconnect_user_from_mikrotik,
+        disconnect_user_with_api,
+        get_tenant_mikrotik_api,
+        safe_close,
+    )
 
     routers = Router.objects.filter(tenant=tenant, is_active=True)
     disconnected_from = []
     errors = []
+    all_details = []
 
     # If no routers configured for tenant, try using global settings
     if not routers.exists():
@@ -3039,63 +3099,89 @@ def portal_user_disconnect(request, user_id):
                 or result.get("session_removed")
                 or result.get("user_disabled")
             ):
-                return Response(
-                    {
-                        "success": True,
-                        "message": f"User {user.phone_number} disconnected",
-                        "disconnected_from": ["Default Router"],
-                        "details": result,
-                    }
-                )
+                disconnected_from.append("Default Router")
+                all_details.append({"router": "Default Router", **result})
         except Exception as e:
-            return Response(
-                {"success": False, "message": f"Failed to disconnect user: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-    # Disconnect from each tenant router
-    for router in routers:
-        api = None
-        try:
-            # Connect to router using tenant-specific credentials
-            connection = routeros_api.RouterOsApiPool(
-                router.host,
-                username=router.username,
-                password=router.password,
-                port=router.port or 8728,
-                plaintext_login=True,
-            )
-            api = connection.get_api()
-
-            # Remove active sessions
+            errors.append(f"Default Router: {str(e)}")
+    else:
+        # Disconnect from each tenant router using the FULL disconnect function
+        for router in routers:
+            api = None
             try:
-                active = api.get_resource("/ip/hotspot/active")
-                all_sessions = active.get()
+                api = get_tenant_mikrotik_api(router)
+                if api is None:
+                    errors.append(f"{router.name}: Connection failed")
+                    continue
 
-                for session in all_sessions:
-                    if session.get("user", "") == user.phone_number:
-                        session_id = session.get(".id") or session.get("id")
-                        if session_id:
-                            active.remove(id=session_id)
-                            disconnected_from.append(router.name)
-                            break
+                # Use disconnect_user_with_api which does ALL 3 steps:
+                # 1. Remove active sessions
+                # 2. Remove IP bindings (MAC bypass)
+                # 3. Disable hotspot user
+                result = disconnect_user_with_api(
+                    api=api,
+                    username=user.phone_number,
+                    mac_address=None,  # Disconnect all MACs for this user
+                )
+
+                # Also disconnect each known device MAC specifically
+                for device in user.devices.filter(is_active=True):
+                    if device.mac_address:
+                        try:
+                            device_result = disconnect_user_with_api(
+                                api=api,
+                                username=user.phone_number,
+                                mac_address=device.mac_address,
+                            )
+                            # Merge results
+                            if device_result.get("binding_removed"):
+                                result["binding_removed"] = True
+                            if device_result.get("session_removed"):
+                                result["session_removed"] = True
+                        except Exception:
+                            pass
+
+                if (
+                    result.get("success")
+                    or result.get("session_removed")
+                    or result.get("binding_removed")
+                    or result.get("user_disabled")
+                ):
+                    disconnected_from.append(router.name)
+
+                all_details.append({
+                    "router": router.name,
+                    "router_id": router.id,
+                    "session_removed": result.get("session_removed", False),
+                    "binding_removed": result.get("binding_removed", False),
+                    "user_disabled": result.get("user_disabled", False),
+                    "errors": result.get("errors", []),
+                })
+
             except Exception as e:
                 errors.append(f"{router.name}: {str(e)}")
+            finally:
+                if api:
+                    safe_close(api)
 
-        except Exception as e:
-            errors.append(f"{router.name}: Connection failed - {str(e)}")
-        finally:
-            if api:
-                try:
-                    api.get_communicator().close()
-                except:
-                    pass
+    # Mark all devices as inactive in the database
+    devices_deactivated = user.devices.filter(is_active=True).update(is_active=False)
+
+    # Deactivate user access in database
+    user.deactivate_access()
+
+    logger.info(
+        f"Portal disconnect: user={user.phone_number}, tenant={tenant.slug}, "
+        f"routers={disconnected_from}, devices_deactivated={devices_deactivated}"
+    )
 
     return Response(
         {
             "success": True,
-            "message": f"User {user.phone_number} disconnected",
+            "message": f"User {user.phone_number} fully disconnected and deactivated",
             "disconnected_from": disconnected_from if disconnected_from else None,
+            "devices_deactivated": devices_deactivated,
+            "user_deactivated": True,
+            "router_details": all_details if all_details else None,
             "errors": errors if errors else None,
         }
     )

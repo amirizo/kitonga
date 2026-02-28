@@ -3047,7 +3047,7 @@ def admin_router_disconnect_user(request, router_id):
     Disconnect a user from a specific router (Platform Admin only)
     """
     try:
-        from .mikrotik import get_tenant_mikrotik_api, disconnect_user_with_api
+        from .mikrotik import get_tenant_mikrotik_api, disconnect_user_with_api, safe_close
 
         router = Router.objects.select_related("tenant").get(id=router_id)
 
@@ -3070,7 +3070,10 @@ def admin_router_disconnect_user(request, router_id):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-        result = disconnect_user_with_api(api, username, mac_address)
+        try:
+            result = disconnect_user_with_api(api, username, mac_address)
+        finally:
+            safe_close(api)
 
         return Response(
             {
