@@ -2814,6 +2814,11 @@ def portal_users(request):
     return Response(
         {
             "success": True,
+            "tenant": {
+                "id": str(tenant.id),
+                "name": tenant.business_name,
+                "slug": tenant.slug,
+            },
             "users": user_list,
             "pagination": {
                 "page": page,
