@@ -784,7 +784,9 @@ def send_remote_user_expiry_notifications():
                 notified_count += 1
             except Exception as e:
                 failed_count += 1
-                logger.error(f"KTN 5-min expiry notification error for {user.name}: {e}")
+                logger.error(
+                    f"KTN 5-min expiry notification error for {user.name}: {e}"
+                )
 
         # ── 24-hour warning window (±30 min to avoid duplicates) ────
         window_24h_start = now + timedelta(hours=23, minutes=30)
@@ -843,7 +845,9 @@ def send_remote_user_expiry_notifications():
         return {"success": False, "error": str(e)}
 
 
-def _send_vpn_expiry_notification(remote_user, hours_remaining=None, minutes_remaining=None):
+def _send_vpn_expiry_notification(
+    remote_user, hours_remaining=None, minutes_remaining=None
+):
     """
     Send an SMS notification to a remote user about upcoming VPN expiry.
     Uses the tenant's NextSMS configuration.

@@ -1640,7 +1640,9 @@ class RemoteAccessPayment(models.Model):
 
         remote_user.status = "active"
         remote_user.is_active = True
-        remote_user.expiry_notification_sent = False  # Reset so new period gets notified
+        remote_user.expiry_notification_sent = (
+            False  # Reset so new period gets notified
+        )
         remote_user.save(
             update_fields=[
                 "expires_at",
