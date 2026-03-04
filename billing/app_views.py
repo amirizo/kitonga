@@ -1706,13 +1706,19 @@ def vpn_session(request):
     # Build parsed tunnel credentials for the native layer
     vpn_config = remote_user.vpn_config
 
-    # Parse DNS — default to Cloudflare + Google
-    dns = "1.1.1.1,8.8.8.8"
+    # Parse DNS — default to MikroTik DNS (10.100.0.20) which resolves via
+    # the WireGuard tunnel. Public DNS (1.1.1.1, 8.8.8.8) also works as a
+    # fallback because the VPS DNAT-redirects all port-53 traffic from VPN
+    # clients to MikroTik automatically. MikroTik listed first for lowest
+    # latency; 1.1.1.1 as fallback in case MikroTik DNS is unreachable.
+    dns = "10.100.0.20,1.1.1.1"
     if vpn_config and vpn_config.dns_servers:
         dns = vpn_config.dns_servers
 
-    # Parse MTU
-    mtu = 1420
+    # Parse MTU — 1280 is safe for double WireGuard encapsulation
+    # (Client→VPS→MikroTik). Standard WireGuard MTU is 1420 but the
+    # double tunnel overhead requires a lower value to avoid fragmentation.
+    mtu = 1280
     if vpn_config and hasattr(vpn_config, "mtu") and vpn_config.mtu:
         mtu = vpn_config.mtu
 

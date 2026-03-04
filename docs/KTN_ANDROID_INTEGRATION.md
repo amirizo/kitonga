@@ -5,6 +5,7 @@
 **KTN (Kitonga Network)** is an internet access product. It lets users access the internet from anywhere — **even outside WiFi hotspot areas**. It is NOT a traditional VPN service. It is a **paid internet access tunnel**.
 
 **User flow:**
+
 1. User opens the Kitonga app
 2. User purchases a KTN plan (e.g. 30 days)
 3. App calls the API to get tunnel credentials
@@ -28,19 +29,18 @@ This document describes exactly how the Android app must build and activate the 
 ## Architecture
 
 ```
-┌──────────────┐         UDP 51820          ┌──────────────────────┐
-│  Android App │ ◄── KTN Encrypted Tunnel ─►│  KTN Server          │
-│  User's IP:  │                            │  (66.29.143.116)     │
-│  10.200.0.x  │                            │  wg0: 10.100.0.1    │
-└──────────────┘                            │       Port: 51820    │
-                                            │                      │
-                                            │  NAT + Routing       │
-                                            │         ▼            │
-                                            │  eth0 → Internet     │
+┌──────────────┐         UDP 51820          ┌──────────────────────┐         WireGuard        ┌──────────────────────┐
+│  Android App │ ◄── KTN Encrypted Tunnel ─►│  VPS (Hub)           │ ◄── Site-to-Site ──────►│  MikroTik (Exit)     │
+│  User's IP:  │                            │  (66.29.143.116)     │                          │  10.100.0.20         │
+│  10.200.0.x  │                            │  wg0: 10.100.0.1    │                          │  DNS + NAT + QoS     │
+└──────────────┘                            │       Port: 51820    │                          │         │            │
+                                            │                      │                          │         ▼            │
+                                            │  Policy Routing      │                          │     Internet         │
+                                            │  (fwmark → MikroTik) │                          └──────────────────────┘
                                             └──────────────────────┘
 ```
 
-When a user activates KTN, the app creates a private encrypted tunnel to the KTN server. All the user's internet traffic flows through this tunnel. The server routes it to the internet on the user's behalf. This gives the user full internet access anywhere, not just on a WiFi hotspot.
+When a user activates KTN, the app creates a private encrypted tunnel to the VPS. The VPS policy-routes all client traffic to MikroTik, which acts as the **exit node**. MikroTik handles DNS resolution (via `10.100.0.20:53`), NAT masquerade, bandwidth management, and routes traffic to the internet.
 
 ---
 
@@ -64,8 +64,8 @@ Headers:
   "interface": {
     "private_key": "KPdwlsTVNwBo0v3H0UkdI1UjQfmJdm2/oQSfExvYi1E=",
     "address": "10.200.0.2/32",
-    "dns": "1.1.1.1, 8.8.8.8",
-    "mtu": 1420
+    "dns": "10.100.0.20,1.1.1.1",
+    "mtu": 1280
   },
   "peer": {
     "public_key": "0ItNRIAXdf090Z3RpIVsmrA1JjRJrZveYweNZXXo3mQ=",
@@ -86,6 +86,8 @@ Headers:
 }
 ```
 
+> **⚠️ DNS Note:** The `dns` field now returns `10.100.0.20` (MikroTik infrastructure DNS) as the primary server. This is critical — using public DNS (like `1.1.1.1`) directly caused "no internet" issues. See [KTN_DNS_FIX.md](KTN_DNS_FIX.md) for full explanation.
+
 ---
 
 ## Step 2: Build the KTN Tunnel Configuration
@@ -96,8 +98,8 @@ Using the API response, construct a WireGuard config (KTN uses WireGuard protoco
 [Interface]
 PrivateKey = KPdwlsTVNwBo0v3H0UkdI1UjQfmJdm2/oQSfExvYi1E=
 Address = 10.200.0.2/32
-DNS = 1.1.1.1, 8.8.8.8
-MTU = 1420
+DNS = 10.100.0.20, 1.1.1.1
+MTU = 1280
 
 [Peer]
 PublicKey = 0ItNRIAXdf090Z3RpIVsmrA1JjRJrZveYweNZXXo3mQ=
@@ -109,17 +111,17 @@ PersistentKeepalive = 25
 
 ### Field Mapping (API → WireGuard)
 
-| API Response Field | WireGuard Config Field | Section | Notes |
-|---|---|---|---|
-| `interface.private_key` | `PrivateKey` | `[Interface]` | Base64, 44 chars. **Secret — never log this.** |
-| `interface.address` | `Address` | `[Interface]` | Always `/32` (single IP). |
-| `interface.dns` | `DNS` | `[Interface]` | Comma-separated. May contain spaces after comma. |
-| `interface.mtu` | `MTU` | `[Interface]` | Usually `1420`. |
-| `peer.public_key` | `PublicKey` | `[Peer]` | Base64, 44 chars. This is the **server's** public key. |
-| `peer.preshared_key` | `PresharedKey` | `[Peer]` | Base64, 44 chars. **Optional** — omit if empty string. |
-| `peer.endpoint` | `Endpoint` | `[Peer]` | Format: `IP:PORT`. This is where the phone sends packets. |
-| `peer.allowed_ips` | `AllowedIPs` | `[Peer]` | `0.0.0.0/0` = route ALL traffic through KTN tunnel. |
-| `peer.persistent_keepalive` | `PersistentKeepalive` | `[Peer]` | Seconds. Keeps NAT mappings alive. |
+| API Response Field          | WireGuard Config Field | Section       | Notes                                                                                                |
+| --------------------------- | ---------------------- | ------------- | ---------------------------------------------------------------------------------------------------- |
+| `interface.private_key`     | `PrivateKey`           | `[Interface]` | Base64, 44 chars. **Secret — never log this.**                                                       |
+| `interface.address`         | `Address`              | `[Interface]` | Always `/32` (single IP).                                                                            |
+| `interface.dns`             | `DNS`                  | `[Interface]` | Comma-separated. Primary: `10.100.0.20` (MikroTik DNS). **Do NOT hardcode — always use API value.**  |
+| `interface.mtu`             | `MTU`                  | `[Interface]` | Currently `1280` (required for double WG encapsulation). **Do NOT hardcode — always use API value.** |
+| `peer.public_key`           | `PublicKey`            | `[Peer]`      | Base64, 44 chars. This is the **server's** public key.                                               |
+| `peer.preshared_key`        | `PresharedKey`         | `[Peer]`      | Base64, 44 chars. **Optional** — omit if empty string.                                               |
+| `peer.endpoint`             | `Endpoint`             | `[Peer]`      | Format: `IP:PORT`. This is where the phone sends packets.                                            |
+| `peer.allowed_ips`          | `AllowedIPs`           | `[Peer]`      | `0.0.0.0/0` = route ALL traffic through KTN tunnel.                                                  |
+| `peer.persistent_keepalive` | `PersistentKeepalive`  | `[Peer]`      | Seconds. Keeps NAT mappings alive.                                                                   |
 
 ---
 
@@ -148,40 +150,40 @@ import com.wireguard.crypto.Key
 fun buildWireGuardConfig(session: KtnSessionResponse): Config {
     // === [Interface] ===
     val interfaceBuilder = Interface.Builder()
-    
+
     // Private key (from API: interface.private_key)
     interfaceBuilder.parsePrivateKey(session.interfaceData.privateKey)
-    
+
     // Address (from API: interface.address, e.g. "10.200.0.2/32")
     interfaceBuilder.parseAddresses(session.interfaceData.address)
-    
-    // DNS (from API: interface.dns, e.g. "1.1.1.1, 8.8.8.8")
+
+    // DNS (from API: interface.dns, e.g. "10.100.0.20,1.1.1.1")
     // Split by comma, trim spaces
     interfaceBuilder.parseDnsServers(session.interfaceData.dns)
-    
-    // MTU (from API: interface.mtu, e.g. 1420)
+
+    // MTU (from API: interface.mtu, e.g. 1280)
     interfaceBuilder.parseMtu(session.interfaceData.mtu.toString())
-    
+
     // === [Peer] ===
     val peerBuilder = Peer.Builder()
-    
+
     // Server public key (from API: peer.public_key)
     peerBuilder.parsePublicKey(session.peer.publicKey)
-    
+
     // Preshared key (from API: peer.preshared_key) — IMPORTANT: include if non-empty
     if (session.peer.presharedKey.isNotEmpty()) {
         peerBuilder.parsePreSharedKey(session.peer.presharedKey)
     }
-    
+
     // Endpoint (from API: peer.endpoint, e.g. "66.29.143.116:51820")
     peerBuilder.parseEndpoint(session.peer.endpoint)
-    
+
     // AllowedIPs (from API: peer.allowed_ips, e.g. "0.0.0.0/0")
     peerBuilder.parseAllowedIPs(session.peer.allowedIps)
-    
+
     // PersistentKeepalive (from API: peer.persistent_keepalive, e.g. 25)
     peerBuilder.parsePersistentKeepalive(session.peer.persistentKeepalive.toString())
-    
+
     // Build config
     return Config.Builder()
         .setInterface(interfaceBuilder.build())
@@ -222,7 +224,7 @@ If you're using a library that accepts a raw `.conf` string:
 ```kotlin
 fun buildConfigString(session: KtnSessionResponse): String {
     val sb = StringBuilder()
-    
+
     sb.appendLine("[Interface]")
     sb.appendLine("PrivateKey = ${session.interfaceData.privateKey}")
     sb.appendLine("Address = ${session.interfaceData.address}")
@@ -237,7 +239,7 @@ fun buildConfigString(session: KtnSessionResponse): String {
     sb.appendLine("AllowedIPs = ${session.peer.allowedIps}")
     sb.appendLine("Endpoint = ${session.peer.endpoint}")
     sb.appendLine("PersistentKeepalive = ${session.peer.persistentKeepalive}")
-    
+
     return sb.toString()
 }
 
@@ -289,7 +291,8 @@ If the API returns a non-empty `preshared_key`, it **MUST** be included in the c
 
 ### ❌ 2. DNS Field Has Spaces After Commas
 
-The API returns `"1.1.1.1, 8.8.8.8"` (with space after comma). Some WireGuard parsers choke on this. Either:
+The API returns `"10.100.0.20,1.1.1.1"` (comma-separated, may have spaces). Some WireGuard parsers choke on spaces. Either:
+
 - Use the library's `parseDnsServers()` which handles it, OR
 - Strip spaces: `dns.replace(" ", "")`
 
@@ -310,6 +313,7 @@ The endpoint must be exactly `66.29.143.116:51820` (the KTN server public IP + p
 Android's WireGuard will show "connected" as soon as the local tunnel interface is up — even before a handshake with the server completes. This is a WireGuard design behavior, not a bug. **"Connected" does NOT mean "handshake successful".**
 
 To verify a real connection:
+
 - Check `latestHandshake` — it should be non-zero after activating KTN
 - Try to ping `10.100.0.1` (KTN server tunnel address) from the app
 - Check if data transfer counters increase (rx/tx bytes)
@@ -321,11 +325,26 @@ To verify a real connection:
 
 If these are swapped, handshake will fail.
 
+### ❌ 7. DNS Not Applied — "Only WhatsApp Works" Bug
+
+**This is the #1 cause of "connected but no internet" in KTN.**
+
+If the app does NOT set DNS from the API response (via `VpnService.Builder.addDnsServer()` or WireGuard config `DNS` field), the phone will continue using its default DNS server (WiFi router / mobile carrier). Those DNS servers are NOT reachable through the tunnel, so DNS fails → browsers say "no internet" → but WhatsApp still works (it uses hardcoded IPs).
+
+**Check:**
+
+- Is `addDnsServer("10.100.0.20")` called?
+- Is `addDnsServer("1.1.1.1")` called as fallback?
+- Test: Can the user load `http://1.1.1.1` (raw IP, no DNS needed)? If yes but `google.com` fails → **DNS is the problem**
+
+See [KTN_DNS_FIX.md](KTN_DNS_FIX.md) for the complete diagnosis and fix.
+
 ---
 
 ## Debugging Checklist
 
 ### On the Android side:
+
 1. Log the full config string (redact PrivateKey) before activating KTN
 2. Check that all 6 fields in `[Interface]` and all 5 fields in `[Peer]` are populated
 3. After activating, check `tunnel.getStatistics()` for:
@@ -333,6 +352,7 @@ If these are swapped, handshake will fail.
    - `rxBytes` > 0 → receiving data from server
 
 ### On the server side (we can check):
+
 ```bash
 # See if the phone's peer has completed a handshake:
 wg show wg0
@@ -356,8 +376,8 @@ To rule out Android code issues, test with the **official WireGuard app** from P
    - **Name:** `KTN`
    - **Private key:** `KPdwlsTVNwBo0v3H0UkdI1UjQfmJdm2/oQSfExvYi1E=`
    - **Addresses:** `10.200.0.2/32`
-   - **DNS servers:** `1.1.1.1, 8.8.8.8`
-   - **MTU:** `1420`
+   - **DNS servers:** `10.100.0.20, 1.1.1.1`
+   - **MTU:** `1280`
 4. Tap "Add peer" and enter **[Peer]** fields:
    - **Public key:** `0ItNRIAXdf090Z3RpIVsmrA1JjRJrZveYweNZXXo3mQ=`
    - **Pre-shared key:** `QjQIPP6E94twMHcdwjENSF5QFkrY9XggvhifbMoUPYM=`
@@ -376,11 +396,11 @@ To rule out Android code issues, test with the **official WireGuard app** from P
 
 ## API Error Responses
 
-| Status | Error Code | Meaning |
-|--------|-----------|---------|
-| 404 | `no_plan` | User has no active KTN plan — needs to purchase one |
-| 403 | `expired` | KTN plan expired — needs renewal |
-| 500 | `no_config` | Tunnel config not ready (missing private key) — contact support |
+| Status | Error Code  | Meaning                                                         |
+| ------ | ----------- | --------------------------------------------------------------- |
+| 404    | `no_plan`   | User has no active KTN plan — needs to purchase one             |
+| 403    | `expired`   | KTN plan expired — needs renewal                                |
+| 500    | `no_config` | Tunnel config not ready (missing private key) — contact support |
 
 ---
 

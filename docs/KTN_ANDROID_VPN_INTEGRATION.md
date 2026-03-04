@@ -33,27 +33,30 @@
 ```
     User's Phone                    VPS (Public IP)                  MikroTik Router
    ┌─────────────┐              ┌──────────────────┐              ┌─────────────────┐
-   │  KTN App    │   Encrypted  │  WireGuard Hub   │  Site-to-    │  Infrastructure │
-   │  10.200.0.x │◄────Tunnel──►│  66.29.143.116   │◄───Site────►│  Controller     │
-   │             │   UDP 51820  │  wg0: 10.100.0.1 │   Tunnel     │  10.100.0.40    │
+   │  KTN App    │   Encrypted  │  WireGuard Hub   │  Site-to-    │  Exit Node      │
+   │  10.200.0.x │◄────Tunnel──►│  66.29.143.116   │◄───Site────►│  NAT + Internet │
+   │             │   UDP 51820  │  wg0: 10.100.0.1 │   Tunnel     │  10.100.0.20    │
    └─────────────┘              └────────┬─────────┘              └────────┬────────┘
                                          │                                 │
-                                    NAT + Routing                    Traffic Control
-                                         │                          Bandwidth / QoS
-                                         ▼                                 │
-                                    ┌─────────┐                           ▼
-                                    │ Internet │◄──────────────────── Internet
-                                    └─────────┘
+                                    Policy Routing                   NAT + Routing
+                                    (fwmark → MikroTik)              Bandwidth / QoS
+                                                                     DNS Server
+                                                                           │
+                                                                           ▼
+                                                                    ┌─────────┐
+                                                                    │ Internet │
+                                                                    └─────────┘
 ```
 
 ### How It Works (Step by Step)
 
 1. **User activates KTN** → App creates encrypted WireGuard tunnel to VPS (`66.29.143.116:51820`)
 2. **All phone traffic** enters the encrypted tunnel → arrives at VPS
-3. **VPS routes traffic** → Through site-to-site tunnel to MikroTik for traffic control
-4. **MikroTik handles** → Bandwidth management, QoS, user policies
-5. **Traffic exits** → To the internet
-6. **Response comes back** → MikroTik → VPS → Encrypted tunnel → User's phone
+3. **VPS policy-routes traffic** → Through site-to-site WireGuard tunnel to MikroTik (exit node)
+4. **MikroTik handles** → DNS resolution, bandwidth management, QoS, NAT masquerade
+5. **Traffic exits** → From MikroTik to the internet
+6. **Response comes back** → Internet → MikroTik → VPS → Encrypted tunnel → User's phone
+7. **DNS queries** → Handled by MikroTik (`10.100.0.20:53`) — primary DNS server for all KTN clients
 
 ### Network Addressing
 
@@ -95,8 +98,8 @@ Headers:
   "interface": {
     "private_key": "KPdwlsTVNwBo0v3H0UkdI1UjQfmJdm2/oQSfExvYi1E=",
     "address": "10.200.0.2/32",
-    "dns": "1.1.1.1, 8.8.8.8",
-    "mtu": 1420
+    "dns": "10.100.0.20,1.1.1.1",
+    "mtu": 1280
   },
   "peer": {
     "public_key": "0ItNRIAXdf090Z3RpIVsmrA1JjRJrZveYweNZXXo3mQ=",
@@ -117,6 +120,8 @@ Headers:
 }
 ```
 
+> **⚠️ DNS Note:** The `dns` field now returns `10.100.0.20` (MikroTik infrastructure DNS) as the primary server. This is critical — using public DNS (like `1.1.1.1`) directly caused "no internet" issues. See [KTN_DNS_FIX.md](KTN_DNS_FIX.md) for full explanation.
+
 ---
 
 ## Step 2: Build the KTN Tunnel Configuration
@@ -127,8 +132,8 @@ Using the API response, construct a WireGuard config (KTN uses WireGuard protoco
 [Interface]
 PrivateKey = KPdwlsTVNwBo0v3H0UkdI1UjQfmJdm2/oQSfExvYi1E=
 Address = 10.200.0.2/32
-DNS = 1.1.1.1, 8.8.8.8
-MTU = 1420
+DNS = 10.100.0.20, 1.1.1.1
+MTU = 1280
 
 [Peer]
 PublicKey = 0ItNRIAXdf090Z3RpIVsmrA1JjRJrZveYweNZXXo3mQ=
@@ -140,17 +145,17 @@ PersistentKeepalive = 25
 
 ### Field Mapping (API → WireGuard)
 
-| API Response Field          | WireGuard Config Field | Section       | Notes                                                     |
-| --------------------------- | ---------------------- | ------------- | --------------------------------------------------------- |
-| `interface.private_key`     | `PrivateKey`           | `[Interface]` | Base64, 44 chars. **Secret — never log this.**            |
-| `interface.address`         | `Address`              | `[Interface]` | Always `/32` (single IP).                                 |
-| `interface.dns`             | `DNS`                  | `[Interface]` | Comma-separated. May contain spaces after comma.          |
-| `interface.mtu`             | `MTU`                  | `[Interface]` | Usually `1420`.                                           |
-| `peer.public_key`           | `PublicKey`            | `[Peer]`      | Base64, 44 chars. This is the **server's** public key.    |
-| `peer.preshared_key`        | `PresharedKey`         | `[Peer]`      | Base64, 44 chars. **Optional** — omit if empty string.    |
-| `peer.endpoint`             | `Endpoint`             | `[Peer]`      | Format: `IP:PORT`. This is where the phone sends packets. |
-| `peer.allowed_ips`          | `AllowedIPs`           | `[Peer]`      | `0.0.0.0/0` = route ALL traffic through KTN tunnel.       |
-| `peer.persistent_keepalive` | `PersistentKeepalive`  | `[Peer]`      | Seconds. Keeps NAT mappings alive.                        |
+| API Response Field          | WireGuard Config Field | Section       | Notes                                                                                                |
+| --------------------------- | ---------------------- | ------------- | ---------------------------------------------------------------------------------------------------- |
+| `interface.private_key`     | `PrivateKey`           | `[Interface]` | Base64, 44 chars. **Secret — never log this.**                                                       |
+| `interface.address`         | `Address`              | `[Interface]` | Always `/32` (single IP).                                                                            |
+| `interface.dns`             | `DNS`                  | `[Interface]` | Comma-separated. Primary: `10.100.0.20` (MikroTik DNS). **Do NOT hardcode — always use API value.**  |
+| `interface.mtu`             | `MTU`                  | `[Interface]` | Currently `1280` (required for double WG encapsulation). **Do NOT hardcode — always use API value.** |
+| `peer.public_key`           | `PublicKey`            | `[Peer]`      | Base64, 44 chars. This is the **server's** public key.                                               |
+| `peer.preshared_key`        | `PresharedKey`         | `[Peer]`      | Base64, 44 chars. **Optional** — omit if empty string.                                               |
+| `peer.endpoint`             | `Endpoint`             | `[Peer]`      | Format: `IP:PORT`. This is where the phone sends packets.                                            |
+| `peer.allowed_ips`          | `AllowedIPs`           | `[Peer]`      | `0.0.0.0/0` = route ALL traffic through KTN tunnel.                                                  |
+| `peer.persistent_keepalive` | `PersistentKeepalive`  | `[Peer]`      | Seconds. Keeps NAT mappings alive.                                                                   |
 
 ---
 
@@ -186,11 +191,11 @@ fun buildWireGuardConfig(session: KtnSessionResponse): Config {
     // Address (from API: interface.address, e.g. "10.200.0.2/32")
     interfaceBuilder.parseAddresses(session.interfaceData.address)
 
-    // DNS (from API: interface.dns, e.g. "1.1.1.1, 8.8.8.8")
+    // DNS (from API: interface.dns, e.g. "10.100.0.20,1.1.1.1")
     // Split by comma, trim spaces
     interfaceBuilder.parseDnsServers(session.interfaceData.dns)
 
-    // MTU (from API: interface.mtu, e.g. 1420)
+    // MTU (from API: interface.mtu, e.g. 1280)
     interfaceBuilder.parseMtu(session.interfaceData.mtu.toString())
 
     // === [Peer] ===
@@ -320,7 +325,7 @@ If the API returns a non-empty `preshared_key`, it **MUST** be included in the c
 
 ### ❌ 2. DNS Field Has Spaces After Commas
 
-The API returns `"1.1.1.1, 8.8.8.8"` (with space after comma). Some WireGuard parsers choke on this. Either:
+The API returns `"10.100.0.20,1.1.1.1"` (comma-separated, may have spaces). Some WireGuard parsers choke on spaces. Either:
 
 - Use the library's `parseDnsServers()` which handles it, OR
 - Strip spaces: `dns.replace(" ", "")`
@@ -353,6 +358,20 @@ To verify a real connection:
 - `peer.public_key` = the **server's PUBLIC key** → goes in `[Peer] PublicKey`
 
 If these are swapped, handshake will fail.
+
+### ❌ 7. DNS Not Applied — "Only WhatsApp Works" Bug
+
+**This is the #1 cause of "connected but no internet" in KTN.**
+
+If the app does NOT set DNS from the API response (via `VpnService.Builder.addDnsServer()` or WireGuard config `DNS` field), the phone will continue using its default DNS server (WiFi router / mobile carrier). Those DNS servers are NOT reachable through the tunnel, so DNS fails → browsers say "no internet" → but WhatsApp still works (it uses hardcoded IPs).
+
+**Check:**
+
+- Is `addDnsServer("10.100.0.20")` called?
+- Is `addDnsServer("1.1.1.1")` called as fallback?
+- Test: Can the user load `http://1.1.1.1` (raw IP, no DNS needed)? If yes but `google.com` fails → **DNS is the problem**
+
+See [KTN_DNS_FIX.md](KTN_DNS_FIX.md) for the complete diagnosis and fix.
 
 ---
 
@@ -391,8 +410,8 @@ To rule out Android code issues, test with the **official WireGuard app** from P
    - **Name:** `KTN`
    - **Private key:** `KPdwlsTVNwBo0v3H0UkdI1UjQfmJdm2/oQSfExvYi1E=`
    - **Addresses:** `10.200.0.2/32`
-   - **DNS servers:** `1.1.1.1, 8.8.8.8`
-   - **MTU:** `1420`
+   - **DNS servers:** `10.100.0.20, 1.1.1.1`
+   - **MTU:** `1280`
 4. Tap "Add peer" and enter **[Peer]** fields:
    - **Public key:** `0ItNRIAXdf090Z3RpIVsmrA1JjRJrZveYweNZXXo3mQ=`
    - **Pre-shared key:** `QjQIPP6E94twMHcdwjENSF5QFkrY9XggvhifbMoUPYM=`
